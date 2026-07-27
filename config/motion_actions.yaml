@@ -1,0 +1,128 @@
+# action_go motion config
+#
+# 解析规则：
+# - defaults: 全局默认值，所有 action 继承。
+# - type_defaults: 按模型框架设置默认值，action 写 type 后自动继承。
+# - action_files: 汇总各动作分类文件；每个文件只放对应分类的 actions。
+# - actions: 仍兼容直接内联写动作；推荐新动作放到 actions/<动作包>/<动作包>.yaml。
+#
+# 常用字段：
+# - type: generic_policy / generic_motion_tracking / instinct_parkour / omnixtreme / steadytray / gentle_humanoid
+# - model: ONNX 或模型目录
+# - params: yaml 参数文件
+# - trajectory: motion / command cache / auxiliary model input
+# - command: 外部 player 命令，支持 {action_go_root}/{config_dir}/{action_dir}/{player}/{net}/{model}/{params}/{trajectory}
+# - switch_back_mode: walkrun / passive / last
+# - prestart_before_userctrl: 先启动 player 发布 hold，再切 UserCtrl，用于减少切换空窗
+# - safety_enable: 是否允许 remote supervisor 的 IMU safety 打断该动作；默认 true
+
+defaults:
+  # Fallback DDS 网卡。真机推荐用 tools/launch/start_safe.sh；
+  # 启动脚本/--net 传入的网卡会覆盖这里，并传递给所有子 player。
+  network_interface: enP8p1s0
+  switch_back: true
+  switch_back_mode: walkrun
+  stop_loco_before_start: true
+  safety_enable: true
+
+type_defaults:
+  # ---------------------------------------------------------------------------
+  # Generic Policy Runtime 默认值
+  # - 覆盖已迁移的 self/embedded 类 policy：
+  #   single_actor_state: BFM-Zero / unitree_rl_mjlab
+  #   embedded_mimic_time: BeyondMimic / Holosoma
+  # - params 字段在该类型下表示 policy spec: actions/<policy>/config/generic_*.yaml。
+  # - 使用 prestart handoff，先让 generic_policy_player 完成 ONNX/DDS/lowstate/
+  #   初始化并持续发布当前姿态 hold，再切 UserCtrl。
+  # ---------------------------------------------------------------------------
+  generic_policy:
+    prestart_before_userctrl: true
+    prestart_ready_timeout_sec: 5.0
+    switch_back_mode: walkrun
+    command: "{action_go_root}/build/generic_policy_player --net {net} --cmd-topic rt/user_lowcmd --state-topic rt/lowstate --spec {params} --ready-file {ready_file} --start-file {start_file} --no-damping-on-stop {event_log_arg}"
+
+  # ---------------------------------------------------------------------------
+  # Generic Motion Tracking Runtime 默认值
+  # - 覆盖 motion_conditioned_tracking / external_reference_tracking：
+  #   ProtoMotions / TWIST / Humanoid-GPT / SONIC
+  # - params 字段在该类型下表示 policy spec: actions/<policy>/config/generic_*.yaml。
+  # - 保留 prestart handoff、CommandSafetyFilter、switch-back；motion/reference
+  #   source、stale gate 和 action decoder 由 spec/action 命令选择。
+  # ---------------------------------------------------------------------------
+  generic_motion_tracking:
+    prestart_before_userctrl: true
+    prestart_ready_timeout_sec: 5.0
+    switch_back_mode: walkrun
+    command: "{action_go_root}/build/generic_motion_tracking_player --net {net} --cmd-topic rt/user_lowcmd --state-topic rt/lowstate --spec {params} --ready-file {ready_file} --start-file {start_file} --no-damping-on-stop {event_log_arg}"
+
+  # ---------------------------------------------------------------------------
+  # Instinct Parkour 默认值
+  # - 依赖 generic_sensor_policy_player、OpenCV；RealSense 需要 librealsense2
+  # - 启动前先检查 RealSense 深度相机；没接入则不进 UserCtrl，直接保持/切回 walkrun
+  # - command 差异比较大，放在每个 action 里覆盖
+  # ---------------------------------------------------------------------------
+  instinct_parkour:
+    switch_back_mode: walkrun
+    prestart_before_userctrl: true
+    prestart_ready_timeout_sec: 10.0
+
+  # ---------------------------------------------------------------------------
+  # OmniXtreme 默认值
+  # - model 是 base_policy_trt.onnx
+  # - residual/fk ONNX 从当前 action 目录下固定文件名读取
+  # - trajectory 是 OmniXtreme 原始 policy/motion.npz
+  # - 使用 prestart handoff
+  # ---------------------------------------------------------------------------
+  omnixtreme:
+    params: actions/omnixtreme/config/generic_omnixtreme.yaml
+    prestart_before_userctrl: true
+    # First TensorRT run may build engine caches, so keep the prestart timeout long.
+    prestart_ready_timeout_sec: 180.0
+    command: "{action_go_root}/build/generic_composite_policy_player --net {net} --cmd-topic rt/user_lowcmd --spec {params} --trajectory {trajectory} --max-frames {max_frames} --ready-file {ready_file} --start-file {start_file} --no-damping-on-stop {event_log_arg}"
+
+  # ---------------------------------------------------------------------------
+  # SteadyTray 默认值
+  # - model 是双输入 ONNX: student_encoder_obs[32,1,103] + policy_obs[1,480]
+  # - 默认使用 G1 头部 RealSense D435 + AprilTag 获取物体 pose。
+  # - 第一次真机前必须把 --tag-size 0.08 改成实际打印 tag 边长（米）。
+  # - 无 apriltag C 库时可手动用 --object-source udp/zero 做 smoke test。
+  # ---------------------------------------------------------------------------
+  steadytray:
+    params: actions/steadytray/config/generic_steadytray.yaml
+    prestart_before_userctrl: true
+    prestart_ready_timeout_sec: 10.0
+    command: "{action_go_root}/build/generic_sensor_policy_player --net {net} --cmd-topic rt/user_lowcmd --spec {params} --ready-file {ready_file} --start-file {start_file} --no-damping-on-stop {event_log_arg}"
+
+  # ---------------------------------------------------------------------------
+  # GentleHumanoid 默认值
+  # - 复用 sibling repo ../gentle-humanoid 的 Python policy.py / observation.py
+  # - 通过 action_go 的外部 command 机制接入 rt/user_lowcmd，不需要新增 C++ target
+  # - trajectory 字段这里复用为 controller.yaml 路径；真实 motion 由 action 名映射
+  #   （gentle_walk -> tracking.yaml 中的 walk）
+  # ---------------------------------------------------------------------------
+  gentle_humanoid:
+    model: ../gentle-humanoid/assets/ckpts/G1/policy.onnx
+    params: ../gentle-humanoid/config/tracking.yaml
+    trajectory: ../gentle-humanoid/config/controller.yaml
+    prestart_before_userctrl: true
+    prestart_ready_timeout_sec: 10.0
+    switch_back_mode: walkrun
+    command: "cd {action_go_root}/../gentle-humanoid && python3 src/action_go_player.py --repo-root {action_go_root}/../gentle-humanoid --net {net} --cmd-topic rt/user_lowcmd --state-topic rt/lowstate --policy-path {model} --policy-cfg {params} --controller-cfg {trajectory} --motion-from-action {name} --max-frames {max_frames} --duration-sec {duration_sec} --ready-file {ready_file} --start-file {start_file} --stats-interval 50 --no-damping-on-stop"
+
+# 动作清单汇总：具体动作配置拆到 actions 下各动作目录或分类 yaml。
+# 每个动作默认继承 defaults.safety_enable=true；如需禁用某个动作的 IMU safety，
+# 在对应 action 下写 safety_enable: false。
+action_files:
+  beyondmimic: actions/beyondmimic/beyondmimic.yaml                    # generic_policy: kick_right / hlqk / wbst / lie_down_beyondmimic
+  bfm_zero: actions/bfm0/bfm_zero.yaml                                 # generic_policy: bfm_zero_stand
+  ufo: actions/ufo/ufo.yaml                                            # generic_policy: fixed prompts / tracking / recovery
+  instinct_parkour: actions/instinct/instinct_parkour.yaml             # g1_parkour
+  holosoma_wbt: actions/holosoma/holosoma_wbt.yaml                     # generic_policy: holosoma_dance
+  humanoid_gpt: actions/humanoid_gpt/humanoid_gpt.yaml                  # generic_motion_tracking: humanoid_gpt_offline / humanoid_gpt_realtime
+  sonic: actions/sonic/sonic.yaml                                      # generic_motion_tracking: offline / G1 ZMQ / PICO SMPL teleop
+  protomotions_tracker: actions/protomotions/protomotions_tracker.yaml  # generic_motion_tracking: proto_walk / proto_dance
+  omnixtreme: actions/omnixtreme/omnixtreme.yaml                        # omni_motion_default / omni_seg01..15
+  twist: actions/twist/twist.yaml                                      # generic_motion_tracking: twist_offline_pkl / twist_{udp,zmq,redis}_realtime
+  steadytray: actions/steadytray/steadytray.yaml                         # steadytray_balance / steadytray_zero_test
+  gentle_humanoid: actions/gentle_humanoid/gentle_humanoid.yaml           # gentle_default / gentle_walk / gentle_hug ...
+  unitree_rl_mjlab: actions/unitree_rl_mjlab/unitree_rl_mjlab.yaml         # generic_policy: sim_walkrun

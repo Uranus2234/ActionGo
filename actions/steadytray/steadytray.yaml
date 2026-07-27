@@ -1,0 +1,18 @@
+actions:
+  steadytray_balance:
+    type: steadytray
+    model: model/policy_9999.onnx
+    params: config/generic_steadytray.yaml
+    switch_back_mode: walkrun
+    safety_enable: true
+    # Default command comes from config/motion_actions.yaml:
+    #   --object-source apriltag --tag-size 0.08 --require-tag
+    # Edit tag-size to the measured printed AprilTag size before real runs.
+
+  steadytray_zero_test:
+    type: steadytray
+    model: model/policy_9999.onnx
+    params: config/generic_steadytray.yaml
+    switch_back_mode: walkrun
+    safety_enable: false
+    command: "{action_go_root}/build/generic_sensor_policy_player --net {net} --cmd-topic rt/user_lowcmd --spec {params} --object-source zero --duration-sec 5 --ready-file {ready_file} --start-file {start_file} --no-damping-on-stop {event_log_arg}"

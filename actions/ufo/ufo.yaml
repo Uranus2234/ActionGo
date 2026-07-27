@@ -1,0 +1,20 @@
+actions:
+  generic_policy:
+    ufo_idle:
+      safety_enable: true
+      params: config/generic_ufo_idle.yaml
+    ufo_forward_slow:
+      safety_enable: true
+      params: config/generic_ufo_forward_slow.yaml
+    ufo_move_left:
+      safety_enable: true
+      params: config/generic_ufo_move_left.yaml
+    ufo_spin_arms:
+      safety_enable: true
+      params: config/generic_ufo_spin_arms.yaml
+    ufo_tracking_zs7:
+      safety_enable: true
+      params: config/generic_ufo_tracking_zs7.yaml
+    ufo_stand:
+      safety_enable: false
+      params: config/generic_ufo_stand.yaml

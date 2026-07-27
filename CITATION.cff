@@ -1,0 +1,16 @@
+cff-version: 1.2.0
+message: "If you use ActionGo in research, please cite the software release."
+title: "ActionGo: A Contract-Validated Runtime for Heterogeneous Humanoid Policies"
+type: software
+authors:
+  - family-names: Liu
+    given-names: Xiaojing
+repository-code: "https://github.com/Uranus2234/ActionGo"
+abstract: >-
+  ActionGo is a contract-validated runtime for deploying heterogeneous
+  whole-body policies and coordinating controller handoff on the Unitree G1.
+keywords:
+  - humanoid robotics
+  - policy deployment
+  - controller handoff
+  - runtime safety

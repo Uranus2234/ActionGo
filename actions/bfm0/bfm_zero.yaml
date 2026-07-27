@@ -1,0 +1,7 @@
+# BFM-Zero recovery actions.
+# safety_enable 默认 true；如某个动作不希望被 IMU safety 打断，可改为 false。
+actions:
+  generic_policy:
+    bfm_zero_stand:
+      safety_enable: true
+      params: config/generic_bfm_zero.yaml

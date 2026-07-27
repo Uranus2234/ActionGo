@@ -1,0 +1,60 @@
+# ActionGo Generic Policy Runtime V3 spec.
+# Template: Motion-Conditioned Tracking Policies (state + motion command/reference cache -> target q)
+name: generic_protomotions
+runtime:
+  template: motion_conditioned_tracking
+  variant: protomotions
+  inference_hz: 50
+  publish_hz: 500
+  onnx_threads: 2
+  target_interp_sec: 0.0
+  stats_interval: 50
+  dry_run_duration_sec: 1.0
+robot:
+  params: unified_pipeline.yaml
+  motor_count: 29
+model:
+  path: ../model/unified_pipeline.onnx
+  input_names:
+    - current_anchor_rot
+    - current_dof_pos
+    - current_dof_vel
+    - current_root_local_ang_vel
+    - historical_processed_actions
+    - mimic_future_anchor_rot
+    - mimic_future_dof_pos
+    - mimic_future_dof_vel
+  output_names:
+    - actions
+    - joint_pos_targets
+    - stiffness_targets
+    - damping_targets
+reference:
+  type: npz_motion_cache
+  path: ../motions/output_walk.50fps.npz
+  anchor_source: fk
+  startup_interp_sec: 0.5
+  loop: false
+observation:
+  obs_dim: 342
+  multi_input: true
+  future_steps: 4
+  terms:
+    - current_anchor_rot
+    - current_dof_pos
+    - current_dof_vel
+    - current_root_local_ang_vel
+    - historical_processed_actions
+    - mimic_future_anchor_rot
+    - mimic_future_dof_pos
+    - mimic_future_dof_vel
+action:
+  type: target_q
+  action_dim: 29
+  source_output: joint_pos_targets
+handoff:
+  cmd_topic: rt/user_lowcmd
+  state_topic: rt/lowstate
+  mode_machine: 5
+  damping_on_stop: false
+safety: {}

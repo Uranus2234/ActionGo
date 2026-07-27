@@ -1,0 +1,58 @@
+# TWIST generic runtime actions.
+# - twist_offline_pkl: uses one bundled TWIST dataset PKL and prepares a mimic_obs cache.
+# - twist_nokov_realtime / twist_udp_realtime: UDP interface for Nokov/teleop.
+# - twist_zmq_realtime: ZMQ SUB interface.
+# - twist_redis_realtime: Redis GET interface.
+
+actions:
+  generic_motion_tracking:
+    twist_offline_pkl:
+      safety_enable: true
+      max_frames: 0
+      prestart_ready_timeout_sec: 30.0
+      switch_back: true
+      switch_back_mode: walkrun
+      params: config/generic_twist.yaml
+      trajectory: motions/A3__Swing_arms.pkl
+      command: "{action_go_root}/build/generic_motion_tracking_player --net {net} --cmd-topic rt/user_lowcmd --state-topic rt/lowstate --spec {params} --input offline-pkl --motion-pkl {trajectory} --motion-cache {action_go_root}/.cache/twist/{name}.mimic.csv --ready-file {ready_file} --start-file {start_file} --no-damping-on-stop {event_log_arg}"
+
+    twist_nokov_realtime:
+      safety_enable: true
+      max_frames: 0
+      switch_back: true
+      switch_back_mode: walkrun
+      prestart_ready_timeout_sec: 3.5
+      stop_loco_before_start: false
+      params: config/generic_twist.yaml
+      # Nokov/retargeter sends UDP JSON/CSV mimic_obs packets to this player.
+      command: "{action_go_root}/build/generic_motion_tracking_player --net {net} --cmd-topic rt/user_lowcmd --state-topic rt/lowstate --spec {params} --input realtime --realtime-transport udp --nokov-port 15110 --require-realtime --input-timeout-sec 3.0 --stale-sec 0.25 --ready-file {ready_file} --start-file {start_file} --no-damping-on-stop {event_log_arg}"
+
+    twist_udp_realtime:
+      safety_enable: true
+      max_frames: 0
+      switch_back: true
+      switch_back_mode: walkrun
+      prestart_ready_timeout_sec: 3.5
+      stop_loco_before_start: false
+      params: config/generic_twist.yaml
+      command: "{action_go_root}/build/generic_motion_tracking_player --net {net} --cmd-topic rt/user_lowcmd --state-topic rt/lowstate --spec {params} --input realtime --realtime-transport udp --udp-bind 127.0.0.1 --udp-port 15110 --require-realtime --input-timeout-sec 3.0 --stale-sec 0.25 --ready-file {ready_file} --start-file {start_file} --no-damping-on-stop {event_log_arg}"
+
+    twist_zmq_realtime:
+      safety_enable: true
+      max_frames: 0
+      switch_back: true
+      switch_back_mode: walkrun
+      prestart_ready_timeout_sec: 3.5
+      stop_loco_before_start: false
+      params: config/generic_twist.yaml
+      command: "{action_go_root}/build/generic_motion_tracking_player --net {net} --cmd-topic rt/user_lowcmd --state-topic rt/lowstate --spec {params} --input realtime --realtime-transport zmq --zmq-bind --zmq-endpoint tcp://127.0.0.1:15111 --require-realtime --input-timeout-sec 3.0 --stale-sec 0.25 --ready-file {ready_file} --start-file {start_file} --no-damping-on-stop {event_log_arg}"
+
+    twist_redis_realtime:
+      safety_enable: true
+      max_frames: 0
+      switch_back: true
+      switch_back_mode: walkrun
+      prestart_ready_timeout_sec: 3.5
+      stop_loco_before_start: false
+      params: config/generic_twist.yaml
+      command: "{action_go_root}/build/generic_motion_tracking_player --net {net} --cmd-topic rt/user_lowcmd --state-topic rt/lowstate --spec {params} --input realtime --realtime-transport redis --redis-host 127.0.0.1 --redis-port 6379 --redis-key action_mimic_g1 --require-realtime --input-timeout-sec 3.0 --stale-sec 0.25 --ready-file {ready_file} --start-file {start_file} --no-damping-on-stop {event_log_arg}"

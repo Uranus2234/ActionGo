@@ -1,0 +1,20 @@
+actions:
+  gentle_humanoid:
+    # Starts the GentleHumanoid tracking policy and tracks the configured
+    # one-frame "default" clip before handing back to official walkrun.
+    gentle_default:
+      max_frames: 0
+
+    # Motions from ../gentle-humanoid/config/tracking.yaml.
+    # max_frames: 0 lets src/action_go_player.py exit when the requested
+    # reference stream completes. Set a positive value to cap runtime.
+    gentle_walk:
+      max_frames: 0
+    gentle_hug:
+      max_frames: 0
+    gentle_pick_ball:
+      max_frames: 0
+    gentle_drag_object:
+      max_frames: 0
+    gentle_move_object:
+      max_frames: 0

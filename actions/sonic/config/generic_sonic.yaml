@@ -1,0 +1,71 @@
+name: generic_sonic
+runtime:
+  template: motion_conditioned_tracking
+  variant: sonic
+  inference_hz: 50
+  publish_hz: 500
+  onnx_threads: 1
+  startup_ramp_sec: 3.0
+  stats_interval: 50
+  dry_run_duration_sec: 1.0
+robot:
+  params: SONIC.yaml
+  motor_count: 29
+model:
+  sessions:
+    encoder:
+      path: ../model/model_encoder.onnx
+      input_names: [obs_dict]
+      output_names: [encoded_tokens]
+    decoder:
+      path: ../model/model_decoder.onnx
+      input_names: [obs_dict]
+      output_names: [action]
+  provider:
+    execution_provider: cpu
+    device_id: 0
+    tensorrt_cache_dir: /tmp/action_go_sonic_trt_cache
+    tensorrt_workspace_size: 1073741824
+    tensorrt_fp16: false
+    warmup_iters: 1
+observation:
+  config: observation_config.yaml
+  obs_dim: 994
+  encoder_obs_dim: 1762
+  token_dim: 64
+  history_len: 10
+  smpl_joint_count: 24
+  smpl_pose_count: 21
+  smpl_reference_frames: 10
+reference:
+  source: offline-csv
+  path: ../motions/squat_001__A359
+  future_frames: 10
+  future_step: 5
+  loop: false
+  zmq_header_size: 1280
+  zmq_protocol_versions: [1, 2, 3]
+  zmq_bind: false
+  zmq_endpoint: tcp://127.0.0.1:5556
+  zmq_topic: pose
+  require_realtime: false
+  input_timeout_sec: 3.0
+  stale_sec: 0.1
+  stale_stop_sec: 0.5
+action:
+  type: target_q
+  action_dim: 29
+  semantic: default_q_plus_remapped_action_times_per_joint_scale
+handoff:
+  cmd_topic: rt/user_lowcmd
+  state_topic: rt/lowstate
+  mode_machine: 5
+  damping_on_stop: false
+safety:
+  enabled: true
+  finite_check: true
+  joint_limit_enabled: true
+  lowstate_timeout_enabled: true
+  lowstate_timeout_sec: 0.05
+  kp_max: 120.0
+  kd_max: 8.0

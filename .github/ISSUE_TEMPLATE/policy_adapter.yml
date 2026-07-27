@@ -1,0 +1,46 @@
+name: Policy adapter request
+description: Propose a policy after collecting its training/export/deployment semantics.
+title: "[Adapter]: "
+labels: [adapter]
+body:
+  - type: input
+    id: upstream
+    attributes:
+      label: Upstream repository and exact revision
+    validations:
+      required: true
+  - type: textarea
+    id: licenses
+    attributes:
+      label: Code, weight, motion, and data licenses
+      description: List each separately; source-code licensing is not evidence for weight redistribution.
+    validations:
+      required: true
+  - type: dropdown
+    id: template
+    attributes:
+      label: Closest ActionGo template
+      options:
+        - single_actor_state
+        - embedded_mimic_time
+        - motion_conditioned_tracking
+        - depth_conditioned_actor
+        - object_conditioned_actor
+        - composite_motion_policy
+        - no existing template
+    validations:
+      required: true
+  - type: textarea
+    id: semantics
+    attributes:
+      label: Recovered semantics
+      description: Observation order/history/normalization, joint mapping, action decoder/scale/default pose, timing, sensors/references, ONNX I/O, and safety/handoff behavior with source paths.
+    validations:
+      required: true
+  - type: textarea
+    id: blockers
+    attributes:
+      label: Unknowns and blockers
+      description: Do not fill unknown safety-critical values with guesses.
+    validations:
+      required: true

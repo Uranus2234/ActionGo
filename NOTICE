@@ -1,0 +1,12 @@
+ActionGo
+Copyright 2026 ActionGo contributors
+
+This product includes interfaces and integration code for Unitree SDK2 and
+ONNX Runtime. Third-party components, policy adapters, names, weights, motion
+data, and printable assets remain subject to their respective licenses and
+rights. The Apache-2.0 license in this repository applies only to ActionGo code
+and documentation for which the contributors have authority to license.
+
+See THIRD_PARTY.md and MODEL_ASSETS.json before redistributing any dependency
+or policy asset. A source-only public snapshot intentionally omits all assets
+whose redistribution status is not explicitly allowed.

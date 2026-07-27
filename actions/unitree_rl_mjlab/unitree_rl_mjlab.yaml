@@ -1,0 +1,10 @@
+# unitree_rl_mjlab simulation walkrun policy.
+# This action is mainly used by tools/sim/action_go_sim_remote.py as the simulated
+# replacement for the real robot's official WALKRUN controller.
+actions:
+  generic_policy:
+    sim_walkrun:
+      params: config/generic_unitree_rl_mjlab.yaml
+      switch_back: false
+      switch_back_mode: walkrun
+      safety_enable: false

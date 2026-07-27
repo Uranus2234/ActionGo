@@ -1,0 +1,10 @@
+# Instinct Parkour actions.
+# safety_enable 默认 true；如某个动作不希望被 IMU safety 打断，可改为 false。
+# prestart_before_userctrl 在 config/motion_actions.yaml 的 type_defaults.instinct_parkour 中统一配置：
+# 先完成 RealSense/ONNX/DDS 初始化并持续发布当前姿态 hold，失败则不进入 UserCtrl。
+actions:
+  instinct_parkour:
+    g1_parkour:
+      safety_enable: true
+      params: config/generic_instinct_parkour.yaml
+      command: "{action_go_root}/build/generic_sensor_policy_player --net {net} --cmd-topic rt/user_lowcmd --spec {params} --ready-file {ready_file} --start-file {start_file} --no-damping-on-stop {event_log_arg}"

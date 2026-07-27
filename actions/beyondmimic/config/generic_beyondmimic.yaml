@@ -1,0 +1,44 @@
+# ActionGo Generic Policy Runtime V1 spec.
+# Template: Embedded-Mimic Time Policies (obs + time_step -> actions + internal reference outputs)
+name: generic_beyondmimic_kick_right
+runtime:
+  template: embedded_mimic_time
+  variant: beyondmimic
+  inference_hz: 50
+  publish_hz: 500
+  onnx_threads: 1
+  max_frames: 200
+  stats_interval: 50
+  dry_run_duration_sec: 1.0
+robot:
+  params: BeyondMimic.yaml
+  motor_count: 29
+model:
+  path: ../model/kick_right.onnx
+  input_names: [obs, time_step]
+  output_names: [actions, joint_pos, joint_vel, body_quat_w]
+  obs_input: obs
+observation:
+  builder: beyondmimic
+  obs_dim: 154
+  terms: [ref_joint_pos, ref_joint_vel, anchor_rotation_3x2, gyro, q_minus_default, dq, last_action]
+mimic_time:
+  time_input_name: time_step
+  time_step_source: counter
+  internal_reference_outputs: [joint_pos, joint_vel, body_quat_w]
+  warmup_steps: 2
+  ref_body_count: 14
+  anchor_body_index: 7
+  yaw_alignment: anchor_yaw
+  max_frames: 200
+action:
+  type: target_q
+  action_dim: 29
+  scale_from_params: action_scale
+  add_default: true
+handoff:
+  cmd_topic: rt/user_lowcmd
+  state_topic: rt/lowstate
+  mode_machine: 5
+  damping_on_stop: false
+safety: {}

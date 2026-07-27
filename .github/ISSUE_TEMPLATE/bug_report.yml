@@ -1,0 +1,45 @@
+name: Bug report
+description: Report a reproducible ActionGo defect without exposing sensitive robot data.
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Do not use this form for security issues or urgent real-robot incidents. Follow SECURITY.md and enter damping first.
+  - type: textarea
+    id: behavior
+    attributes:
+      label: Observed and expected behavior
+      description: Include the exact failure and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Minimal reproduction
+      description: Include commands, config fields, and whether this was check-only, dry-run, simulation, or hardware.
+    validations:
+      required: true
+  - type: input
+    id: revision
+    attributes:
+      label: ActionGo revision
+      placeholder: Git commit or release tag
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, architecture, compiler, Unitree SDK2, ORT/provider, and optional sensor stack.
+    validations:
+      required: true
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Safety and privacy
+      options:
+        - label: I removed credentials, private addresses, personal data, unlicensed assets, and unsafe reproduction instructions.
+          required: true
+        - label: If hardware was involved, the robot is now in a safe state and the issue says so.
+          required: true

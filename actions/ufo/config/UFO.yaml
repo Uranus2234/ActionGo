@@ -1,0 +1,22 @@
+schema_version: 1
+robot:
+  motor_count: 29
+  joint_order: [left_hip_pitch_joint, left_hip_roll_joint, left_hip_yaw_joint, left_knee_joint, left_ankle_pitch_joint, left_ankle_roll_joint, right_hip_pitch_joint, right_hip_roll_joint, right_hip_yaw_joint, right_knee_joint, right_ankle_pitch_joint, right_ankle_roll_joint, waist_yaw_joint, waist_roll_joint, waist_pitch_joint, left_shoulder_pitch_joint, left_shoulder_roll_joint, left_shoulder_yaw_joint, left_elbow_joint, left_wrist_roll_joint, left_wrist_pitch_joint, left_wrist_yaw_joint, right_shoulder_pitch_joint, right_shoulder_roll_joint, right_shoulder_yaw_joint, right_elbow_joint, right_wrist_roll_joint, right_wrist_pitch_joint, right_wrist_yaw_joint]
+  default_angles: [-0.1, 0.0, 0.0, 0.3, -0.2, 0.0, -0.1, 0.0, 0.0, 0.3, -0.2, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+  kp: [99.09843, 99.0984, 40.1792, 99.0984, 28.5012, 28.5012, 99.09843, 99.0984, 40.1792, 99.0984, 28.5012, 28.5012, 300.0, 300.0, 300.0, 14.2506, 14.2506, 14.2506, 14.2506, 14.25062, 8.61103, 8.61103, 14.2506, 14.2506, 14.2506, 14.2506, 14.25062, 8.61103, 8.61103]
+  kd: [6.3088, 6.3088, 2.5579, 6.3088, 1.8145, 1.8145, 6.3088, 6.3088, 2.5579, 6.3088, 1.8145, 1.8145, 5.0, 5.0, 5.0, 0.9072, 0.9072, 0.9072, 0.9072, 0.9072, 0.5482, 0.5482, 0.9072, 0.9072, 0.9072, 0.9072, 0.9072, 0.5482, 0.5482]
+  action_scale: [0.35066146, 0.35066146, 0.54754644, 0.35066146, 0.43857726, 0.43857726, 0.35066146, 0.35066146, 0.54754644, 0.35066146, 0.43857726, 0.43857726, 0.07333333, 0.04166667, 0.04166667, 0.43857741, 0.43857741, 0.43857741, 0.43857741, 0.43857741, 0.38903592, 0.38903592, 0.43857741, 0.43857741, 0.43857741, 0.43857741, 0.43857741, 0.38903592, 0.38903592]
+  torque_limits: [88.0, 88.0, 88.0, 139.0, 50.0, 50.0, 88.0, 88.0, 88.0, 139.0, 50.0, 50.0, 88.0, 50.0, 50.0, 25.0, 25.0, 25.0, 25.0, 25.0, 5.0, 5.0, 25.0, 25.0, 25.0, 25.0, 25.0, 5.0, 5.0]
+  joint_pos_lower_limit: [-2.5307, -0.5236, -2.7576, -0.0873, -0.8727, -0.2618, -2.5307, -2.9671, -2.7576, -0.0873, -0.8727, -0.2618, -2.618, -0.52, -0.52, -3.0892, -1.5882, -2.618, -1.0472, -1.9722, -1.6144, -1.6144, -3.0892, -2.2515, -2.618, -1.0472, -1.9722, -1.6144, -1.6144]
+  joint_pos_upper_limit: [2.8798, 2.9671, 2.7576, 2.8798, 0.5236, 0.2618, 2.8798, 0.5236, 2.7576, 2.8798, 0.5236, 0.2618, 2.618, 0.52, 0.52, 2.6704, 2.2515, 2.618, 2.0944, 1.9722, 1.6144, 1.6144, 2.6704, 1.5882, 2.618, 2.0944, 1.9722, 1.6144, 1.6144]
+policy:
+  num_actions: 29
+  actor_obs_dim: 721
+  policy_obs_dim: 465
+observation:
+  z_dim: 256
+  history_steps: 4
+  z_file: ufo_reward_idle_z.txt
+action:
+  action_rescale: 5.0
+safety: {}

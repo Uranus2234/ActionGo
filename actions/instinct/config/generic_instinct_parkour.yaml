@@ -1,0 +1,54 @@
+# ActionGo Generic Sensor Policy Runtime spec.
+name: generic_instinct_parkour
+runtime:
+  template: depth_conditioned_actor
+  variant: instinct_parkour
+  inference_hz: 50
+  publish_hz: 50
+  onnx_threads: 2
+  stats_interval: 25
+robot:
+  params: env.yaml
+  motor_count: 29
+model:
+  logdir: ..
+  standdir: ../stand_onboard
+  sessions:
+    depth_encoder:
+      path: ../model/0-depth_encoder.onnx
+      input_names: [input]
+      output_names: [output]
+    actor:
+      path: ../model/actor.onnx
+      input_names: [input]
+      output_names: [output]
+observation:
+  obs_dim: 5376
+  proprio_dim: 768
+  depth_input_shape: [1, 8, 18, 32]
+  depth_latent_dim: 128
+  actor_input_dim: 896
+sensor:
+  depth_source: realsense
+  require_depth_camera: true
+  depth_camera_timeout_sec: 1.0
+  min_depth_camera_frames: 1
+  require_torso_imu: true
+  torso_imu_timeout_sec: 1.0
+startup:
+  cold_start_before_policy: true
+  cold_start_hold_sec: 0.1
+  target_interp_sec: 0.0
+  target_rate_limit: 0.0
+  startup_sec: 0.0
+  startup_hold_sec: 0.0
+  use_normalizer: false
+handoff:
+  cmd_topic: rt/user_lowcmd
+  state_topic: rt/lowstate
+  mode_machine: 5
+  damping_on_stop: false
+action:
+  type: target_q
+  action_dim: 29
+safety: {}

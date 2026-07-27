@@ -1,0 +1,60 @@
+# ActionGo Generic Composite Policy Runtime spec.
+name: generic_omnixtreme
+runtime:
+  template: composite_motion_policy
+  variant: omnixtreme
+  execution_provider: auto
+  inference_hz: 50
+  publish_hz: 500
+  onnx_threads: 1
+  warmup_iters: 1
+  prepare_ramp_sec: 0.1
+  prepare_hold_sec: 0.05
+  startup_interp_sec: 0.0
+  target_interp_sec: 0.0
+  stats_interval: 25
+robot:
+  params: OmniXtreme.yaml
+  motor_count: 29
+model:
+  base: ../model/base_policy_trt.onnx
+  residual: ../model/residual_policy.onnx
+  fk: ../model/fk_trt.onnx
+  sessions:
+    base:
+      path: ../model/base_policy_trt.onnx
+      input_names: [real_obs, command_obs, real_historical_obs_raw, initial_noise]
+      output_names: [action]
+    residual:
+      path: ../model/residual_policy.onnx
+      input_names: [obs]
+      output_names: [actions]
+    fk:
+      path: ../model/fk_trt.onnx
+      input_names: [joint_angles, base_pos, base_quat]
+      output_names: [pos, rot]
+motion:
+  path: ../motions/motion.npz
+  max_frames: 1000
+observation:
+  obs_dim: 1687
+  real_obs_dim: 90
+  command_obs_dim: 64
+  history_dim: 1350
+  residual_obs_dim: 183
+tensorrt:
+  fp16: true
+  cache_dir: ../../../.cache/omnixtreme_trt
+action:
+  type: target_q
+  action_dim: 29
+  residual_gain: 1.0
+  initial_noise_scale: 1.0
+  friction_feedforward: false
+  joint_limit_clamp: false
+handoff:
+  cmd_topic: rt/user_lowcmd
+  state_topic: rt/lowstate
+  mode_machine: 5
+  damping_on_stop: false
+safety: {}

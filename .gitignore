@@ -1,0 +1,10 @@
+build
+__pycache__
+**/.vscode
+logs/
+.cache/
+experiments/runs/
+paper/build/
+# Private research drafts and imported literature stay outside code-only releases.
+docs/actiongo_*
+docs/papers/

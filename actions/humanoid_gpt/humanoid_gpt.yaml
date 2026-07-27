@@ -1,0 +1,22 @@
+# Humanoid-GPT generic runtime actions.
+# No default remote binding is added here; bind explicitly in supervisor config if needed.
+actions:
+  generic_motion_tracking:
+    humanoid_gpt_offline:
+      safety_enable: true
+      max_frames: 0
+      switch_back: true
+      switch_back_mode: walkrun
+      params: config/generic_humanoid_gpt.yaml
+      trajectory: motions/human_walking_50Hz_29dof.npz
+      command: "{action_go_root}/build/generic_motion_tracking_player --net {net} --cmd-topic rt/user_lowcmd --state-topic rt/lowstate --spec {params} --input offline-npz --trajectory {trajectory} --ready-file {ready_file} --start-file {start_file} --no-damping-on-stop {event_log_arg}"
+
+    humanoid_gpt_realtime:
+      safety_enable: true
+      max_frames: 0
+      switch_back: true
+      switch_back_mode: walkrun
+      stop_loco_before_start: false
+      prestart_ready_timeout_sec: 3.5
+      params: config/generic_humanoid_gpt.yaml
+      command: "{action_go_root}/build/generic_motion_tracking_player --net {net} --cmd-topic rt/user_lowcmd --state-topic rt/lowstate --spec {params} --input realtime --realtime-transport udp --udp-bind 127.0.0.1 --udp-port 51234 --require-realtime --input-timeout-sec 3.0 --stale-sec 0.25 --ready-file {ready_file} --start-file {start_file} --no-damping-on-stop {event_log_arg}"

@@ -1,0 +1,40 @@
+# ActionGo Generic Sensor Policy Runtime spec.
+name: generic_steadytray
+runtime:
+  template: object_conditioned_actor
+  variant: steadytray
+  inference_hz: 50
+  publish_hz: 500
+  onnx_threads: 2
+  warmup_steps: 5
+  target_interp_sec: 0.02
+  stats_interval: 50
+robot:
+  params: SteadyTray.yaml
+  motor_count: 29
+model:
+  path: ../model/policy_9999.onnx
+  input_names: [student_encoder_obs, policy_obs]
+  output_names: [actions]
+observation:
+  obs_dim: 480
+  frame_dim: 96
+  policy_frames: 5
+  encoder_obs_dim: 103
+  encoder_history_len: 32
+object:
+  source: apriltag
+  tag_size: 0.08
+  require_tag: true
+  exit_on_tag_lost: true
+  pose_timeout_sec: 0.15
+  camera_timeout_sec: 2.0
+handoff:
+  cmd_topic: rt/user_lowcmd
+  state_topic: rt/lowstate
+  mode_machine: 5
+  damping_on_stop: false
+action:
+  type: target_q
+  action_dim: 29
+safety: {}

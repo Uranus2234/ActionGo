@@ -1,0 +1,23 @@
+# ProtoMotions tracker actions.
+# safety_enable 默认 true；如某个动作不希望被 IMU safety 打断，可改为 false。
+actions:
+  generic_motion_tracking:
+    proto_walk:
+      safety_enable: true
+      params: config/generic_protomotions.yaml
+      max_frames: 1020
+      prestart_ready_timeout_sec: 10.0
+      switch_back: true
+      switch_back_mode: walkrun
+      trajectory: motions/output_walk.50fps.npz
+      command: "{action_go_root}/build/generic_motion_tracking_player --net {net} --cmd-topic rt/user_lowcmd --state-topic rt/lowstate --spec {params} --trajectory {trajectory} --max-frames {max_frames} --ready-file {ready_file} --start-file {start_file} --no-damping-on-stop {event_log_arg}"
+
+    proto_dance:
+      safety_enable: true
+      params: config/generic_protomotions.yaml
+      max_frames: 1020
+      prestart_ready_timeout_sec: 10.0
+      switch_back: true
+      switch_back_mode: walkrun
+      trajectory: motions/dance1_subject2.50fps.npz
+      command: "{action_go_root}/build/generic_motion_tracking_player --net {net} --cmd-topic rt/user_lowcmd --state-topic rt/lowstate --spec {params} --trajectory {trajectory} --max-frames {max_frames} --ready-file {ready_file} --start-file {start_file} --no-damping-on-stop {event_log_arg}"

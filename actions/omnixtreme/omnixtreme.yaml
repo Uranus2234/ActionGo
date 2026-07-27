@@ -1,0 +1,16 @@
+# OmniXtreme actions.
+actions:
+  omnixtreme:
+    omni_motion:
+      safety_enable: false
+      max_frames: 1000
+      switch_back: true
+      switch_back_mode: walkrun
+      model: actions/omnixtreme/model/base_policy_trt.onnx
+      params: config/generic_omnixtreme.yaml
+      trajectory: motions/motion.npz
+
+
+# Additional split segments from the concatenated motion.npz.
+action_files:
+  - omnixtreme_segments.yaml

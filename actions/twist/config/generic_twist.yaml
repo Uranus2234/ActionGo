@@ -1,0 +1,62 @@
+# ActionGo Generic Policy Runtime V3 spec.
+# Template: Motion-Conditioned Tracking Policies (state + 33D motion command -> target q)
+name: generic_twist
+runtime:
+  template: motion_conditioned_tracking
+  variant: twist
+  inference_hz: 50
+  publish_hz: 500
+  onnx_threads: 2
+  stats_interval: 50
+  dry_run_duration_sec: 1.0
+robot:
+  params: TWIST.yaml
+  motor_count: 29
+model:
+  path: ../model/twist_general_motion_tracker.onnx
+  input_names:
+    - obs
+  output_names:
+    - action
+  obs_input: obs
+  action_output: action
+observation:
+  obs_dim: 1155
+  input_dim: 1155
+  history_len: 10
+  policy_mimic_dim: 31
+  proprio_dim: 74
+  obs_frame_dim: 105
+motion_command:
+  source: offline-pkl
+  mimic_dim: 33
+  wrist_dim: 6
+  pkl: ../motions/A3__Swing_arms.pkl
+  cache: ../../../.cache/twist/twist_offline_pkl.mimic.csv
+  steps: "1"
+  loop: false
+  realtime_transport: udp
+  udp_bind: 0.0.0.0
+  udp_port: 15110
+  zmq_bind: true
+  zmq_endpoint: tcp://127.0.0.1:15111
+  zmq_topic: ""
+  redis_host: 127.0.0.1
+  redis_port: 6379
+  redis_key: action_mimic_g1
+  require_realtime: false
+  input_timeout_sec: 0.5
+  stale_sec: 0.25
+  stale_behavior: hold_then_stop
+  stale_to_default: false
+action:
+  type: target_q
+  action_dim: 23
+  source_output: action
+  scale: 0.5
+handoff:
+  cmd_topic: rt/user_lowcmd
+  state_topic: rt/lowstate
+  mode_machine: 5
+  damping_on_stop: false
+safety: {}

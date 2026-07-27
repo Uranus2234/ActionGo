@@ -1,0 +1,49 @@
+name: actiongo-ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  linux-x86_64:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    steps:
+      - name: Check out sources
+        uses: actions/checkout@v4.1.7
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake libeigen3-dev libyaml-cpp-dev zlib1g-dev libssl-dev nlohmann-json3-dev
+
+      - name: Fetch pinned ONNX Runtime
+        run: tools/deps/fetch_onnxruntime.sh
+
+      - name: Install Unitree SDK2
+        run: |
+          git clone --depth 1 https://github.com/unitreerobotics/unitree_sdk2.git /tmp/unitree_sdk2
+          git -C /tmp/unitree_sdk2 fetch --depth 1 origin 21d0a3b2c46ee48c8fdf2783becb6be3beb0a59b
+          git -C /tmp/unitree_sdk2 checkout 21d0a3b2c46ee48c8fdf2783becb6be3beb0a59b
+          cmake -S /tmp/unitree_sdk2 -B /tmp/unitree_sdk2-build -DCMAKE_BUILD_TYPE=Release -DBUILD_EXAMPLES=OFF
+          cmake --build /tmp/unitree_sdk2-build --parallel 2
+          sudo cmake --install /tmp/unitree_sdk2-build
+
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DACTION_GO_CODE_ONLY=ON
+
+      - name: Build
+        run: cmake --build build --parallel 2
+
+      - name: Test complete source-owned suite
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Validate code-only adapters and release gates
+        run: |
+          ./build/policy_spec_schema_check --all --allow-missing-assets
+          ./build/policy_spec_schema_check --all --installed-only
+          python3 tools/assets/check_model_assets.py --permit-missing
+          python3 tools/assets/check_readme_links.py
+          python3 tools/release/create_public_snapshot.py --output /tmp/ActionGo-public
+          python3 tools/release/public_snapshot_check.py --repo /tmp/ActionGo-public
+          python3 -m py_compile tools/assets/*.py tools/release/*.py tools/remote/*.py

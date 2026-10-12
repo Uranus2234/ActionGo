@@ -192,6 +192,6 @@ SONIC default pose，随后跟踪官方 `squat_001__A359` reference，序列结�
   --ep cpu --duration-sec 1 --dry-run --offline-dry-run-state
 ```
 
-真机 supervisor 启动后，先按 `Start` 进入运行态并确认 stand 稳定，再按 `F2+X` 启动
+真机 supervisor 启动后，先确认机器人在官方 walkrun 中稳定，再按 `Start` 启用外壳，按 `F2+X` 启动
 `sonic_offline_squat`。`R2+A` 随时中止当前动作并返回官方 `walkrun`，`Select+Start`
 进入官方 damping；`F2+Y` 用于上述 `sonic_pico_teleop`。

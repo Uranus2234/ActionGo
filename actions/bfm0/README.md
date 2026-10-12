@@ -74,19 +74,24 @@ rt/lowcmd
   --remote-map config/remote_actions.yaml
 ```
 
-`bfm_zero_stand` 默认不再绑定到遥控动作键，主要由 IMU safety 自动触发。
-如需手动测试，使用 `action_go_test --action bfm_zero_stand`。
+`Start` 选择 BFM 并 ARM；IMU 有效且倾角不低于 `30°` 时立即请求恢复，
+否则只启用动作和监控。`Left+B` 使用同样规则选择 UFO。
+如需单独测试 BFM，使用 `action_go_test --action bfm_zero_stand`。
 
-## Safety 自动恢复
+## Safety 与恢复
 
-IMU safety 触发后会自动执行：
+默认 `safety_auto_recovery: false`，IMU safety 触发后的流程是：
 
 ```text
 摔倒
-  -> bfm_zero_stand
-  -> 站稳 recover_hold_ms
+  -> 官方阻尼，回 SHELL_IDLE
+  -> 操作员按 Start 人工请求 bfm_zero_stand
+  -> 新鲜 IMU 倾角 <=30° 稳定 1200 ms
   -> walkrun
 ```
+
+显式设为 `safety_auto_recovery: true` 时，摔倒阻尼后会自动运行当前选择的恢复策略。
+恢复期间忽略普通摔倒角度中断，payload 失败则阻尼并停止重试。
 
 BFM-Zero 的 `bfm_zero_stand` 已启用回切 hot-standby：收到切回 `walkrun` 请求后，
 先调用官方 7111 接口，同时继续发布最后一条经安全过滤的 BFM 命令 0.6 秒，随后才退出

@@ -28,17 +28,18 @@ OpenCV 和 libzmq 用于构建 sensor player；RealSense、AprilTag、MuJoCo、R
 
 ## 模型与预检
 
-代码版首发不再分发许可未确认的 ONNX、运动数据、标签或第三方二进制。请根据 [MODEL_ASSETS.json](MODEL_ASSETS.json) 中已有的记录从权利方取得所需文件并核对 SHA256。清单尚未覆盖当前 paoxiao、PHP、mjlab、SONIC v1.1 和 HandoffGuard 的所有模型，还需核对对应动作包 README 和 spec；`blocked_pending_review` 表示 BYOW（自行提供权重/数据），不代表允许再分发。
+代码版不分发第三方 ONNX、运动数据、标签或预编译二进制。根据 [资产获取说明](docs/model_assets.md) 从上游取得模型或提供匹配的本地导出，再按 [MODEL_ASSETS.json](MODEL_ASSETS.json) 校验。清单已同步本地动作包的 71 个文件，包含 paoxiao、PHP、mjlab、SONIC 原版与 v1.1 及运动数据；来源不明确的 checkpoint 继续标为待补，未在本地找到的 HandoffGuard risk model 需单独提供。`blocked_pending_review` 表示 BYOW，不代表允许再分发。
 
 ```bash
-python3 tools/assets/check_model_assets.py
+python3 tools/assets/check_model_assets.py --policy bfm0  # 严格检查已安装的指定动作包
+python3 tools/assets/check_model_assets.py --installed-only
 ./build/policy_spec_schema_check --all --allow-missing-assets
 ./build/policy_spec_schema_check --all --installed-only
-./build/policy_spec_schema_check --all       # 真机前严格模式
+./build/policy_spec_schema_check --spec actions/bfm0/config/generic_bfm_zero.yaml
 ACTION_GO_NET=lo tools/launch/start_dry_run.sh
 ```
 
-`--allow-missing-assets` 用于没有第三方资产时审查 adapter 语义；`--installed-only` 只对已安装资产做真实 ONNX I/O 校验；严格模式要求全部资产存在且匹配。
+`--allow-missing-assets` 用于没有第三方资产时审查 adapter 语义；schema 的 `--installed-only` 对已安装模型检查真实 ONNX I/O。资产检查的 `--installed-only` 核对现有文件，缺失项仅报告；`--policy` 可重复指定动作包。真机前对所选包运行严格资产、schema 和 player check-only；全部包均已安装时再运行不带筛选的严格检查。没有安装模型时的通过不代表部署已验证。
 
 ## 真机入口
 

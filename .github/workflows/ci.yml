@@ -15,7 +15,7 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential cmake libeigen3-dev libyaml-cpp-dev zlib1g-dev libssl-dev nlohmann-json3-dev
+          sudo apt-get install -y build-essential cmake pkg-config libeigen3-dev libyaml-cpp-dev zlib1g-dev libssl-dev nlohmann-json3-dev libopencv-dev libzmq3-dev
 
       - name: Fetch pinned ONNX Runtime
         run: tools/deps/fetch_onnxruntime.sh
@@ -33,7 +33,9 @@ jobs:
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DACTION_GO_CODE_ONLY=ON
 
       - name: Build
-        run: cmake --build build --parallel 2
+        run: |
+          cmake --build build --parallel 2
+          cmake --build build --parallel 2 --target generic_sensor_policy_player
 
       - name: Test complete source-owned suite
         run: ctest --test-dir build --output-on-failure
@@ -43,6 +45,7 @@ jobs:
           ./build/policy_spec_schema_check --all --allow-missing-assets
           ./build/policy_spec_schema_check --all --installed-only
           python3 tools/assets/check_model_assets.py --permit-missing
+          python3 tools/assets/check_model_assets.py --installed-only
           python3 tools/assets/check_readme_links.py
           python3 tools/release/create_public_snapshot.py --output /tmp/ActionGo-public
           python3 tools/release/public_snapshot_check.py --repo /tmp/ActionGo-public

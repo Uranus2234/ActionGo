@@ -193,6 +193,7 @@ class Binding:
 @dataclass
 class SafetyConfig:
     enable: bool = True
+    auto_recovery: bool = False
     action: str = "ufo_stand"
     return_mode: str = "walkrun"
     fall_angle_deg: float = 57.3
@@ -254,6 +255,8 @@ def load_remote_config(path: Path | None) -> RemoteConfig:
         cfg.lie_action = str(data["lie_action"])
     if "safety_enable" in data:
         cfg.safety.enable = parse_bool(data["safety_enable"], cfg.safety.enable)
+    if "safety_auto_recovery" in data:
+        cfg.safety.auto_recovery = parse_bool(data["safety_auto_recovery"], cfg.safety.auto_recovery)
     if "safety_action" in data:
         cfg.safety.action = str(data["safety_action"])
     if "safety_return_mode" in data:
@@ -1177,6 +1180,7 @@ class SimActionManager:
 class SafetyState:
     NORMAL = "normal"
     RECOVERING = "recovering"
+    DAMPED = "damped"
 
 
 def resolve_default_path(raw: str) -> str:
@@ -1518,7 +1522,8 @@ def main(argv=None) -> int:
             print(
                 "[action_go_sim][shell] initial state=SHELL_IDLE + simulated PASSIVE: "
                 "robot is damped and will fall. Use Start/S for BFM stand or "
-                "Left+B/B for UFO stand; the selected backend remains active for safety.",
+                "Left+B/B for UFO stand when valid IMU tilt reaches the recovery threshold; "
+                "later falls enter damping unless auto recovery is enabled.",
                 flush=True,
             )
 
@@ -1600,6 +1605,13 @@ def main(argv=None) -> int:
             recover_timer_active = False
             last_safety_finish = time.monotonic() - max(0, remote_cfg.safety.cooldown_ms) / 1000.0
 
+        def ensure_safety_recovery_running(source: str):
+            if manager.action_running() and manager.active_action == selected_safety_action:
+                return True
+            if manager.action_running():
+                manager.stop_active(switch_mode="none")
+            return manager.start_action(selected_safety_action, source=source)
+
         def arm_shell(source: str, recovery_action: str):
             nonlocal shell_armed, selected_safety_action, safety_state, fall_timer_active, recover_timer_active
             if manager.action_running():
@@ -1608,18 +1620,17 @@ def main(argv=None) -> int:
             shell_armed = True
             selected_safety_action = recovery_action or remote_cfg.safety.action
             reset_safety_state()
-            # ARM immediately starts the selected stand backend.  Once upright,
-            # safetyTick() switches to walkrun and remembers that backend for later falls.
+            imu = remote.imu()
             print(
                 f"[action_go_sim][shell] ARMED by {source}: actions/safety enabled; "
-                f"start recovery={selected_safety_action}",
+                f"recovery={selected_safety_action}",
                 flush=True,
             )
-            safety_state = SafetyState.RECOVERING
             fall_timer_active = False
             recover_timer_active = False
-            manager.stop_walkrun()
-            manager.start_action(selected_safety_action, source="arm")
+            if imu.valid and imu.tilt_deg >= remote_cfg.safety.recover_angle_deg:
+                safety_state = SafetyState.RECOVERING
+                ensure_safety_recovery_running("arm:" + source)
 
         def start_action(action_name: str, source: str):
             nonlocal lie_action_active
@@ -1630,72 +1641,84 @@ def main(argv=None) -> int:
                 lie_action_active = (action_name == remote_cfg.lie_action)
 
         def start_safety_recovery(tilt: float):
-            nonlocal safety_state, fall_timer_active, recover_timer_active
-            safety_state = SafetyState.RECOVERING
+            nonlocal shell_armed, safety_state, fall_timer_active, recover_timer_active
+            safety_state = SafetyState.DAMPED
+            shell_armed = False
             fall_timer_active = False
             recover_timer_active = False
             print(
-                f"[action_go_sim][safety] fallen tilt={tilt:.1f} >= {remote_cfg.safety.fall_angle_deg}; "
-                f"start {selected_safety_action}",
+                f"[action_go_sim][safety] fallen tilt={tilt:.1f} >= {remote_cfg.safety.fall_angle_deg}; damping",
                 flush=True,
             )
-            manager.stop_active(switch_mode="none")
-            manager.stop_walkrun()
-            manager.start_action(selected_safety_action, source="safety")
+            manager.enter_passive()
+            if remote_cfg.safety.auto_recovery:
+                shell_armed = True
+                safety_state = SafetyState.RECOVERING
+                ensure_safety_recovery_running("fall_detected")
 
         def safety_tick():
-            nonlocal fall_timer_active, recover_timer_active, fall_since, recover_since, safety_state, last_safety_finish
-            if not remote_cfg.safety.enable or not shell_armed:
+            nonlocal shell_armed, fall_timer_active, recover_timer_active, fall_since, recover_since, safety_state, last_safety_finish
+            if not remote_cfg.safety.enable or not shell_armed or safety_state == SafetyState.DAMPED:
                 return
             imu = remote.imu()
             now = time.monotonic()
+            if safety_state == SafetyState.RECOVERING:
+                if not manager.action_running() or manager.active_action != selected_safety_action:
+                    print("[action_go_sim][safety] recovery failed; damping and return to SHELL_IDLE", flush=True)
+                    shell_armed = False
+                    safety_state = SafetyState.DAMPED
+                    recover_timer_active = False
+                    manager.enter_passive()
+                    return
+                if not imu.valid or now - imu.stamp > 0.5:
+                    recover_timer_active = False
+                    return
+                if imu.tilt_deg > remote_cfg.safety.recover_angle_deg:
+                    recover_timer_active = False
+                    return
+                if not recover_timer_active:
+                    recover_since = now
+                    recover_timer_active = True
+                if now - recover_since < max(0, remote_cfg.safety.recover_hold_ms) / 1000.0:
+                    return
+                print(
+                    f"[action_go_sim][safety] recovered tilt={imu.tilt_deg:.1f}; return {remote_cfg.safety.return_mode}",
+                    flush=True,
+                )
+                manager.stop_active(switch_mode="none")
+                if normalize_mode(remote_cfg.safety.return_mode) == "passive":
+                    manager.enter_passive()
+                else:
+                    manager.start_walkrun()
+                safety_state = SafetyState.NORMAL
+                recover_timer_active = False
+                last_safety_finish = now
+                return
+
+            if manager.action_running():
+                action = manager.actions.get(manager.active_action)
+                if action is not None and not action.safety_enable:
+                    fall_timer_active = False
+                    recover_timer_active = False
+                    return
             if not imu.valid or now - imu.stamp > 0.5:
                 return
             fallen = imu.tilt_deg >= remote_cfg.safety.fall_angle_deg
-            upright = imu.tilt_deg <= remote_cfg.safety.recover_angle_deg
-            if safety_state == SafetyState.NORMAL:
-                recover_timer_active = False
-                if now - last_safety_finish < max(0, remote_cfg.safety.cooldown_ms) / 1000.0:
-                    fall_timer_active = False
-                    return
-                if not fallen:
-                    fall_timer_active = False
-                    return
-                if not fall_timer_active:
-                    fall_since = now
-                    fall_timer_active = True
-                if now - fall_since >= max(0, remote_cfg.safety.fall_hold_ms) / 1000.0:
-                    start_safety_recovery(imu.tilt_deg)
-                return
-
-            # Recovering: keep recovery action alive until upright is stable.
-            fall_timer_active = False
-            if not manager.action_running():
-                manager.stop_walkrun()
-                manager.start_action(selected_safety_action, source="safety_watchdog")
-            if not upright:
-                recover_timer_active = False
-                return
-            if not recover_timer_active:
-                recover_since = now
-                recover_timer_active = True
-            if now - recover_since < max(0, remote_cfg.safety.recover_hold_ms) / 1000.0:
-                return
-            print(
-                f"[action_go_sim][safety] recovered tilt={imu.tilt_deg:.1f}; return {remote_cfg.safety.return_mode}",
-                flush=True,
-            )
-            manager.stop_active(switch_mode="none")
-            if normalize_mode(remote_cfg.safety.return_mode) == "passive":
-                manager.enter_passive()
-            else:
-                manager.start_walkrun()
-            safety_state = SafetyState.NORMAL
             recover_timer_active = False
-            last_safety_finish = now
+            if now - last_safety_finish < max(0, remote_cfg.safety.cooldown_ms) / 1000.0:
+                fall_timer_active = False
+                return
+            if not fallen:
+                fall_timer_active = False
+                return
+            if not fall_timer_active:
+                fall_since = now
+                fall_timer_active = True
+            if now - fall_since >= max(0, remote_cfg.safety.fall_hold_ms) / 1000.0:
+                start_safety_recovery(imu.tilt_deg)
 
         def remote_tick():
-            nonlocal prev_mask, shell_armed, lie_action_active, safety_state
+            nonlocal prev_mask, shell_armed, lie_action_active, safety_state, recover_timer_active
             nonlocal next_risk_tick
             with keyboard_lock:
                 events = list(keyboard_events)
@@ -1826,8 +1849,10 @@ def main(argv=None) -> int:
                     manager.enter_passive()
                     print("[action_go_sim][shell] lie-down done -> PASSIVE SHELL_IDLE", flush=True)
                 elif safety_state == SafetyState.RECOVERING:
-                    # safety_tick will restart/stop recovery based on IMU state.
-                    pass
+                    shell_armed = False
+                    safety_state = SafetyState.DAMPED
+                    recover_timer_active = False
+                    manager.enter_passive()
                 elif mode == "passive":
                     shell_armed = False
             prev_mask = now_mask

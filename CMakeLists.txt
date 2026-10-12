@@ -144,6 +144,14 @@ target_link_libraries(action_go_remote_test
 )
 
 if(BUILD_TESTING)
+  add_test(
+    NAME simulation_recovery_test
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/runtime/tests/simulation_recovery_test.py
+  )
+  add_test(
+    NAME model_assets_check_test
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/runtime/tests/model_assets_check_test.py
+  )
   add_executable(depth_monitor_publisher_test runtime/tests/depth_monitor_publisher_test.cpp)
   target_include_directories(depth_monitor_publisher_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/runtime/include)
   target_compile_options(depth_monitor_publisher_test PRIVATE -UNDEBUG)

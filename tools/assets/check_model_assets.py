@@ -32,7 +32,7 @@ def tracked_managed_assets(repo: Path) -> set[str]:
     managed = set()
     for relative in paths:
         lowered = relative.lower()
-        if relative and any(lowered.endswith(suffix) for suffix in MANAGED_SUFFIXES):
+        if relative and (repo / relative).is_file() and any(lowered.endswith(suffix) for suffix in MANAGED_SUFFIXES):
             managed.add(relative)
     return managed
 
@@ -59,12 +59,23 @@ def main() -> int:
                         help="fail if any bundled asset lacks verified redistribution permission")
     parser.add_argument("--permit-missing", action="store_true",
                         help="allow manifest-listed assets to be absent in a code-only export")
+    parser.add_argument("--installed-only", action="store_true",
+                        help="verify present assets and report absent ones without failing")
+    parser.add_argument("--policy", action="append", default=[],
+                        help="check one actions/<policy> package; may be repeated")
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
 
     repo = args.repo.resolve()
     manifest_path = args.manifest if args.manifest.is_absolute() else repo / args.manifest
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    known_policies = {path.split("/")[1] for group in manifest["assets"] for path in group["paths"]
+                      if path.startswith("actions/")}
+    unknown_policies = set(args.policy) - known_policies
+    if unknown_policies:
+        parser.error("unknown asset package(s): " + ", ".join(sorted(unknown_policies)))
+    selected_prefixes = tuple(f"actions/{policy}/" for policy in args.policy)
+    permit_missing = args.permit_missing or args.installed_only
     results = []
     failures = 0
     declared_paths: set[str] = set()
@@ -75,6 +86,8 @@ def main() -> int:
             raise SystemExit(f"paths/hash count mismatch for {group.get('source')}")
         release_allowed = group.get("redistribution") == "allowed"
         for relative, expected in zip(paths, hashes):
+            if selected_prefixes and not relative.startswith(selected_prefixes):
+                continue
             if relative in declared_paths:
                 failures += 1
                 results.append({"path": relative, "matches": False,
@@ -88,7 +101,7 @@ def main() -> int:
                 failures += 1
             actual = sha256_file(path) if exists else ""
             matches = exists and actual == expected
-            failures += int(not matches and not (args.permit_missing and not exists))
+            failures += int(not matches and not (permit_missing and not exists))
             results.append({
                 "path": relative,
                 "exists": exists,
@@ -103,6 +116,8 @@ def main() -> int:
 
     unmanaged = sorted(tracked_managed_assets(repo) - declared_paths)
     for relative in unmanaged:
+        if selected_prefixes and not relative.startswith(selected_prefixes):
+            continue
         failures += 1
         results.append({
             "path": relative,
@@ -121,7 +136,7 @@ def main() -> int:
         for result in results:
             if result["matches"]:
                 status = "OK"
-            elif args.permit_missing and not result["exists"]:
+            elif permit_missing and not result["exists"]:
                 status = "MISSING-ALLOWED"
             else:
                 status = "MISMATCH"
@@ -135,6 +150,10 @@ def main() -> int:
                 print(f"  error: {result['error']}")
         if args.public_release:
             print("Public-release mode requires redistribution=allowed for every asset actually bundled.")
+        installed = sum(result.get("matches", False) for result in results)
+        print(f"Checked {len(results)} asset(s): {installed} installed and matching, {failures} failure(s).")
+        if args.installed_only and installed == 0:
+            print("No installed assets were validated; this does not establish deployment readiness.")
     return 0 if failures == 0 else 1
 
 

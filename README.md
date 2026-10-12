@@ -49,10 +49,11 @@ OpenCV and ZeroMQ are required to build `generic_sensor_policy_player`. RealSens
 
 Policy weights, motion files, tags, and datasets are not distributed in the code-only release unless their asset-specific redistribution rights are verified. A source-code license does not automatically license a checkpoint or dataset.
 
-Use [MODEL_ASSETS.json](MODEL_ASSETS.json) for the assets it currently lists. The manifest does not yet cover every configured asset, including the current BeyondMimic `paoxiao` checkpoint, PHP, mjlab, SONIC v1.1, and HandoffGuard models. Read the corresponding package README and spec for the required paths and available acquisition instructions; unresolved provenance must be clarified before deployment. `blocked_pending_review` means **bring your own weights/data**: obtain the asset from its rights holder and verify that your use complies with its terms. Then run:
+The [asset acquisition guide](docs/model_assets.md) and [MODEL_ASSETS.json](MODEL_ASSETS.json) inventory 71 files from the local policy packages, including current BeyondMimic `paoxiao`, PHP, mjlab, original SONIC, SONIC v1.1, and motion/reference data. Download third-party assets from their upstream provider or supply your own matching exports; unresolved checkpoint origins remain explicitly recorded. The optional HandoffGuard risk model was not found locally and remains separately supplied. `blocked_pending_review` means **bring your own weights/data**, not permission to redistribute it. Validate the packages you install:
 
 ```bash
-python3 tools/assets/check_model_assets.py
+python3 tools/assets/check_model_assets.py --policy bfm0
+python3 tools/assets/check_model_assets.py --installed-only
 ```
 
 ActionGo does not provide an uncontrolled downloader for assets with unclear terms.
@@ -99,13 +100,13 @@ ACTION_GO_NET=lo tools/launch/start_dry_run.sh
 The mandatory progression is:
 
 ```text
-asset hash -> schema -> package check-only -> dry-run -> simulation/replay
+package asset check -> schema -> package check-only -> dry-run -> simulation/replay
            -> physically protected low-risk robot test -> higher-risk action
 ```
 
 ## Real-Robot Start
 
-Only proceed after the strict asset and schema gates pass, the action-specific sensor/reference checks pass, and the operator has verified the robot network interface and damping path.
+Only proceed after the selected package's strict asset and schema checks pass, the action-specific sensor/reference checks pass, and the operator has verified the robot network interface and damping path. An all-package strict check is appropriate when every configured package is installed.
 
 ```bash
 ACTION_GO_NET=<robot-network-interface> tools/launch/start_safe.sh
@@ -156,8 +157,8 @@ This table reports repository evidence, not marketing-level “support.” The p
 
 | Adapter | Model/data acquisition | Extra hardware/source | Check-only | Simulation tooling | Real-robot verified | IMU safety default | Dynamic risk |
 |---|---|---|---|---|---|---|---|
-| BeyondMimic | BYOW; manifest incomplete for current `paoxiao` | Embedded reference | Yes | Risk-switch preview | Not documented | Mixed: `wbst` and lie-down off | High |
-| UFO | BYOW; Hugging Face source in manifest | Latent prompt file | Yes | No dedicated tool documented | Not documented | Mixed: recovery stand off | Medium |
+| BeyondMimic | BYOW; current `paoxiao` inventoried, public checkpoint source pending | Embedded reference | Yes | Risk-switch preview | Not documented | Mixed: `wbst` and lie-down off | High |
+| UFO | BYOW; Hugging Face source in manifest | Latent prompt file | Yes | Unified simulation entry | Not documented | Mixed: recovery stand off | Medium |
 | BFM-Zero | BYOW; manifest source/hash | Latent prompt file | Yes | MuJoCo preview | Not documented | On | Medium |
 | Instinct Parkour | BYOW; manifest source/hash | RealSense + torso IMU | Yes; camera checks separate | Dedicated viewer | Not documented | On | High |
 | Holosoma | BYOW; manifest source/hash | Embedded reference | Yes | Official MuJoCo bridge notes | Not documented | On | High |
@@ -167,8 +168,8 @@ This table reports repository evidence, not marketing-level “support.” The p
 | SteadyTray | BYOW; manifest source/hash | Camera + AprilTag or trusted pose input | Yes; camera checks separate | Zero-source smoke test only | Not documented | Off | High |
 | unitree_rl_mjlab | BYOW/local export; provenance unresolved | Command input | Yes | ActionGo simulation bridge | Not documented | Off | Medium |
 | TWIST | BYOW; manifest source/hash | PKL, mocap, UDP, ZMQ, or Redis source | Yes | No dedicated tool documented | Not documented | On | High |
-| Humanoid-GPT | BYOW; exact release URL unresolved | Motion cache; optional MuJoCo FK | Yes | No dedicated viewer documented | Not documented | On | High |
-| SONIC | BYOW; original and v1.1, manifest incomplete | CSV or local G1/PICO ZMQ input | Yes | ActionGo MuJoCo bridge and synthetic PICO input | v1.1 acceptance pending | On | High |
+| Humanoid-GPT | BYOW; upstream repository recorded, exact asset revision pending | Motion cache; optional MuJoCo FK | Yes | No dedicated viewer documented | Not documented | On | High |
+| SONIC | BYOW; original and v1.1 inventoried, exact asset revision pending | CSV or local G1/PICO ZMQ input | Yes | ActionGo MuJoCo bridge and synthetic PICO input | v1.1 acceptance pending | On | High |
 | PHP | BYOW; package acquisition instructions | RealSense + torso IMU or SHM depth | Yes; camera checks separate | Official Holosoma/ActionGo bridge | Stair acceptance pending | On | High |
 | mjlab | BYOW/local export; package source notes | Embedded reference | Yes | C++ Unitree SDK2 MuJoCo bridge | Not documented | On | High |
 

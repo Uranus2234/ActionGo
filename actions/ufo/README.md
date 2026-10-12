@@ -119,8 +119,8 @@ Viewer 键盘：
 
 | 按键 | 功能 |
 |---|---|
-| `S` | ARM 并运行 `bfm_zero_stand`，对应遥控器 `Start` |
-| `B` | ARM 并运行 `ufo_stand`，对应遥控器 `Left+B` |
+| `S` | ARM 选择 BFM；IMU 有效且倾角 ≥30° 时恢复，对应遥控器 `Start` |
+| `B` | ARM 选择 UFO；IMU 有效且倾角 ≥30° 时恢复，对应遥控器 `Left+B` |
 | `T` | 启动 `ufo_tracking_zs7` |
 | `G` | 启动 `ufo_stand` |
 | `W` | 停止当前动作并进入模拟 walkrun |

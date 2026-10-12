@@ -88,15 +88,16 @@ Tracking 模式：
   --auto-action ufo_tracking_zs7
 ```
 
-统一遥控模式下，`Start` 会 ARM 并运行 `bfm_zero_stand`，`Left+B` 会 ARM
-并运行 `ufo_stand`。恢复直立后切回 walkrun；之后发生倾倒时，safety 继续
-使用对应 ARM 入口选择的 stand backend。`Left+A` 启动 UFO tracking。
+统一遥控模式下，`Start` 选择 `bfm_zero_stand`，`Left+B` 选择 `ufo_stand`。
+IMU 有效且倾角不低于 30° 时 ARM 立即请求恢复，否则只启用动作和监控。
+恢复站稳后切回 walkrun；后续摔倒默认先阻尼，等待再次 ARM，显式启用
+`safety_auto_recovery` 时才自动恢复。`Left+A` 启动 UFO tracking。
 
 没有手柄时直接使用 MuJoCo viewer 键盘：
 
 ```text
-S      ARM 并运行 bfm_zero_stand，对应遥控器 Start
-B      ARM 并运行 ufo_stand，对应遥控器 Left+B
+S      ARM 选择 bfm_zero_stand；IMU 有效且倾角 >=30° 时恢复，对应 Start
+B      ARM 选择 ufo_stand；IMU 有效且倾角 >=30° 时恢复，对应 Left+B
 T      启动 ufo_tracking_zs7
 G      启动 ufo_stand
 V      重新启动命令行 `--auto-action` 指定的动作
@@ -106,11 +107,11 @@ R      重置仿真并自动进入模拟 walkrun
 SPACE  暂停/继续
 ```
 
-正常顺序是按 `S` 选择 BFM stand，或按 `B` 选择 UFO stand；恢复并切回
-walkrun 后按 `T` 启动 tracking。当前动作运行时需要先按 `W` 或 `P` 停止，
+正常顺序是按 `S` 选择 BFM stand，或按 `B` 选择 UFO stand；倾倒时等待恢复并切回
+walkrun，直立时 ARM 不启动恢复，之后按 `T` 启动 tracking。当前动作运行时需要先按 `W` 或 `P` 停止，
 才能启动另一个动作。
 
-无手柄自动测试倾倒恢复：
+无手柄测试倾倒后的人工 ARM 恢复请求；ARM 时 IMU 倾角须达到恢复阈值：
 
 ```bash
 /usr/bin/python3 tools/sim/action_go_sim_remote.py \
@@ -153,9 +154,11 @@ walkrun 后按 `T` 启动 tracking。当前动作运行时需要先按 `W` 或 `
 `tools/sim/action_go_sim_remote.py` 对齐真机 `action_go_remote_test` 的外壳/按键逻辑：
 
 - 启动后默认 `SHELL_IDLE + passive damping`：机器人不进 walkrun，会保持阻尼并倒地
-- `Start`：ARM 并运行 `bfm_zero_stand`
-- `Left+B`：ARM 并运行 `ufo_stand`
-- 站稳后切到仿真 walkrun；后续倾倒继续使用当前选择的 stand backend
+- `Start`：ARM 选择 BFM；IMU 有效且倾角 >=30° 时运行 `bfm_zero_stand`
+- `Left+B`：ARM 选择 UFO；IMU 有效且倾角 >=30° 时运行 `ufo_stand`
+- 站稳后切到仿真 walkrun；后续摔倒默认阻尼并回 SHELL_IDLE，等待再次 ARM
+- `safety_auto_recovery: true` 才允许摔倒阻尼后自动恢复；恢复失败阻尼，不自动重试
+- 无效或超过 500 ms 的 IMU 会重置恢复站稳计时；动作自身的 `safety_enable` 与真机一致
 - `Select+Start`：回到 SHELL_IDLE，并进入仿真 passive damping
 - 低层 emergency / exit 组合默认禁用，常规遥控停止只使用 `Select+Start`
 - 具体动作绑定继续读 `config/remote_actions.yaml`

@@ -22,8 +22,12 @@
       "redistribution": "blocked_pending_review"
     },
     {
-      "paths": ["actions/bfm0/model/FBcprAuxModel.onnx"],
-      "sha256": ["89f66488fc7d59b02f33d098c65142050219ef3df4aaf778b7d24898a2328365"],
+      "paths": [
+        "actions/bfm0/model/FBcprAuxModel.onnx"
+      ],
+      "sha256": [
+        "89f66488fc7d59b02f33d098c65142050219ef3df4aaf778b7d24898a2328365"
+      ],
       "source": "https://github.com/LeCAR-Lab/BFM-Zero",
       "upstream_revision": "unknown",
       "upstream_code_license": "CC-BY-NC-4.0",
@@ -31,8 +35,12 @@
       "redistribution": "blocked_pending_review"
     },
     {
-      "paths": ["actions/holosoma/model/ppo_g1_29dof_dancing.onnx"],
-      "sha256": ["50c0d577bd950e7a1df74be8fb5e2cef597f8090b1b219b300bbd2711eb23e5f"],
+      "paths": [
+        "actions/holosoma/model/ppo_g1_29dof_dancing.onnx"
+      ],
+      "sha256": [
+        "50c0d577bd950e7a1df74be8fb5e2cef597f8090b1b219b300bbd2711eb23e5f"
+      ],
       "source": "https://github.com/amazon-far/holosoma",
       "upstream_revision": "unknown",
       "upstream_code_license": "Apache-2.0",
@@ -40,9 +48,13 @@
       "redistribution": "blocked_pending_review"
     },
     {
-      "paths": ["actions/humanoid_gpt/model/pns_wo_priv216.onnx"],
-      "sha256": ["1ca1f475dc647afb736f4cdbd55d45103c36b7f5059d830b05d6aef3a5fc3a1e"],
-      "source": "public Humanoid-GPT tracking release; exact URL required",
+      "paths": [
+        "actions/humanoid_gpt/model/pns_wo_priv216.onnx"
+      ],
+      "sha256": [
+        "1ca1f475dc647afb736f4cdbd55d45103c36b7f5059d830b05d6aef3a5fc3a1e"
+      ],
+      "source": "https://github.com/GalaxyGeneralRobotics/Humanoid-GPT",
       "upstream_revision": "unknown",
       "upstream_code_license": "unverified",
       "weight_license": "unverified",
@@ -85,8 +97,12 @@
       "redistribution": "blocked_pending_review"
     },
     {
-      "paths": ["actions/protomotions/model/unified_pipeline.onnx"],
-      "sha256": ["a59baa3e04a951e5cf0b4cc68f24ebaafa9272714226618b99a5017dfc805b4c"],
+      "paths": [
+        "actions/protomotions/model/unified_pipeline.onnx"
+      ],
+      "sha256": [
+        "a59baa3e04a951e5cf0b4cc68f24ebaafa9272714226618b99a5017dfc805b4c"
+      ],
       "source": "https://github.com/NVlabs/ProtoMotions",
       "upstream_revision": "unknown",
       "upstream_code_license": "Apache-2.0",
@@ -94,8 +110,12 @@
       "redistribution": "blocked_pending_review"
     },
     {
-      "paths": ["actions/steadytray/model/policy_9999.onnx"],
-      "sha256": ["3dad3611a20e3a6b53bddf2c16f673e0b919c09faac56db2f1147c7b781ad85d"],
+      "paths": [
+        "actions/steadytray/model/policy_9999.onnx"
+      ],
+      "sha256": [
+        "3dad3611a20e3a6b53bddf2c16f673e0b919c09faac56db2f1147c7b781ad85d"
+      ],
       "source": "https://github.com/AllenHuangGit/SteadyTray",
       "upstream_revision": "unknown",
       "upstream_code_license": "unverified",
@@ -113,15 +133,20 @@
         "013ab0287236aa2721e13f1e936d699db982302d0de0bfcdae76d5c3245362d3",
         "39b553e197f62f077975ba38512bc04781a3fc37c2af7c6756e04629f760edea"
       ],
-      "source": "upstream GEAR-SONIC release; exact revision and weight terms required",
+      "source": "https://huggingface.co/nvidia/GEAR-SONIC",
       "upstream_revision": "unknown",
       "upstream_code_license": "unverified",
       "weight_license": "unverified",
-      "redistribution": "blocked_pending_review"
+      "redistribution": "blocked_pending_review",
+      "notes": "Original 1762D encoder/decoder and shared V2 planner; kept separately from SONIC v1.1. Exact asset revision remains unresolved."
     },
     {
-      "paths": ["actions/twist/model/twist_general_motion_tracker.onnx"],
-      "sha256": ["ce6f4d39b60d8619b506b4ab3216b839b61440ba59a9eeed82ed69ea3841f61b"],
+      "paths": [
+        "actions/twist/model/twist_general_motion_tracker.onnx"
+      ],
+      "sha256": [
+        "ce6f4d39b60d8619b506b4ab3216b839b61440ba59a9eeed82ed69ea3841f61b"
+      ],
       "source": "https://github.com/YanjieZe/TWIST",
       "upstream_revision": "unknown",
       "upstream_code_license": "MIT",
@@ -129,8 +154,12 @@
       "redistribution": "blocked_pending_review"
     },
     {
-      "paths": ["actions/ufo/model/FBcprAuxModel.onnx"],
-      "sha256": ["e0a67a6e7d40e6bb50253da4f4e25451556de2dba6446ebaa05f424aee118067"],
+      "paths": [
+        "actions/ufo/model/FBcprAuxModel.onnx"
+      ],
+      "sha256": [
+        "e0a67a6e7d40e6bb50253da4f4e25451556de2dba6446ebaa05f424aee118067"
+      ],
       "source": "https://huggingface.co/xuewang/ufo-g1-policy",
       "upstream_revision": "fc5efb7b3bb7a82270abaeabb0cf3c1194f1c7e6",
       "upstream_code_license": "unverified",
@@ -138,13 +167,268 @@
       "redistribution": "blocked_pending_review"
     },
     {
-      "paths": ["actions/unitree_rl_mjlab/model/policy.onnx"],
-      "sha256": ["6ce5c751bb692e383bffb9bc32c9142518283224e4da9a33ef8dd374b2b63cdb"],
+      "paths": [
+        "actions/unitree_rl_mjlab/model/policy.onnx"
+      ],
+      "sha256": [
+        "6ce5c751bb692e383bffb9bc32c9142518283224e4da9a33ef8dd374b2b63cdb"
+      ],
       "source": "https://github.com/unitreerobotics/unitree_rl_mjlab",
       "upstream_revision": "local export; source checkpoint path must be replaced with a release identifier",
       "upstream_code_license": "unverified",
       "weight_license": "unverified",
       "redistribution": "blocked_pending_review"
+    },
+    {
+      "paths": [
+        "actions/beyondmimic/model/paoxiao.onnx"
+      ],
+      "sha256": [
+        "1b2f97475885b576023b0a5dc70a073e72e1f202928d246c7649a32870c24d3a"
+      ],
+      "source": "https://github.com/HybridRobotics/whole_body_tracking",
+      "upstream_revision": "local checkpoint",
+      "upstream_code_license": "unverified",
+      "weight_license": "unverified",
+      "redistribution": "blocked_pending_review",
+      "notes": "Current hlqk action uses paoxiao.onnx. A public download or training run identifier has not been recorded."
+    },
+    {
+      "paths": [
+        "actions/humanoid_gpt/assets/g1_mjx_track_meshless.xml"
+      ],
+      "sha256": [
+        "c5cd50aa2d13abda5c45f17869989463bcf80b8ec6a057b1409146cc90d05887"
+      ],
+      "source": "https://github.com/GalaxyGeneralRobotics/Humanoid-GPT",
+      "upstream_revision": "unknown",
+      "upstream_code_license": "unverified",
+      "weight_license": "unverified",
+      "redistribution": "blocked_pending_review",
+      "notes": "Local asset inventoried; exact upstream asset revision and redistribution terms remain unverified."
+    },
+    {
+      "paths": [
+        "actions/humanoid_gpt/motions/human_walking_50Hz_29dof.npz"
+      ],
+      "sha256": [
+        "4ab95256ec8987bea42ae416d949993124ed73ba93763a83b639ff093456e44d"
+      ],
+      "source": "https://github.com/GalaxyGeneralRobotics/Humanoid-GPT",
+      "upstream_revision": "unknown",
+      "upstream_code_license": "unverified",
+      "weight_license": "unverified",
+      "redistribution": "blocked_pending_review",
+      "notes": "Local asset inventoried; exact upstream asset revision and redistribution terms remain unverified."
+    },
+    {
+      "paths": [
+        "actions/mjlab/model/dance1_subject2_29999.onnx",
+        "actions/mjlab/model/reverse_vault_flat_24000.onnx",
+        "actions/mjlab/model/reverse_vault_flat_28000.onnx",
+        "actions/mjlab/model/reverse_vault_terrain_20000.onnx"
+      ],
+      "sha256": [
+        "2173f598f295483f86c47079822e53b5d344c98305b6508de60308e4c3be0e63",
+        "4f2163cd2a1a66fee18e6ec8e088c11cbe3182f6aad86802efa6dd907706b071",
+        "d3fb86b8da4263e5c66cc671e00c5f26ebaf3473bf319c24c9ec437584b0de8a",
+        "47ea43c940bfc82a77ab4f8696964118026ac9eb3286656a7d915e0247b90e25"
+      ],
+      "source": "https://github.com/mujocolab/mjlab",
+      "upstream_revision": "local export",
+      "upstream_code_license": "unverified",
+      "weight_license": "unverified",
+      "redistribution": "blocked_pending_review",
+      "notes": "Locally exported checkpoints listed in actions/mjlab/README.md; no public checkpoint download is currently recorded."
+    },
+    {
+      "paths": [
+        "actions/omnixtreme/motions/motion.npz",
+        "actions/omnixtreme/motions/segments/10_back_hand_flip.npz",
+        "actions/omnixtreme/motions/segments/11_side_flip_roll.npz",
+        "actions/omnixtreme/motions/segments/12_wbst_motive.npz",
+        "actions/omnixtreme/motions/segments/13_ceshoufan_double.npz",
+        "actions/omnixtreme/motions/segments/14_yewendun-kick.npz",
+        "actions/omnixtreme/motions/segments/15_front_paxing.npz",
+        "actions/omnixtreme/motions/segments/1_fuck_floor.npz",
+        "actions/omnixtreme/motions/segments/2_back_hand_flip_roll.npz",
+        "actions/omnixtreme/motions/segments/3_back_hand_flip.npz",
+        "actions/omnixtreme/motions/segments/4_wbst_stand.npz",
+        "actions/omnixtreme/motions/segments/5_side_roll_kick.npz",
+        "actions/omnixtreme/motions/segments/6_front_roll.npz",
+        "actions/omnixtreme/motions/segments/7_back_roll.npz",
+        "actions/omnixtreme/motions/segments/8_none.npz",
+        "actions/omnixtreme/motions/segments/9_back_hand_flip.npz"
+      ],
+      "sha256": [
+        "efc8f7fa86df93f00c371d3e9d7d4183d4c72e8dfd08056bd4ddea69fd6d4155",
+        "fd254559ae6de9e821fc3a14681e8062fe1eddf9e0e114dc429f9383c7391a4d",
+        "a8f96f77f0e3ddf163352afc147fab3b1043ef4549139dd325c61a99e7b58206",
+        "2007acc31087ded950f1d34e941da5eea1fad30b97e6f36e1d036b0e813dd6df",
+        "10e6aa3e1230c138fc95ba6257c214196991dcabd680efd170eceffbb11ab435",
+        "bfda34bdb7bd63a1e7aba0f4ddea2c1a467d72d07e140791073a6bea91954ab1",
+        "4fab306f9e41d7c56bfff83c8db759ae2f432ce6d08375570beed9e897ca0740",
+        "f8542e69efc4675121a1ba218629c46b33c46e984982d3fccf89afaccbb5cfd8",
+        "dcace28822982369083a6347eb5e8463444764ba6afee57c5f1ed75b98f2ed0d",
+        "bbfa86db1352c622ad17ee1f17b64818fb84a5a50d4673e9c8f9c35a6216d173",
+        "a83df6ee447d172ff0d038f764d06dd9cfd1544fbf7d4769442c50ef3779e97e",
+        "fa1ae1aa195b45e16d778d6018eceae36c18f85aa242f2288dcadedfcfae4097",
+        "5da4bbc1a9b99b73999cced6af22bdd7de8a4bf8cbc0faf57ddc2d4fbc7a9a96",
+        "aab601bb36aa4e713f453168292be5e22fbebf154da85c4ac324143e0419596a",
+        "93f127b79943548d5ef862bc511d2fdf14e54796cea17921a9fe4ebfcec24d44",
+        "688759068c057c84a815d0761215c3c6eaaffa24297c0356f84db63923fc6bab"
+      ],
+      "source": "https://github.com/Perkins729/OmniXtreme",
+      "upstream_revision": "unknown",
+      "upstream_code_license": "unverified",
+      "weight_license": "unverified",
+      "redistribution": "blocked_pending_review",
+      "notes": "Local asset inventoried; exact upstream asset revision and redistribution terms remain unverified."
+    },
+    {
+      "paths": [
+        "actions/php/model/depth_backbone.onnx",
+        "actions/php/model/student.onnx"
+      ],
+      "sha256": [
+        "5b22466a218944e3b0ab0f4f82a910e3eec35375ee03e7fb94eb65fa88431b56",
+        "e426c4206181d511b838c76efc48e43636299b76cb5a15183977011589931628"
+      ],
+      "source": "https://github.com/amazon-far/php_parkour/releases/tag/student-assets-v1",
+      "upstream_revision": "student-assets-v1",
+      "upstream_code_license": "Apache-2.0",
+      "weight_license": "unverified",
+      "redistribution": "blocked_pending_review",
+      "notes": "File checksums match the upstream student release manifest; model-specific redistribution terms remain unverified."
+    },
+    {
+      "paths": [
+        "actions/protomotions/motions/dance1_subject2.50fps.npz",
+        "actions/protomotions/motions/output_walk.50fps.npz"
+      ],
+      "sha256": [
+        "5f0772df2b1f6a7a89da3e55aa7f01938aae07f818ae980d91ca3284db402111",
+        "3f55af299db17545b6b40c10eb2844e4f8da76ee93c6358ace6d7727201171aa"
+      ],
+      "source": "https://github.com/NVlabs/ProtoMotions",
+      "upstream_revision": "unknown",
+      "upstream_code_license": "unverified",
+      "weight_license": "unverified",
+      "redistribution": "blocked_pending_review",
+      "notes": "Local asset inventoried; exact upstream asset revision and redistribution terms remain unverified."
+    },
+    {
+      "paths": [
+        "actions/sonic/model/sonic_v1_1/model_decoder.onnx",
+        "actions/sonic/model/sonic_v1_1/model_encoder.onnx"
+      ],
+      "sha256": [
+        "34bae8570d4a4421a5391a5c2befd745d4a02d182ec539e5f9da44c091c67509",
+        "fb97de22819b2057b41459802128d91723d91a25f0ad73e7bfc41a9cf8365bae"
+      ],
+      "source": "https://huggingface.co/nvidia/GEAR-SONIC",
+      "upstream_revision": "unknown",
+      "upstream_code_license": "unverified",
+      "weight_license": "unverified",
+      "redistribution": "blocked_pending_review",
+      "notes": "SONIC v1.1 encoder/decoder; retrieve the matching historical upstream release, not a later default or low-latency variant. Exact model revision is unresolved."
+    },
+    {
+      "paths": [
+        "actions/sonic/motions/squat_001__A359/body_ang_vel.csv",
+        "actions/sonic/motions/squat_001__A359/body_lin_vel.csv",
+        "actions/sonic/motions/squat_001__A359/body_pos.csv",
+        "actions/sonic/motions/squat_001__A359/body_quat.csv",
+        "actions/sonic/motions/squat_001__A359/joint_pos.csv",
+        "actions/sonic/motions/squat_001__A359/joint_vel.csv"
+      ],
+      "sha256": [
+        "9de87460d6dedc06cc36214912abd998aed6645658b7340c170b1e4d0f68c08d",
+        "5908f9da9d5767326386ada07311596a6ffff63080c700fb1fc1ce8ef1222d2b",
+        "ad98ccf42203c2246f2cdf43a64806642a2930bf525a3fef77956f6d727a7a09",
+        "b1e6ab7b81de682fed07720ee6d21ba99f02812631f262bfcf77f6c39e0c164b",
+        "fd6b07ac5d66a3ffb78999eefc12f6934402b3103853e71d4667858dab088e8d",
+        "246e8225dcdf410339bbaa6700375e92b217166de6e497c5168c4c4eb34dd38c"
+      ],
+      "source": "https://huggingface.co/nvidia/GEAR-SONIC",
+      "upstream_revision": "unknown",
+      "upstream_code_license": "unverified",
+      "weight_license": "unverified",
+      "redistribution": "blocked_pending_review",
+      "notes": "Local squat motion CSV; exact upstream sample revision is unresolved."
+    },
+    {
+      "paths": [
+        "actions/steadytray/tags/src/tag41_12_00000.png",
+        "actions/steadytray/tags/src/tag41_12_00001.png",
+        "actions/steadytray/tags/src/tag41_12_00002.png",
+        "actions/steadytray/tags/src/tag41_12_00003.png",
+        "actions/steadytray/tags/tagStandard41h12_id0_tagsize50mm_A4.pdf",
+        "actions/steadytray/tags/tagStandard41h12_id0_tagsize60mm_A4.pdf",
+        "actions/steadytray/tags/tagStandard41h12_id0_tagsize70mm_A4.pdf",
+        "actions/steadytray/tags/tagStandard41h12_id0_tagsize80mm_A4.pdf",
+        "actions/steadytray/tags/tagStandard41h12_ids0-3_tagsize40mm_A4.pdf"
+      ],
+      "sha256": [
+        "ad5bc161c157634f05afcfd3cfba34334b9303609dd3afc9c000b86e031da02a",
+        "0d3011b7e8f187cb5dd7822d9075299a0141c170ba45a38b9aafdbf31292d9aa",
+        "d769e493648845f67555b3b07e508855beec0ed6266474eb0da0b14bb56db97b",
+        "da1764b41d3a1be7ce50a962210862efcb7bb73b0e512ba14e7fe2f18584b29b",
+        "8f13d5f95c67a7a44f94b40aea0514e1c14521d1c904c7a339b187a3ef4b6429",
+        "16f329d032c78cba64153647e8f4d632deb5ff8436450cea6944b84621f89f3a",
+        "db372ab50d0d63c9131a03578aac2ddddf202d17fc5fc3a3df51fa9a47464587",
+        "4d7a1c11cb5705c04b1b8339cae2f58126cfffbcb646fca7c3b742e0482d4120",
+        "296eb0f16e32a282dbd40f43da6b1c88b296bdd72b7818f850ef5eb84217dfa4"
+      ],
+      "source": "https://github.com/AllenHuangGit/SteadyTray",
+      "upstream_revision": "unknown",
+      "upstream_code_license": "unverified",
+      "weight_license": "unverified",
+      "redistribution": "blocked_pending_review",
+      "notes": "Local asset inventoried; exact upstream asset revision and redistribution terms remain unverified."
+    },
+    {
+      "paths": [
+        "actions/twist/motions/01_01.pkl",
+        "actions/twist/motions/125_SLP201.pkl",
+        "actions/twist/motions/A3__Swing_arms.pkl",
+        "actions/twist/motions/A6___lift_box.pkl"
+      ],
+      "sha256": [
+        "30ac0a7449d94f0abc3bda28807a5d31ff9935baa484992d4a50824490618535",
+        "a4e909c34e7fc151b111e064fdb66d678b20caf56e63987c687883d54bf02920",
+        "fb0417b6049819876aa517f5852240e3cd75f418b5a4c1f6694fbe08a74e7d04",
+        "b031bb9261f5319b4181fb3823179f800d7460eb21c0eac9c21e29d018f92689"
+      ],
+      "source": "https://github.com/YanjieZe/TWIST",
+      "upstream_revision": "unknown",
+      "upstream_code_license": "unverified",
+      "weight_license": "unverified",
+      "redistribution": "blocked_pending_review",
+      "notes": "Local asset inventoried; exact upstream asset revision and redistribution terms remain unverified."
+    },
+    {
+      "paths": [
+        "actions/ufo/config/ufo_tracking_zs7.npy"
+      ],
+      "sha256": [
+        "b5929738c544c300c38b963089273f6d3ffdc5259994a626380e1eb17af0c98e"
+      ],
+      "source": "https://github.com/Roboparty/UFO",
+      "upstream_revision": "unknown",
+      "upstream_code_license": "unverified",
+      "weight_license": "unverified",
+      "redistribution": "blocked_pending_review",
+      "notes": "Local asset inventoried; exact upstream asset revision and redistribution terms remain unverified."
     }
-  ]
+  ],
+  "external_assets": [
+    {
+      "path": "actions/handoffguard/model/handoffguard_risk_tcn.onnx",
+      "status": "not_found_locally",
+      "source": "operator-provided HandoffGuard risk model",
+      "notes": "Required only for optional bridge experiments. No model was found in actions or at the configured development path; no checksum or public download is claimed."
+    }
+  ],
+  "inventory_note": "Inventory synchronized from the local actions directory on 2026-10-12. Recorded checksums identify local files; unknown origins and redistribution permissions are not inferred from public availability. Model weights and motion assets are supplied separately."
 }

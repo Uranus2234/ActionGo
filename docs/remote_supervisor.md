@@ -116,7 +116,7 @@ config/remote_actions.yaml
 
 Instinct Parkour 额外保护：启动 `g1_parkour` 时会先在官方 walkrun 仍接管的状态下初始化 RealSense、`rt/secondary_imu` torso IMU、ONNX/DDS，并发布当前姿态 hold；ready 后才切 UserCtrl。没有检测到 RealSense 深度相机、没有深度帧或没有 torso IMU 时，不会切 UserCtrl，不会启动策略，并请求保持/回到官方 `walkrun`。切入 UserCtrl 后执行 official ColdStartAgent-style 过渡到 `default_joint_pos`，然后默认直接进入 parkour 模型。
 Instinct parkour 保持官方的 `inference_hz=50`、不做策略帧间插值且不限速；LowCmd
-由独立发布线程以 `publish_hz=500` 重发最新策略目标，避免推理阻塞命令发布。
+由独立发布线程以 `publish_hz=50` 重发最新策略目标，避免推理阻塞命令发布。
 当前 `actions/instinct` checkpoint 是官方 InstinctLab onboard 导出，部署时必须使用旧版 `instinct_onboard` 的 shoulder-first 关节顺序；C++ player 已按这个顺序发送和解析 LowCmd/LowState。若改成 InstinctMJ 的 waist-first 顺序，典型现象是 stand 刚开始能顶住一小会儿，随后手、腿、身体乱摆。
 
 ## IMU Safety
@@ -173,10 +173,12 @@ blend 期间继续推进。warmup 和 current-pose hold 不消耗这 100 ms。tr
 preview commit 保持 candidate 首帧一致，因此显式旁路 activation blend，并记录
 `activation_blend_bypassed=preview_commit`。
 
-BFM、Unitree、BeyondMimic、Holosoma、ProtoMotions、TWIST、HumanoidGPT 和
-SteadyTray 的 active loop 已将低频推理与高频 LowCmd 发布解耦；Sonic、Instinct 和
-OmniXtreme 保留原有解耦线程并使用相同的 activation blend 语义。`runtime_metrics`
-记录 `publish_count`、`publish_deadline_miss` 和 `max_publish_interval_ms`。
+BFM、UFO、Unitree、ProtoMotions、TWIST、HumanoidGPT、SteadyTray、SONIC、
+Instinct 和 OmniXtreme 使用独立发布线程。BeyondMimic、mjlab 和 Holosoma
+保留同一循环中的推理与发布调度；推理耗时会延后该循环的命令发布。
+各入口使用相同的 activation blend 接口，但具体启动顺序由策略配置决定。
+独立发布路径的 `runtime_metrics` 包含发布次数、deadline miss 和最大间隔；
+同循环路径的统计字段以对应 player 实际输出为准。
 
 这些指标和 `activation_blend_started/completed` 只能证明进程内软件命令的顺序与
 连续性，不能证明 7110/7111 后固件已经完成物理 ownership 切换。真机仍需结合独立

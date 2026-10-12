@@ -29,6 +29,7 @@
 namespace fs = std::filesystem;
 using action_go::runtime::event_bool;
 using action_go::runtime::event_int;
+using action_go::runtime::event_number;
 using action_go::runtime::event_string;
 
 namespace
@@ -254,6 +255,17 @@ void applyActionField(MotionActionController::ActionConfig& action,
         action.ready_file = value;
     } else if (key == "start_file") {
         action.start_file = value;
+    } else if (key == "postrun_handoff_hold") {
+        action.postrun_handoff_hold = parseBool(value, false);
+    } else if (key == "handoff_complete_file") {
+        action.handoff_complete_file = value;
+    } else if (key == "handoff_release_file") {
+        action.handoff_release_file = value;
+    } else if (key == "switch_back_overlap_sec") {
+        action.switch_back_overlap_sec = std::stod(value);
+        if (action.switch_back_overlap_sec < 0.0) {
+            throw std::runtime_error("switch_back_overlap_sec must be >= 0");
+        }
     } else if (key == "switch_back_mode" || key == "internal_ctrl_mode" || key == "back_mode") {
         action.switch_back_mode = normalizeInternalMode(value);
     } else {
@@ -313,6 +325,14 @@ void applyDefaults(MotionActionController::ActionConfig& action,
             action.ready_file = defaults.config.ready_file;
         } else if (key == "start_file") {
             action.start_file = defaults.config.start_file;
+        } else if (key == "postrun_handoff_hold") {
+            action.postrun_handoff_hold = defaults.config.postrun_handoff_hold;
+        } else if (key == "handoff_complete_file") {
+            action.handoff_complete_file = defaults.config.handoff_complete_file;
+        } else if (key == "handoff_release_file") {
+            action.handoff_release_file = defaults.config.handoff_release_file;
+        } else if (key == "switch_back_overlap_sec") {
+            action.switch_back_overlap_sec = defaults.config.switch_back_overlap_sec;
         } else if (key == "switch_back_mode" || key == "internal_ctrl_mode" || key == "back_mode") {
             action.switch_back_mode = defaults.config.switch_back_mode;
         }
@@ -982,6 +1002,14 @@ bool MotionActionController::loadConfig(const std::string& config_path)
                 action.start_file = "/tmp/action_go_" + action.name + "_start";
             }
         }
+        if (action.postrun_handoff_hold) {
+            if (action.handoff_complete_file.empty()) {
+                action.handoff_complete_file = "/tmp/action_go_" + action.name + "_complete";
+            }
+            if (action.handoff_release_file.empty()) {
+                action.handoff_release_file = "/tmp/action_go_" + action.name + "_release";
+            }
+        }
     }
 
     if (actions_.empty()) {
@@ -1047,23 +1075,22 @@ void MotionActionController::logActionEvent(const std::string& event,
                     event_int("action_seq", static_cast<long long>(action.action_seq)),
                     event_string("ready_file", action.ready_file),
                     event_string("start_file", action.start_file),
+                    event_string("handoff_complete_file", action.handoff_complete_file),
+                    event_string("handoff_release_file", action.handoff_release_file),
                     event_string("payload_event_log", action.payload_event_log),
                     event_string("reason", reason)});
 }
 
 bool MotionActionController::startAction(const std::string& action_name)
 {
-    if (emergency_latched_.load()) {
-        setFailed("action rejected while emergency stop is latched; perform local reset");
-        return false;
-    }
     ActionConfig action;
     {
         std::lock_guard<std::mutex> lock(mutex_);
         const Status current_status = status_.load();
         if (current_status == Status::SwitchingToUserCtrl ||
             current_status == Status::Running ||
-            current_status == Status::SwitchingBack) {
+            current_status == Status::SwitchingBack ||
+            current_status == Status::SwitchBackBlocked) {
             last_error_ = "another motion action is running: " + current_action_;
             return false;
         }
@@ -1090,6 +1117,7 @@ bool MotionActionController::startAction(const std::string& action_name)
         last_error_.clear();
         cancel_requested_.store(false);
         suppress_switch_back_on_cancel_.store(false);
+        handoff_release_sent_.store(false);
         status_.store(Status::SwitchingToUserCtrl);
     }
     logActionEvent("action_triggered", action,
@@ -1137,7 +1165,7 @@ void MotionActionController::interruptForRecovery()
         return;
     }
 
-    // Unlike emergencyStop()/stopAndSwitchToOfficial(), keep the robot out of
+    // Unlike dampingStop()/stopAndSwitchToOfficial(), keep the robot out of
     // the official controller hand-back path.  The caller will immediately
     // start a recovery action (BFM-Zero) in UserCtrl.
     suppress_switch_back_on_cancel_.store(true);
@@ -1152,42 +1180,6 @@ void MotionActionController::interruptForRecovery()
     }
     setStatus(Status::Idle);
     suppress_switch_back_on_cancel_.store(false);
-}
-
-void MotionActionController::emergencyStop()
-{
-    std::cerr << "[MotionActionController] emergencyStop requested" << std::endl;
-    emergency_latched_.store(true);
-    if (dry_run_) {
-        cancel_requested_.store(true);
-        terminateRunningProcess(false);
-        joinWorkerIfJoinable();
-        setFailed("dry-run emergency stopped");
-        return;
-    }
-    suppress_switch_back_on_cancel_.store(true);
-    cancel_requested_.store(true);
-    terminateRunningProcess(true);
-    std::string damping_error;
-    if (!enterOfficialDamping(damping_error)) {
-        std::cerr << "[MotionActionController] emergencyStop damping warning: "
-                  << damping_error << std::endl;
-    }
-    joinWorkerIfJoinable();
-    setFailed("motion action emergency stopped and damping latched");
-}
-
-void MotionActionController::clearEmergencyLatch()
-{
-    if (isRunning()) return;
-    emergency_latched_.store(false);
-    suppress_switch_back_on_cancel_.store(false);
-    setStatus(Status::Idle);
-}
-
-bool MotionActionController::emergencyLatched() const
-{
-    return emergency_latched_.load();
 }
 
 void MotionActionController::dampingStop()
@@ -1207,8 +1199,6 @@ void MotionActionController::dampingStop()
     suppress_switch_back_on_cancel_.store(true);
     cancel_requested_.store(true);
 
-    // Force-stop the low-level action immediately. This is stronger than
-    // emergencyStop(): it does not wait for graceful player shutdown.
     terminateRunningProcess(true);
 
     std::string damping_error;
@@ -1256,53 +1246,38 @@ bool MotionActionController::stopAndSwitchToOfficial(const std::string& mode)
         return true;
     }
 
-    // Handoff ordering matters on real G1:
-    // if we stop the low-level BFM-Zero process first, the policy player handles
-    // SIGTERM by publishing a short damping/soft-stop command.  That creates a
-    // brief zero-torque/low-stiffness gap before official walkrun is ready,
-    // so the robot visibly "sags" and then stands again.  For a normal handoff,
-    // keep the user controller alive while requesting official control first;
-    // after the official controller has been asked to take over, stop the
-    // external action process.  Suppress the worker thread's own switch-back so
-    // this path is the single owner of the handoff.
+    const Status current_status = status_.load();
+    const bool cancel_before_rpc = current_status == Status::SwitchingToUserCtrl;
+    ActionConfig action = currentActionConfig();
+    action.switch_back_mode = normalized_mode;
+    // A stop racing the UserCtrl RPC still cancels early.  Once UserCtrl is
+    // stable, the payload must continue publishing through the official RPC
+    // and the configured overlap window.
     suppress_switch_back_on_cancel_.store(true);
-    cancel_requested_.store(true);
-    std::string action;
-    uint64_t action_seq = 0;
-    {
-        std::lock_guard<std::mutex> lock(mutex_);
-        action = current_action_;
-        action_seq = current_action_seq_;
-    }
-    event_log_.log("switch_back_req",
-                   {event_string("action", action),
-                    event_int("action_seq", static_cast<long long>(action_seq)),
-                    event_string("mode", normalized_mode),
-                    event_string("reason", "external_normal_stop")});
+    if (cancel_before_rpc) cancel_requested_.store(true);
     std::string switch_error;
-    const bool ok = switchBackToOfficial(switch_error, normalized_mode);
-    event_log_.log("switch_back_ret",
-                   {event_string("action", action),
-                    event_int("action_seq", static_cast<long long>(action_seq)),
-                    event_string("mode", normalized_mode),
-                    event_bool("ok", ok),
-                    event_string("reason", ok ? "external_normal_stop" : switch_error)});
-    if (ok) {
-        event_log_.log("controller_mode_confirmed",
-                       {event_string("action", action),
-                        event_int("action_seq", static_cast<long long>(action_seq)),
-                        event_string("mode", normalized_mode),
-                        event_string("confirmation", "switch_api_return")});
-    }
-
-    terminateRunningProcess(false);
-    joinWorkerIfJoinable();
-    suppress_switch_back_on_cancel_.store(false);
-
+    const bool ok = completeSwitchBack(action, normalized_mode,
+                                       "external_normal_stop", switch_error);
     if (!ok) {
-        setFailed("normal stop switch back failed: " + switch_error);
+        // The payload remains active and can be retried.  This is deliberately
+        // not Failed: dampingStop must remain available.
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            last_error_ = "normal stop switch back failed: " + switch_error;
+        }
+        setStatus(Status::SwitchBackBlocked);
         return false;
     }
+
+    const bool releasing_completed_hold = action.postrun_handoff_hold &&
+        supervisor_platform_ &&
+        supervisor_platform_->file_exists(action.handoff_complete_file);
+    if (!releasing_completed_hold) {
+        cancel_requested_.store(true);
+        terminateRunningProcess(false);
+    }
+    joinWorkerIfJoinable();
+    suppress_switch_back_on_cancel_.store(false);
 
     {
         std::lock_guard<std::mutex> lock(mutex_);
@@ -1314,10 +1289,22 @@ bool MotionActionController::stopAndSwitchToOfficial(const std::string& mode)
     return true;
 }
 
+MotionActionController::ActionConfig MotionActionController::currentActionConfig() const
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    const auto it = actions_.find(current_action_);
+    ActionConfig action = it == actions_.end() ? ActionConfig{} : it->second;
+    action.name = current_action_;
+    action.action_seq = current_action_seq_;
+    action.trial_id = current_trial_id_;
+    return action;
+}
+
 bool MotionActionController::isRunning() const
 {
     const Status s = status_.load();
-    return s == Status::SwitchingToUserCtrl || s == Status::Running || s == Status::SwitchingBack;
+    return s == Status::SwitchingToUserCtrl || s == Status::Running ||
+           s == Status::SwitchingBack || s == Status::SwitchBackBlocked;
 }
 
 bool MotionActionController::isDone() const
@@ -1367,6 +1354,7 @@ const char* MotionActionController::statusToString(Status status)
     case Status::SwitchingToUserCtrl: return "SwitchingToUserCtrl";
     case Status::Running: return "Running";
     case Status::SwitchingBack: return "SwitchingBack";
+    case Status::SwitchBackBlocked: return "SwitchBackBlocked";
     case Status::Done: return "Done";
     case Status::Failed: return "Failed";
     }
@@ -1386,6 +1374,8 @@ void MotionActionController::workerMain(ActionConfig action)
         }
         if (!supervisor_platform_->remove_file(action.ready_file, error)) return false;
         if (!supervisor_platform_->remove_file(action.start_file, error)) return false;
+        if (!supervisor_platform_->remove_file(action.handoff_complete_file, error)) return false;
+        if (!supervisor_platform_->remove_file(action.handoff_release_file, error)) return false;
         return true;
     };
 
@@ -1462,7 +1452,7 @@ void MotionActionController::workerMain(ActionConfig action)
                 return;
             }
             logActionEvent("start_file_touched", action, "dry_run");
-            payload_ok = waitRunningCommand(dry_command, error);
+            payload_ok = waitRunningCommand(dry_command, error, &action);
         } else {
             payload_ok = runCommandString(action, dry_command, error, "dry_run_payload");
         }
@@ -1566,12 +1556,6 @@ void MotionActionController::workerMain(ActionConfig action)
         setFailed(error);
         return;
     }
-    event_log_.log("controller_mode_confirmed",
-                   {event_string("action", action.name),
-                    event_int("action_seq", static_cast<long long>(action.action_seq)),
-                    event_string("mode", "userctrl"),
-                    event_string("confirmation", "switch_api_return")});
-
     if (payload_prestarted && !action.start_file.empty()) {
         if (!touchFile(action.start_file, error)) {
             terminateRunningProcess(false);
@@ -1588,7 +1572,7 @@ void MotionActionController::workerMain(ActionConfig action)
 
     setStatus(Status::Running);
     const bool payload_ok = payload_prestarted
-        ? waitRunningCommand(expandCommandTemplate(action), error)
+        ? waitRunningCommand(expandCommandTemplate(action), error, &action)
         : runActionPayload(action, error);
     if (!payload_ok) {
         const bool suppress_switch_back = suppress_switch_back_on_cancel_.load();
@@ -1609,7 +1593,8 @@ void MotionActionController::workerMain(ActionConfig action)
     }
     logActionEvent("action_exit", action, cancel_requested_.load() ? "canceled" : "done");
 
-    if (action.switch_back && !suppress_switch_back_on_cancel_.load()) {
+    if (action.switch_back && !suppress_switch_back_on_cancel_.load() &&
+        !handoff_release_sent_.load()) {
         setStatus(Status::SwitchingBack);
         if (!switchBackToOfficialLogged(error, action.switch_back_mode,
                                         action, "action_complete")) {
@@ -1666,11 +1651,6 @@ bool MotionActionController::switchBackToOfficialLogged(std::string& error_messa
                     event_bool("ok", ok),
                     event_string("reason", ok ? reason : error_message)});
     if (ok) {
-        event_log_.log("controller_mode_confirmed",
-                       {event_string("action", action.name),
-                        event_int("action_seq", static_cast<long long>(action.action_seq)),
-                        event_string("mode", normalizeInternalMode(mode)),
-                        event_string("confirmation", "switch_api_return")});
         if (reason.find("failure") != std::string::npos ||
             reason.find("failed") != std::string::npos ||
             reason.find("recovery") != std::string::npos) {
@@ -1682,6 +1662,62 @@ bool MotionActionController::switchBackToOfficialLogged(std::string& error_messa
         }
     }
     return ok;
+}
+
+bool MotionActionController::completeSwitchBack(const ActionConfig& action,
+                                                const std::string& mode,
+                                                const std::string& reason,
+                                                std::string& error_message)
+{
+    std::lock_guard<std::mutex> handoff_lock(switch_back_mutex_);
+    if (handoff_release_sent_.load()) return true;
+    setStatus(Status::SwitchingBack);
+    event_log_.log("switch_back_req",
+                   {event_string("action", action.name),
+                    event_string("mode", normalizeInternalMode(mode)),
+                    event_int("action_seq", static_cast<long long>(action.action_seq)),
+                    event_string("reason", reason)});
+    const bool ok = switchBackToOfficial(error_message, mode);
+    event_log_.log("switch_back_ret",
+                   {event_string("action", action.name),
+                    event_string("mode", normalizeInternalMode(mode)),
+                    event_int("action_seq", static_cast<long long>(action.action_seq)),
+                    event_bool("ok", ok),
+                    event_string("reason", ok ? reason : error_message)});
+    if (!ok) {
+        event_log_.log("switch_back_blocked",
+                       {event_string("action", action.name),
+                        event_int("action_seq", static_cast<long long>(action.action_seq)),
+                        event_string("mode", normalizeInternalMode(mode)),
+                        event_string("reason", error_message)});
+        setStatus(Status::SwitchBackBlocked);
+        return false;
+    }
+
+    event_log_.log("handoff_overlap_started",
+                   {event_string("action", action.name),
+                    event_int("action_seq", static_cast<long long>(action.action_seq)),
+                    event_number("overlap_sec", action.switch_back_overlap_sec),
+                    event_string("reason", reason)});
+    if (supervisor_platform_ && action.switch_back_overlap_sec > 0.0) {
+        supervisor_platform_->sleep_for(std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::duration<double>(action.switch_back_overlap_sec)));
+    }
+    if (!action.handoff_release_file.empty()) {
+        if (!touchFile(action.handoff_release_file, error_message)) {
+            setStatus(Status::SwitchBackBlocked);
+            event_log_.log("switch_back_blocked",
+                           {event_string("action", action.name),
+                            event_int("action_seq", static_cast<long long>(action.action_seq)),
+                            event_string("reason", error_message)});
+            return false;
+        }
+        logActionEvent("handoff_release_sent", action, reason);
+    } else {
+        logActionEvent("handoff_release_sent", action, reason + ":terminate_payload");
+    }
+    handoff_release_sent_.store(true);
+    return true;
 }
 
 bool MotionActionController::enterOfficialDamping(std::string& error_message)
@@ -1747,7 +1783,7 @@ bool MotionActionController::runCommandString(const ActionConfig& action,
                     event_int("pid", static_cast<long long>(running_pid_.load())),
                     event_string("phase", phase),
                     event_string("payload_event_log", action.payload_event_log)});
-    return waitRunningCommand(command, error_message);
+    return waitRunningCommand(command, error_message, &action);
 }
 
 bool MotionActionController::startCommandStringAsync(const std::string& command, std::string& error_message)
@@ -1795,7 +1831,8 @@ bool MotionActionController::startCommandStringAsync(const std::string& command,
     return true;
 }
 
-bool MotionActionController::waitRunningCommand(const std::string& command, std::string& error_message)
+bool MotionActionController::waitRunningCommand(const std::string& command, std::string& error_message,
+                                                const ActionConfig* action)
 {
     const pid_t pid = running_pid_.load();
     if (pid <= 0) {
@@ -1804,7 +1841,28 @@ bool MotionActionController::waitRunningCommand(const std::string& command, std:
     }
 
     action_go::runtime::SupervisorProcessResult process_result;
+    bool complete_seen = false;
     while (true) {
+        if (action && action->postrun_handoff_hold && !complete_seen &&
+            !action->handoff_complete_file.empty() &&
+            supervisor_platform_->file_exists(action->handoff_complete_file)) {
+            complete_seen = true;
+            logActionEvent("handoff_hold_started", *action, "complete_file_seen");
+            std::string handoff_error;
+            if (dry_run_) {
+                if (!touchFile(action->handoff_release_file, handoff_error)) {
+                    error_message = handoff_error;
+                    return false;
+                }
+                logActionEvent("handoff_release_sent", *action, "dry_run_no_control_switch");
+                handoff_release_sent_.store(true);
+            } else if (!completeSwitchBack(*action, action->switch_back_mode,
+                                           "action_complete_hold", handoff_error)) {
+                error_message = handoff_error;
+                // Keep polling the payload in SwitchBackBlocked.  A later
+                // external retry can complete the RPC and release the hold.
+            }
+        }
         {
             std::lock_guard<std::mutex> process_lock(process_mutex_);
             if (running_pid_.load() != pid) {
@@ -2049,6 +2107,8 @@ std::string MotionActionController::expandCommandTemplate(const ActionConfig& ac
     replaceAll(command, "{motion_end_step}", std::to_string(action.max_frames));
     replaceAll(command, "{ready_file}", action.ready_file);
     replaceAll(command, "{start_file}", action.start_file);
+    replaceAll(command, "{handoff_complete_file}", action.handoff_complete_file);
+    replaceAll(command, "{handoff_release_file}", action.handoff_release_file);
     replaceAll(command, "{payload_event_log}", action.payload_event_log);
     replaceAll(command, "{supervisor_event_log}", action.supervisor_event_log);
     replaceAll(command, "{event_log_arg}", action.event_log_arg);

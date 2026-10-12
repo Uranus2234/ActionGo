@@ -20,8 +20,20 @@ ALWAYS_EXCLUDED = {
     "tools/experiments",
     "docs/papers",
     "AGENTS.md",
+    "build",
+    "build-debug",
+    "CMakeFiles",
+    "{handoff_complete_file}",
+    "docs/GPT_PRO_REVIEW_PROMPT.md",
+    "docs/open_source_plan.md",
+    "tools/motion_prior",
+    "runtime/tests/test_motion_prior.py",
 }
-EXCLUDED_PREFIXES = ("docs/actiongo_", "docs/preview_handoff_runtime.md")
+EXCLUDED_PREFIXES = (
+    "docs/actiongo_", "docs/preview_handoff_runtime.md",
+    "docs/MOTION_PRIOR_RESIDUAL_BRIDGE_",
+    "config/motion_prior_",
+)
 COMPILED_SUFFIXES = {".so", ".a", ".o", ".pyc"}
 MANAGED_SUFFIXES = {
     ".onnx", ".onnx.data", ".npz", ".npy", ".pkl", ".pt", ".pth",

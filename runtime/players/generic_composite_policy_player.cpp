@@ -75,6 +75,7 @@ Cli parse_cli(int argc, char** argv) {
           k == "--onnx-threads" || k == "--mode-machine" || k == "--motion-start-frame" ||
           k == "--motion-start-step" || k == "--max-frames" || k == "--max-steps" ||
           k == "--duration-sec" || k == "--startup-interp-sec" ||
+          k == "--activation-blend-sec" ||
           k == "--target-interp-sec" || k == "--residual-gain" ||
           k == "--initial-noise-scale" || k == "--stats-interval" ||
           k == "--warmup-iters" || k == "--prepare-ramp-sec" || k == "--prepare-hold-sec";
@@ -246,6 +247,7 @@ int main(int argc, char** argv) {
     const YAML::Node handoff = y["handoff"];
     const YAML::Node trt = y["tensorrt"];
     const YAML::Node action = y["action"];
+    const YAML::Node safety = y["safety"];
     require_node(robot, "robot");
     require_node(model, "model");
     require_node(motion, "motion");
@@ -274,6 +276,7 @@ int main(int argc, char** argv) {
     add_scalar<int>(args, "--publish-hz", runtime, "publish_hz");
     add_scalar<int>(args, "--onnx-threads", runtime, "onnx_threads");
     add_scalar<int>(args, "--mode-machine", handoff, "mode_machine");
+    add_scalar<double>(args, "--activation-blend-sec", handoff, "activation_blend_sec");
     add_scalar<int>(args, "--motion-start-frame", motion, "start_frame");
     add_scalar<int>(args, "--max-frames", motion, "max_frames");
     add_scalar<double>(args, "--duration-sec", runtime, "duration_sec");
@@ -288,7 +291,14 @@ int main(int argc, char** argv) {
     add_scalar<double>(args, "--prepare-hold-sec", runtime, "prepare_hold_sec");
     add_bool_flag(args, "--trt-fp16", trt, "fp16");
     add_bool_inverse_flag(args, "--no-trt-fp16", trt, "fp16");
+    add_bool_flag(args, "--clip-envelope", action, "clip_envelope");
+    add_bool_inverse_flag(args, "--no-clip-envelope", action, "clip_envelope");
     add_bool_flag(args, "--joint-limit-clamp", action, "joint_limit_clamp");
+    if (safety && safety["joint_limit_enabled"]) {
+      args.push_back(safety["joint_limit_enabled"].as<bool>()
+                         ? "--safety-joint-limit"
+                         : "--no-safety-joint-limit");
+    }
     add_bool_inverse_flag(args, "--no-friction-feedforward", action, "friction_feedforward");
     append_legacy_args(args, y);
     if (!cli.event_log.empty()) {

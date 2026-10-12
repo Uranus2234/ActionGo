@@ -1,0 +1,55 @@
+# ActionGo Generic Policy Runtime V1 simulation-parity spec.
+name: generic_mjlab_dance1_subject2_sim
+runtime:
+  template: embedded_mimic_time
+  variant: beyondmimic
+  inference_hz: 50
+  publish_hz: 500
+  onnx_threads: 1
+  startup_interp_sec: 0.0
+  max_frames: 6574
+  stats_interval: 50
+  dry_run_duration_sec: 1.0
+robot:
+  params: ReverseVault.yaml
+  motor_count: 29
+model:
+  path: ../model/dance1_subject2_29999.onnx
+  input_names: [obs, time_step]
+  output_names: [actions, joint_pos, joint_vel, body_quat_w]
+  obs_input: obs
+observation:
+  builder: beyondmimic
+  obs_dim: 154
+  terms: [ref_joint_pos, ref_joint_vel, anchor_rotation_3x2, gyro, q_minus_default, dq, last_action]
+mimic_time:
+  time_input_name: time_step
+  time_step_source: counter
+  internal_reference_outputs: [joint_pos, joint_vel, body_quat_w]
+  warmup_steps: 2
+  initial_reference_step: 1
+  policy_step_source: lowstate_tick
+  policy_tick_ms: 20
+  sim_lockstep_sequence: true
+  ref_body_count: 14
+  anchor_body_index: 7
+  yaw_alignment: none
+  max_frames: 6574
+action:
+  type: target_q
+  action_dim: 29
+  scale_from_params: action_scale
+  add_default: true
+handoff:
+  cmd_topic: rt/lowcmd
+  state_topic: rt/lowstate
+  mode_machine: 5
+  damping_on_stop: false
+safety:
+  profile: simulation_parity
+  enabled: true
+  finite_check: true
+  joint_limit_enabled: false
+  lowstate_timeout_enabled: true
+  lowstate_timeout_sec: 0.2
+  max_position_step_enabled: false

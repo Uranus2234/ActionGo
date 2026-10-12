@@ -216,14 +216,20 @@ const std::vector<PolicyProtocolConstraint>& constraints() {
        "Unitree G1 29DoF",
        true,
        false,
-       "SONIC uses encoder and decoder ONNX sessions; TensorRT is selected by runtime configuration",
+       "SONIC uses encoder, decoder, and V2 locomotion planner ONNX sessions; TensorRT is selected by runtime configuration",
        kUnitreeG1ProtocolMotorCount,
        kSonicDecoderObsDim,
        kUnitreeG1ProtocolMotorCount,
        {},
        {},
        {{"encoder", {"obs_dict"}, {"encoded_tokens"}},
-        {"decoder", {"obs_dict"}, {"action"}}},
+        {"decoder", {"obs_dict"}, {"action"}},
+        {"planner",
+         {"context_mujoco_qpos", "target_vel", "mode", "movement_direction",
+          "facing_direction", "random_seed", "has_specific_target",
+          "specific_target_positions", "specific_target_headings",
+          "allowed_pred_num_tokens", "height"},
+         {"mujoco_qpos", "num_pred_frames"}}},
        kSonicTokenDim,
        kSonicHistoryLen,
        0,
@@ -241,6 +247,12 @@ const std::vector<PolicyProtocolConstraint>& constraints() {
        0,
        0,
        0},
+      {"php", "Unitree G1 29DoF", true, false, "",
+       kUnitreeG1ProtocolMotorCount, kPhpProtocolObsDim, kUnitreeG1ProtocolMotorCount,
+       {}, {},
+       {{"depth_encoder", {"depth_image"}, {"depth_latent"}},
+        {"actor", {"obs", "time_step"}, {"actions", "joint_pos", "joint_vel", "body_pos_w", "body_quat_w", "body_lin_vel_w", "body_ang_vel_w"}}},
+       kPhpProtocolDepthLatentDim, 1, 108, {}, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
       {"instinct_parkour",
        "Unitree G1 29DoF",
        true,
@@ -386,8 +398,7 @@ std::vector<PolicyNamedDim> protocol_named_dims_for_variant(const std::string& v
     return {{"base_obs_dim", kUnitreeRlMjlabProtocolBaseObsDim}};
   }
   if (variant_name == "beyondmimic") {
-    return {{"ref_body_count", kBeyondMimicProtocolRefBodyCount},
-            {"anchor_body_index", kBeyondMimicProtocolRefAnchorIndex}};
+    return {{"ref_body_count", kBeyondMimicProtocolRefBodyCount}};
   }
   if (variant_name == "twist") {
     return {{"mimic_dim", kTwistProtocolMimicDim},
@@ -406,6 +417,7 @@ std::vector<PolicyNamedDim> protocol_named_dims_for_variant(const std::string& v
   }
   if (variant_name == "sonic") {
     return {{"encoder_obs_dim", kSonicEncoderObsDim},
+            {"encoder_obs_dim_v1_1", kSonicV11EncoderObsDim},
             {"token_dim", kSonicTokenDim},
             {"history_len", kSonicHistoryLen},
             {"smpl_joint_count", kSonicSmplJointCount},
@@ -413,7 +425,11 @@ std::vector<PolicyNamedDim> protocol_named_dims_for_variant(const std::string& v
             {"smpl_reference_frames", kSonicSmplReferenceFrames},
             {"reference_frames", kSonicReferenceFrames},
             {"reference_step", kSonicReferenceStep},
-            {"zmq_header_size", kSonicZmqHeaderSize}};
+            {"zmq_header_size", kSonicZmqHeaderSize},
+            {"planner_context_frames", kSonicPlannerContextFrames},
+            {"planner_qpos_dim", kSonicPlannerQposDim},
+            {"planner_output_frames", kSonicPlannerOutputFrames},
+            {"planner_mode_count", kSonicPlannerModeCount}};
   }
   if (variant_name == "instinct_parkour" || variant_name == "instinct") {
     return {{"proprio_dim", kInstinctProtocolProprioDim},
@@ -436,6 +452,12 @@ std::vector<PolicyNamedDim> protocol_named_dims_for_variant(const std::string& v
 }
 
 std::vector<PolicyYamlDimRule> protocol_yaml_dim_rules_for_variant(const std::string& variant_name) {
+  if (variant_name == "php") {
+    return {{"observation.proprio_dim", 108, "PHP proprio and command dim"},
+            {"observation.depth_latent_dim", kPhpProtocolDepthLatentDim, "PHP depth latent dim"},
+            {"observation.command_dim", kPhpProtocolCommandDim, "PHP command dim"},
+            {"observation.history_len", 1, "PHP history len"}};
+  }
   if (variant_name == "bfm_zero") {
     return {{"observation.latent_dim", kBfmProtocolLatentDim, "BFM-Zero latent dim"},
             {"observation.history_steps", kBfmProtocolHistorySteps, "BFM-Zero history steps"}};
@@ -444,8 +466,7 @@ std::vector<PolicyYamlDimRule> protocol_yaml_dim_rules_for_variant(const std::st
     return {{"observation.base_obs_dim", kUnitreeRlMjlabProtocolBaseObsDim, "unitree base obs dim"}};
   }
   if (variant_name == "beyondmimic") {
-    return {{"mimic_time.ref_body_count", kBeyondMimicProtocolRefBodyCount, "BeyondMimic ref body count"},
-            {"mimic_time.anchor_body_index", kBeyondMimicProtocolRefAnchorIndex, "BeyondMimic anchor body index"}};
+    return {{"mimic_time.ref_body_count", kBeyondMimicProtocolRefBodyCount, "BeyondMimic ref body count"}};
   }
   if (variant_name == "twist") {
     return {{"motion_command.mimic_dim", kTwistProtocolMimicDim, "TWIST motion_command.mimic_dim"},

@@ -1,0 +1,63 @@
+# ActionGo Generic Policy Runtime V1 spec.
+# MJLab Reverse Vault: embedded reference + robot state -> scaled joint targets.
+name: generic_mjlab_reverse_vault_flat
+runtime:
+  template: embedded_mimic_time
+  variant: beyondmimic
+  inference_hz: 50
+  publish_hz: 500
+  onnx_threads: 1
+  # Keep the embedded motion timing intact.  Long first-target ramps delay the
+  # opening support transition and are unsafe on hardware.
+  startup_interp_sec: 0.0
+  max_frames: 368
+  stats_interval: 50
+  dry_run_duration_sec: 1.0
+robot:
+  params: ReverseVault.yaml
+  motor_count: 29
+model:
+  path: ../model/reverse_vault_flat_28000.onnx
+  input_names: [obs, time_step]
+  output_names: [actions, joint_pos, joint_vel, body_quat_w]
+  obs_input: obs
+observation:
+  builder: beyondmimic
+  obs_dim: 154
+  terms: [ref_joint_pos, ref_joint_vel, anchor_rotation_3x2, gyro, q_minus_default, dq, last_action]
+mimic_time:
+  time_input_name: time_step
+  time_step_source: counter
+  internal_reference_outputs: [joint_pos, joint_vel, body_quat_w]
+  # Match the BeyondMimic player contract: hold current pose for two
+  # policy cycles before the first action target is released.
+  warmup_steps: 2
+  # The training checkout predates mjlab issue #1138/#1139: env.reset()
+  # performs an extra MotionCommand update, so the first policy observation
+  # is aligned with reference frame 1 rather than frame 0.
+  initial_reference_step: 1
+  ref_body_count: 14
+  anchor_body_index: 7
+  yaw_alignment: anchor_yaw
+  max_frames: 368
+action:
+  type: target_q
+  action_dim: 29
+  scale_from_params: action_scale
+  add_default: true
+handoff:
+  cmd_topic: rt/user_lowcmd
+  state_topic: rt/lowstate
+  mode_machine: 5
+  damping_on_stop: false
+safety:
+  profile: hardware
+  enabled: true
+  finite_check: true
+  # MJLab position actuators allow PD setpoints outside the mechanical
+  # joint range; MuJoCo/Unitree enforce torque limits instead.  Keep the
+  # shared finite/stale/kp/kd checks, but do not rewrite the trained target.
+  joint_limit_enabled: false
+  lowstate_timeout_enabled: true
+  lowstate_timeout_sec: 0.2
+  max_position_step_enabled: false

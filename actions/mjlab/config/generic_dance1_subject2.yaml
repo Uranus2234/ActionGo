@@ -1,0 +1,59 @@
+# ActionGo Generic Policy Runtime V1 spec.
+# MJLab LAFAN1 dance1_subject2: embedded reference + robot state -> joint targets.
+name: generic_mjlab_dance1_subject2
+runtime:
+  template: embedded_mimic_time
+  variant: beyondmimic
+  inference_hz: 50
+  publish_hz: 500
+  onnx_threads: 1
+  # Preserve the embedded motion clock. The reference begins away from the
+  # default standing pose; this spec intentionally does not hide that with a
+  # runtime target interpolation.
+  startup_interp_sec: 0.0
+  max_frames: 6574
+  stats_interval: 50
+  dry_run_duration_sec: 1.0
+robot:
+  # This training run uses exactly the same 29-DoF G1 order, gains, default
+  # pose and action scale recorded in the shared MJLab tracking parameters.
+  params: ReverseVault.yaml
+  motor_count: 29
+model:
+  path: ../model/dance1_subject2_29999.onnx
+  input_names: [obs, time_step]
+  output_names: [actions, joint_pos, joint_vel, body_quat_w]
+  obs_input: obs
+observation:
+  builder: beyondmimic
+  obs_dim: 154
+  terms: [ref_joint_pos, ref_joint_vel, anchor_rotation_3x2, gyro, q_minus_default, dq, last_action]
+mimic_time:
+  time_input_name: time_step
+  time_step_source: counter
+  internal_reference_outputs: [joint_pos, joint_vel, body_quat_w]
+  warmup_steps: 2
+  # The saved training checkout advances MotionCommand once during reset.
+  initial_reference_step: 1
+  ref_body_count: 14
+  anchor_body_index: 7
+  yaw_alignment: anchor_yaw
+  max_frames: 6574
+action:
+  type: target_q
+  action_dim: 29
+  scale_from_params: action_scale
+  add_default: true
+handoff:
+  cmd_topic: rt/user_lowcmd
+  state_topic: rt/lowstate
+  mode_machine: 5
+  damping_on_stop: false
+safety:
+  profile: hardware
+  enabled: true
+  finite_check: true
+  joint_limit_enabled: false
+  lowstate_timeout_enabled: true
+  lowstate_timeout_sec: 0.2
+  max_position_step_enabled: false

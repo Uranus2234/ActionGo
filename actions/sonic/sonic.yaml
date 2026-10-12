@@ -6,9 +6,9 @@ actions:
       switch_back: true
       switch_back_mode: walkrun
       prestart_ready_timeout_sec: 180.0
-      params: config/generic_sonic.yaml
+      params: config/generic_sonic_v1_1.yaml
       trajectory: motions/squat_001__A359
-      command: "{action_go_root}/build/generic_motion_tracking_player --net {net} --cmd-topic rt/user_lowcmd --state-topic rt/lowstate --spec {params} --input offline-csv --trajectory {trajectory} --ep tensorrt --trt-cache-dir /tmp/action_go_sonic_trt_cache --ready-file {ready_file} --start-file {start_file} --no-damping-on-stop {event_log_arg}"
+      command: "{action_go_root}/build/generic_motion_tracking_player --net {net} --cmd-topic rt/user_lowcmd --state-topic rt/lowstate --spec {params} --input offline-csv --trajectory {trajectory} --ep tensorrt --trt-cache-dir /tmp/action_go_sonic_v1_1_trt_cache --ready-file {ready_file} --start-file {start_file} --no-damping-on-stop {event_log_arg}"
 
     sonic_realtime_g1:
       safety_enable: true
@@ -18,8 +18,8 @@ actions:
       prestart_before_userctrl: true
       stop_loco_before_start: false
       prestart_ready_timeout_sec: 180.0
-      params: config/generic_sonic.yaml
-      command: "{action_go_root}/build/generic_motion_tracking_player --net {net} --cmd-topic rt/user_lowcmd --state-topic rt/lowstate --spec {params} --input realtime-zmq --zmq-connect --zmq-endpoint tcp://127.0.0.1:5556 --zmq-topic pose --require-realtime --input-timeout-sec 3.0 --stale-sec 0.1 --ep tensorrt --trt-cache-dir /tmp/action_go_sonic_trt_cache --ready-file {ready_file} --start-file {start_file} --no-damping-on-stop {event_log_arg}"
+      params: config/generic_sonic_v1_1.yaml
+      command: "{action_go_root}/build/generic_motion_tracking_player --net {net} --cmd-topic rt/user_lowcmd --state-topic rt/lowstate --spec {params} --input realtime-zmq --zmq-connect --zmq-endpoint tcp://127.0.0.1:5556 --zmq-topic pose --require-realtime --input-timeout-sec 3.0 --stale-sec 0.1 --ep tensorrt --trt-cache-dir /tmp/action_go_sonic_v1_1_trt_cache --ready-file {ready_file} --start-file {start_file} --no-damping-on-stop {event_log_arg}"
 
     sonic_pico_teleop:
       safety_enable: true
@@ -29,5 +29,5 @@ actions:
       prestart_before_userctrl: true
       stop_loco_before_start: false
       prestart_ready_timeout_sec: 45.0
-      params: config/generic_sonic.yaml
+      params: config/generic_sonic_v1_1.yaml
       command: "bash {action_go_root}/tools/launch/run_sonic_pico.sh --net {net} --cmd-topic rt/user_lowcmd --state-topic rt/lowstate --spec {params} --ready-file {ready_file} --start-file {start_file} --no-damping-on-stop {event_log_arg}"

@@ -27,7 +27,12 @@ using action_go::runtime::PolicyTemplateId;
 using action_go::runtime::PolicyYamlDimRule;
 using action_go::runtime::kSonicDecoderObsDim;
 using action_go::runtime::kSonicEncoderObsDim;
+using action_go::runtime::kSonicV11EncoderObsDim;
 using action_go::runtime::kSonicHistoryLen;
+using action_go::runtime::kSonicPlannerContextFrames;
+using action_go::runtime::kSonicPlannerModeCount;
+using action_go::runtime::kSonicPlannerOutputFrames;
+using action_go::runtime::kSonicPlannerQposDim;
 using action_go::runtime::kSonicReferenceFrames;
 using action_go::runtime::kSonicReferenceStep;
 using action_go::runtime::kSonicSmplJointCount;
@@ -66,6 +71,16 @@ std::string lower(std::string s) {
 
 bool present(const YAML::Node& node) {
   return node && node.IsDefined() && !node.IsNull();
+}
+
+int sonic_encoder_obs_dim_for_spec(const YAML::Node& y) {
+  const YAML::Node checkpoint_node = yamlc::optional_node(y, "runtime.checkpoint");
+  const std::string checkpoint = present(checkpoint_node)
+      ? lower(checkpoint_node.as<std::string>())
+      : "default";
+  if (checkpoint == "default") return kSonicEncoderObsDim;
+  if (checkpoint == "sonic_v1_1") return kSonicV11EncoderObsDim;
+  throw std::runtime_error("unsupported SONIC runtime.checkpoint: " + checkpoint);
 }
 
 Args parse_args(int argc, char** argv) {
@@ -359,6 +374,15 @@ void validate_source_sections(const fs::path& spec,
       yamlc::required_scalar<std::string>(y, "mimic_time.time_input_name");
       yamlc::required_scalar<std::string>(y, "mimic_time.time_step_source");
       yamlc::required_vector<std::string>(y, "mimic_time.internal_reference_outputs");
+      if (lower(yamlc::required_scalar<std::string>(y, "runtime.variant")) == "beyondmimic") {
+        const int ref_body_count = yamlc::required_scalar<int>(y, "mimic_time.ref_body_count");
+        const int anchor_body_index = yamlc::required_scalar<int>(y, "mimic_time.anchor_body_index");
+        if (ref_body_count != protocol.ref_body_count ||
+            anchor_body_index != protocol.ref_anchor_index) {
+          throw std::runtime_error(
+              "BeyondMimic mimic_time ref_body_count/anchor_body_index do not match protocol constraint");
+        }
+      }
       break;
     case PolicyTemplateId::kMotionConditionedTracking: {
       const std::string variant = lower(yamlc::required_scalar<std::string>(y, "runtime.variant"));
@@ -389,7 +413,10 @@ void validate_source_sections(const fs::path& spec,
         if (source == "offline-csv") {
           require_existing_path(spec, yamlc::required_scalar<std::string>(y, "reference.path"), "reference.path", true);
         }
-        require_matching_int(y, {"observation.encoder_obs_dim"}, kSonicEncoderObsDim, "SONIC encoder obs dim");
+        require_existing_path(spec, yamlc::required_scalar<std::string>(y, "observation.config"),
+                              "observation.config", false);
+        require_matching_int(y, {"observation.encoder_obs_dim"},
+                             sonic_encoder_obs_dim_for_spec(y), "SONIC encoder obs dim");
         require_matching_int(y, {"observation.token_dim"}, kSonicTokenDim, "SONIC token dim");
         require_matching_int(y, {"observation.history_len"}, kSonicHistoryLen, "SONIC history len");
         require_matching_int(y, {"observation.smpl_joint_count"}, kSonicSmplJointCount, "SONIC SMPL joint count");
@@ -401,6 +428,31 @@ void validate_source_sections(const fs::path& spec,
         const auto protocol_versions = yamlc::required_vector<int>(y, "reference.zmq_protocol_versions");
         if (protocol_versions != std::vector<int>({1, 2, 3})) {
           throw std::runtime_error("reference.zmq_protocol_versions must be [1, 2, 3]");
+        }
+        if (!yamlc::required_scalar<bool>(y, "planner.enabled")) {
+          throw std::runtime_error("SONIC planner.enabled must be true for the public sonic variant");
+        }
+        require_matching_int(y, {"planner.version"}, 2, "SONIC planner version");
+        require_matching_int(y, {"planner.inference_hz"}, 10, "SONIC planner inference Hz");
+        require_matching_int(y, {"planner.output_hz"}, 30, "SONIC planner output Hz");
+        require_matching_int(y, {"planner.reference_hz"}, 50, "SONIC planner reference Hz");
+        require_matching_int(y, {"planner.context_frames"}, kSonicPlannerContextFrames, "SONIC planner context frames");
+        require_matching_int(y, {"planner.context_qpos_dim"}, kSonicPlannerQposDim, "SONIC planner qpos dim");
+        require_matching_int(y, {"planner.max_output_frames"}, kSonicPlannerOutputFrames, "SONIC planner output frames");
+        require_matching_int(y, {"planner.min_output_frames"}, 24, "SONIC planner minimum output frames");
+        require_matching_int(y, {"planner.mode_count"}, kSonicPlannerModeCount, "SONIC planner mode count");
+        require_matching_int(y, {"planner.lookahead_steps"}, 2, "SONIC planner lookahead");
+        require_matching_int(y, {"planner.blend_frames"}, 8, "SONIC planner blend frames");
+        const float planner_height = yamlc::required_scalar<float>(y, "planner.default_height");
+        if (!std::isfinite(planner_height) || std::abs(planner_height - 0.788740f) > 1e-6f) {
+          throw std::runtime_error("planner.default_height differs from the V2 deployment value 0.788740");
+        }
+        if (yamlc::required_scalar<int64_t>(y, "planner.random_seed") != 1234) {
+          throw std::runtime_error("planner.random_seed differs from the V2 deployment value 1234");
+        }
+        if (yamlc::required_vector<int64_t>(y, "planner.allowed_pred_num_tokens") !=
+            std::vector<int64_t>({0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0})) {
+          throw std::runtime_error("planner.allowed_pred_num_tokens differs from the V2 TensorRT deployment mask");
         }
       }
       break;
@@ -508,10 +560,41 @@ void validate_params(const YAML::Node& y,
     validate_standard_robot_vectors(params, motor_count, true, true);
     require_matching_int(params, {"policy.num_actions", "num_actions"}, action_dim, "SONIC action dim");
     require_matching_int(params, {"policy.decoder_obs_dim"}, kSonicDecoderObsDim, "SONIC decoder obs dim");
-    require_matching_int(params, {"policy.encoder_obs_dim"}, kSonicEncoderObsDim, "SONIC encoder obs dim");
+    require_matching_int(params, {"policy.encoder_obs_dim"},
+                         sonic_encoder_obs_dim_for_spec(y), "SONIC encoder obs dim");
     require_matching_int(params, {"policy.token_dim"}, kSonicTokenDim, "SONIC token dim");
     require_permutation_one_of(params, {"robot.isaaclab_to_hardware"}, motor_count, "SONIC IsaacLab to hardware map");
     require_permutation_one_of(params, {"robot.hardware_to_isaaclab"}, motor_count, "SONIC hardware to IsaacLab map");
+  } else if (variant == "php") {
+    validate_standard_robot_vectors(params, motor_count, true, true, "robot.policy_joint_order");
+    require_permutation_one_of(params, {"robot.joint_map"}, motor_count, "PHP joint map");
+    require_vector_one_of<float>(params, {"robot.joint_signs"}, static_cast<size_t>(motor_count), "PHP joint signs");
+    require_vector_one_of<float>(params, {"robot.default_velocities"}, static_cast<size_t>(motor_count), "PHP default velocities");
+    require_vector_one_of<float>(params, {"robot.startup_angles"}, static_cast<size_t>(motor_count), "PHP startup pose");
+    require_vector_one_of<float>(params, {"robot.startup_kp"}, static_cast<size_t>(motor_count), "PHP startup kp");
+    require_vector_one_of<float>(params, {"robot.startup_kd"}, static_cast<size_t>(motor_count), "PHP startup kd");
+    if (yamlc::required_vector<int>(y, "observation.depth_input_shape") != std::vector<int>{1, 58, 87})
+      throw std::runtime_error("PHP depth_input_shape must be [1,58,87]");
+    const auto source = yamlc::required_scalar<std::string>(y, "sensor.depth_source");
+    if (source != "shm" && source != "zero" && source != "realsense") throw std::runtime_error("PHP depth source must be realsense, shm or zero");
+    if (source == "realsense") {
+      yamlc::required_scalar<int>(y, "sensor.rs_width");
+      yamlc::required_scalar<int>(y, "sensor.rs_height");
+      yamlc::required_scalar<int>(y, "sensor.rs_fps");
+      if (!yamlc::required_scalar<bool>(y, "sensor.require_depth_camera") ||
+          !yamlc::required_scalar<bool>(y, "sensor.require_torso_imu") ||
+          yamlc::required_scalar<bool>(y, "sensor.disable_torso_imu"))
+        throw std::runtime_error("PHP hardware requires RealSense and torso IMU before ready");
+    }
+    yamlc::required_scalar<float>(y, "safety.kp_max");
+    yamlc::required_scalar<float>(y, "safety.kd_max");
+    const auto command_limits = yamlc::required_scalar<std::string>(y, "safety.command_limit_source");
+    if (command_limits != "joint_position" && command_limits != "simulation_model_action" && command_limits != "pd_torque")
+      throw std::runtime_error("PHP command_limit_source must be joint_position, pd_torque or simulation_model_action");
+    if (command_limits == "simulation_model_action" && yamlc::required_scalar<std::string>(y, "runtime.net") != "lo")
+      throw std::runtime_error("PHP simulation command limits require runtime.net=lo");
+    require_matching_int(params, {"depth.height"}, 58, "PHP depth height");
+    require_matching_int(params, {"depth.width"}, 87, "PHP depth width");
   } else if (variant == "instinct_parkour" || variant == "instinct") {
     require_matching_int(params, {"robot.motor_count"}, motor_count, "Instinct motor count");
     validate_standard_robot_vectors(params, motor_count, true, true, "robot.policy_joint_order");
@@ -583,6 +666,15 @@ void check_spec(const fs::path& raw_spec, bool strict_onnx) {
   yamlc::required_scalar<std::string>(y, "handoff.state_topic");
   require_positive_int(y, "handoff.mode_machine");
   yamlc::required_scalar<bool>(y, "handoff.damping_on_stop");
+  const YAML::Node handoff = y["handoff"];
+  const double activation_blend_sec = handoff && handoff["activation_blend_sec"]
+      ? handoff["activation_blend_sec"].as<double>()
+      : 0.10;
+  if (!std::isfinite(activation_blend_sec) || activation_blend_sec < 0.0 ||
+      activation_blend_sec > 5.0) {
+    throw std::runtime_error(
+        "handoff.activation_blend_sec must be finite and within [0, 5]");
+  }
 
   const fs::path params = require_existing_path(spec, yamlc::required_scalar<std::string>(y, "robot.params"), "robot.params");
   validate_model(spec, y, strict_onnx, *contract, *protocol);

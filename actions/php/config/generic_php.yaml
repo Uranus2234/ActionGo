@@ -1,0 +1,62 @@
+name: generic_php
+runtime:
+  template: depth_conditioned_actor
+  variant: php
+  inference_hz: 50
+  publish_hz: 500
+  onnx_threads: 2
+  stats_interval: 50
+robot:
+  params: PHPParams.yaml
+  motor_count: 29
+model:
+  logdir: ..
+  sessions:
+    depth_encoder:
+      path: ../model/depth_backbone.onnx
+      input_names: [depth_image]
+      output_names: [depth_latent]
+    actor:
+      path: ../model/student.onnx
+      input_names: [obs, time_step]
+      output_names: [actions, joint_pos, joint_vel, body_pos_w, body_quat_w, body_lin_vel_w, body_ang_vel_w]
+observation:
+  obs_dim: 140
+  proprio_dim: 108
+  command_dim: 15
+  history_len: 1
+  depth_input_shape: [1, 58, 87]
+  depth_latent_dim: 32
+sensor:
+  depth_source: realsense
+  shm_name: depth_img_shm
+  rs_width: 848
+  rs_height: 480
+  rs_fps: 10
+  require_depth_camera: true
+  min_depth_camera_frames: 3
+  depth_camera_timeout_sec: 0.5
+  require_torso_imu: true
+  torso_imu_timeout_sec: 0.2
+  disable_torso_imu: false
+startup:
+  cold_start_before_policy: false
+  startup_sec: 1.0
+  startup_hold_sec: 0.5
+  target_interp_sec: 0.0
+  target_rate_limit: 0.0
+  use_normalizer: false
+handoff:
+  cmd_topic: rt/user_lowcmd
+  state_topic: rt/lowstate
+  mode_machine: 5
+  activation_blend_sec: 0.10
+  damping_on_stop: false
+action:
+  type: target_q
+  action_dim: 29
+  clip_by_torque: false
+safety:
+  command_limit_source: pd_torque
+  kp_max: 350
+  kd_max: 20

@@ -1,7 +1,12 @@
+#include "action_go/runtime/activation_blend.h"
+#include "action_go/runtime/async_trace_writer.h"
 #include "action_go/runtime/command_safety_filter.h"
+#include "action_go/runtime/depth_image_preprocessor.h"
+#include "action_go/runtime/depth_monitor_publisher.h"
 #include "action_go/runtime/event_logger.h"
 #include "action_go/runtime/policy_protocol.h"
 #include "action_go/runtime/preview_lifecycle.h"
+#include "action_go/runtime/shared_memory_depth_stream.h"
 #include "action_go/runtime/yaml_contract.h"
 
 #include <onnxruntime_cxx_api.h>
@@ -19,6 +24,7 @@
 
 #ifdef ACTION_GO_WITH_REALSENSE
 #include <librealsense2/rs.hpp>
+#include <librealsense2/rsutil.h>
 #endif
 
 #include <algorithm>
@@ -57,6 +63,8 @@ std::atomic<bool> g_stop_requested{false};
 void signal_handler(int) { g_stop_requested.store(true); }
 
 using action_go::runtime::CommandSafetyConfig;
+using action_go::runtime::ActivationBlend;
+using action_go::runtime::JointCommand;
 using action_go::runtime::CommandSafetyFilter;
 using action_go::runtime::CommandSafetyLimits;
 using action_go::runtime::CommandSafetyState;
@@ -65,6 +73,9 @@ using action_go::runtime::event_int;
 using action_go::runtime::event_number;
 using action_go::runtime::event_string;
 using action_go::runtime::kUnitreeG1ProtocolMotorCount;
+using action_go::runtime::kPhpProtocolObsDim;
+using action_go::runtime::kPhpProtocolCommandDim;
+using action_go::runtime::kPhpProtocolDepthLatentDim;
 namespace yamlc = action_go::runtime::yaml_contract;
 
 constexpr int kNumJoints = kUnitreeG1ProtocolMotorCount;
@@ -122,6 +133,17 @@ std::vector<float> tensor_to_vec_exact(const Ort::Value& value,
 }
 
 struct Args {
+  std::string variant{"instinct_parkour"};
+  std::string params;
+  std::string depth_model;
+  std::string actor_model;
+  std::string trace_file;
+  std::string command_file;
+  std::string shm_name{"depth_img_shm"};
+  std::string command_limit_source{"joint_position"};
+  int command_index{0};
+  float kp_max{300.f};
+  float kd_max{20.f};
   std::string logdir;
   std::string net{"enP8p1s0"};
   std::string cmd_topic{"rt/user_lowcmd"};
@@ -140,11 +162,12 @@ struct Args {
   int rs_height{270};
   int rs_fps{60};
   int hz{50};
-  int publish_hz{500};
+  int publish_hz{50};
   int onnx_threads{2};
   int mode_machine{kDefaultModeMachine};
   int stats_interval{100};
   double target_interp_sec{0.02};
+  double activation_blend_sec{0.10};
   double preview_timeout_sec{5.0};
   double target_rate_limit{0.0};
   double startup_sec{2.0};
@@ -204,7 +227,18 @@ Args parse_args(int argc, char** argv) {
   Args a;
   for (int i = 1; i < argc; ++i) {
     const std::string k = argv[i];
-    if (k == "--logdir") a.logdir = need_arg(i, argc, argv, k);
+    if (k == "--variant") a.variant = need_arg(i, argc, argv, k);
+    else if (k == "--params") a.params = need_arg(i, argc, argv, k);
+    else if (k == "--depth-model") a.depth_model = need_arg(i, argc, argv, k);
+    else if (k == "--actor-model") a.actor_model = need_arg(i, argc, argv, k);
+    else if (k == "--trace-file") a.trace_file = need_arg(i, argc, argv, k);
+    else if (k == "--command-file") a.command_file = need_arg(i, argc, argv, k);
+    else if (k == "--command-index") a.command_index = std::stoi(need_arg(i, argc, argv, k));
+    else if (k == "--depth-shm-name") a.shm_name = need_arg(i, argc, argv, k);
+    else if (k == "--command-limit-source") a.command_limit_source = need_arg(i, argc, argv, k);
+    else if (k == "--kp-max") a.kp_max = std::stof(need_arg(i, argc, argv, k));
+    else if (k == "--kd-max") a.kd_max = std::stof(need_arg(i, argc, argv, k));
+    else if (k == "--logdir") a.logdir = need_arg(i, argc, argv, k);
     else if (k == "--net") a.net = need_arg(i, argc, argv, k);
     else if (k == "--cmd-topic") a.cmd_topic = need_arg(i, argc, argv, k);
     else if (k == "--state-topic") a.state_topic = need_arg(i, argc, argv, k);
@@ -220,10 +254,13 @@ Args parse_args(int argc, char** argv) {
     else if (k == "--event-log") a.event_log = need_arg(i, argc, argv, k);
     else if (k == "--rs-resolution") { a.rs_width = std::stoi(need_arg(i, argc, argv, k)); a.rs_height = std::stoi(need_arg(i, argc, argv, k)); }
     else if (k == "--rs-fps") a.rs_fps = std::stoi(need_arg(i, argc, argv, k));
+    else if (k == "--rs-width") a.rs_width = std::stoi(need_arg(i, argc, argv, k));
+    else if (k == "--rs-height") a.rs_height = std::stoi(need_arg(i, argc, argv, k));
     else if (k == "--hz") a.hz = std::stoi(need_arg(i, argc, argv, k));
     else if (k == "--publish-hz") a.publish_hz = std::stoi(need_arg(i, argc, argv, k));
     else if (k == "--onnx-threads") a.onnx_threads = std::stoi(need_arg(i, argc, argv, k));
     else if (k == "--target-interp-sec") a.target_interp_sec = std::stod(need_arg(i, argc, argv, k));
+    else if (k == "--activation-blend-sec") a.activation_blend_sec = std::stod(need_arg(i, argc, argv, k));
     else if (k == "--target-rate-limit") a.target_rate_limit = std::stod(need_arg(i, argc, argv, k));
     else if (k == "--preview-timeout-sec") a.preview_timeout_sec = std::stod(need_arg(i, argc, argv, k));
     else if (k == "--startup-sec") a.startup_sec = std::stod(need_arg(i, argc, argv, k));
@@ -290,6 +327,7 @@ Args parse_args(int argc, char** argv) {
     }
   }
   if (a.logdir.empty() && !a.depth_camera_check_only) throw std::runtime_error("--logdir is required");
+  if (a.variant == "php" && (a.command_index < 0 || a.command_index >= 15)) throw std::runtime_error("PHP command index must be in [0,14]");
   if (a.depth_camera_check_only) { a.depth_source = "realsense"; a.require_depth_camera = true; }
   if (a.torso_imu_topic.empty()) a.use_torso_imu = false;
   if (a.camera_check) { a.dry_run = true; a.depth_source = "realsense"; if (a.duration_sec <= 0) a.duration_sec = 5.0; if (a.stats_interval == 100) a.stats_interval = 25; }
@@ -462,9 +500,11 @@ struct RobotState {
   uint64_t seq{0};
   std::chrono::steady_clock::time_point recv_stamp{};
   std::array<float, 4> quat{1.f,0.f,0.f,0.f};
+  std::array<float, 4> pelvis_quat{1.f,0.f,0.f,0.f};
   std::array<float, 3> gyro{0.f,0.f,0.f};
   std::vector<float> q_sim = std::vector<float>(kNumJoints, 0.f);
   std::vector<float> dq_sim = std::vector<float>(kNumJoints, 0.f);
+  std::vector<float> tau_est_sim = std::vector<float>(kNumJoints, 0.f);
   std::array<uint8_t, 40> wireless_remote{};
   double torso_imu_age_ms{std::numeric_limits<double>::infinity()};
   const char* imu_source{"pelvis"};
@@ -508,12 +548,26 @@ class ZeroDepthSource final : public DepthSource {
   std::vector<float> obs_;
 };
 
+class SharedMemoryDepthSource final : public DepthSource {
+ public:
+  SharedMemoryDepthSource(const DepthConfig& config, const Args& args)
+      : stream_(args.shm_name, static_cast<size_t>(config.num_frames * config.depth_h * config.depth_w),
+                args.depth_camera_timeout_sec) {}
+  std::vector<float> observation() override { return stream_.observation(); }
+  int frame_count() const override { return static_cast<int>(stream_.sequence()); }
+  uint64_t sequence() const override { return stream_.sequence(); }
+  double age_sec() const override { return stream_.age_sec(); }
+  std::string stats() const override { return stream_.stats(); }
+ private:
+  action_go::runtime::SharedMemoryDepthStream stream_;
+};
+
 class RealSenseDepthSource final : public DepthSource {
  public:
   RealSenseDepthSource(const DepthConfig& cfg, const Args& args) : cfg_(cfg), args_(args) {
 #ifndef ACTION_GO_WITH_REALSENSE
     (void)cfg_; (void)args_;
-    throw std::runtime_error("generic_sensor_policy_player instinct_parkour variant was built without librealsense2; use --depth-source zero or install librealsense2-dev and rebuild");
+    throw std::runtime_error("generic_sensor_policy_player was built without librealsense2; install the SDK and rebuild with ACTION_GO_REQUIRE_REALSENSE=ON");
 #else
     if (args_.require_depth_camera) {
       rs2::context ctx;
@@ -524,8 +578,18 @@ class RealSenseDepthSource final : public DepthSource {
     }
     rs2::config c;
     c.enable_stream(RS2_STREAM_DEPTH, args_.rs_width, args_.rs_height, RS2_FORMAT_Z16, args_.rs_fps);
+    if (args_.variant == "php" && args_.rs_fps == 10 && !c.can_resolve(pipe_)) {
+      rs2::config usb3_config;
+      usb3_config.enable_stream(RS2_STREAM_DEPTH, args_.rs_width, args_.rs_height, RS2_FORMAT_Z16, 30);
+      if (usb3_config.can_resolve(pipe_)) {
+        c = usb3_config;
+        args_.rs_fps = 30;
+        std::cout << "[php] requested depth profile at 10Hz unavailable; using supported 30Hz capture with 10Hz policy depth sampling\n";
+      }
+    }
     profile_ = pipe_.start(c);
     depth_scale_ = profile_.get_device().first<rs2::depth_sensor>().get_depth_scale();
+    if (args_.variant == "php") prepare_php_projection();
     (void)pipe_.wait_for_frames(1000);
     const int sim_frequency = std::max(1, static_cast<int>(1.0f / std::max(1e-6f, cfg_.sim_update_period)));
     real_skip_ = std::max(1, static_cast<int>(args_.rs_fps / static_cast<float>(sim_frequency) * cfg_.history_skip_frames));
@@ -544,8 +608,7 @@ class RealSenseDepthSource final : public DepthSource {
     while (std::chrono::steady_clock::now() < deadline) {
       {
         std::lock_guard<std::mutex> lk(mtx_);
-        if (static_cast<int>(frame_count_.load()) >= std::max(1, args_.min_depth_camera_frames) ||
-            !frames_.empty()) {
+        if (static_cast<int>(frame_count_.load()) >= std::max(1, args_.min_depth_camera_frames)) {
           break;
         }
       }
@@ -559,7 +622,7 @@ class RealSenseDepthSource final : public DepthSource {
       throw std::runtime_error("RealSense depth camera produced no frames within " +
                                std::to_string(args_.depth_camera_timeout_sec) + " sec");
     }
-    std::cout << "[generic_sensor_policy_player][instinct_parkour] RealSense started resolution=(" << args_.rs_width << ", " << args_.rs_height
+    std::cout << "[generic_sensor_policy_player][" << args_.variant << "] RealSense started resolution=(" << args_.rs_width << ", " << args_.rs_height
               << ") fps=" << args_.rs_fps << " sim_skip=" << cfg_.history_skip_frames << " real_skip=" << real_skip_ << " depth_indices=[";
     for (size_t i = 0; i < indices_.size(); ++i) std::cout << (i ? "," : "") << indices_[i];
     std::cout << "]\n";
@@ -575,6 +638,9 @@ class RealSenseDepthSource final : public DepthSource {
 
   std::vector<float> observation() override {
     std::lock_guard<std::mutex> lk(mtx_);
+    if (args_.variant == "php" && (frames_.empty() ||
+        std::chrono::duration<double>(std::chrono::steady_clock::now() - last_time_).count() > args_.depth_camera_timeout_sec))
+      throw std::runtime_error("PHP RealSense depth stream is missing or stale");
     if (frames_.empty()) return std::vector<float>(static_cast<size_t>(cfg_.num_frames * cfg_.depth_h * cfg_.depth_w), 0.f);
     std::vector<float> out;
     out.reserve(static_cast<size_t>(cfg_.num_frames * cfg_.depth_h * cfg_.depth_w));
@@ -606,6 +672,18 @@ class RealSenseDepthSource final : public DepthSource {
   }
  private:
   std::vector<float> preprocess(const cv::Mat& depth_m) {
+    if (args_.variant == "php") {
+      cv::Mat valid = depth_m.clone();
+      valid.setTo(3.f, valid <= 0.f);
+      cv::Mat projected;
+      cv::remap(valid, projected, php_map_x_, php_map_y_, cv::INTER_NEAREST, cv::BORDER_CONSTANT, cv::Scalar(3.f));
+      std::vector<float> raw(projected.ptr<float>(), projected.ptr<float>() + projected.total());
+      auto output = action_go::runtime::preprocess_php_depth(raw);
+      proc_min_ = *std::min_element(output.begin(), output.end());
+      proc_max_ = *std::max_element(output.begin(), output.end());
+      proc_mean_ = std::accumulate(output.begin(), output.end(), 0.f) / output.size();
+      return output;
+    }
     cv::Mat depth, cropped;
     cv::resize(depth_m, depth, cv::Size(cfg_.out_w, cfg_.out_h), 0, 0, cv::INTER_NEAREST);
     if (cfg_.has_crop) {
@@ -629,12 +707,33 @@ class RealSenseDepthSource final : public DepthSource {
     return out;
   }
 #ifdef ACTION_GO_WITH_REALSENSE
+  void prepare_php_projection() {
+    const auto intrinsics = profile_.get_stream(RS2_STREAM_DEPTH).as<rs2::video_stream_profile>().get_intrinsics();
+    php_map_x_.create(60, 106, CV_32FC1);
+    php_map_y_.create(60, 106, CV_32FC1);
+    const float focal = 53.f / std::tan(89.5f * kPi / 360.f);
+    for (int row = 0; row < 60; ++row) for (int column = 0; column < 106; ++column) {
+      const float ray[3] = {(column - 53.f) / focal, (row - 30.f) / focal, 1.f};
+      float pixel[2];
+      rs2_project_point_to_pixel(pixel, &intrinsics, ray);
+      if (row >= 2 && column >= 4 && column < 102 &&
+          (pixel[0] < 0.f || pixel[0] > intrinsics.width - 1.f || pixel[1] < 0.f || pixel[1] > intrinsics.height - 1.f))
+        throw std::runtime_error("RealSense calibrated field of view does not cover PHP training crop; use the full-FOV depth profile");
+      php_map_x_.at<float>(row, column) = pixel[0];
+      php_map_y_.at<float>(row, column) = pixel[1];
+    }
+    std::cout << "[php] calibrated depth projection fx=" << intrinsics.fx << " fy=" << intrinsics.fy
+              << " ppx=" << intrinsics.ppx << " ppy=" << intrinsics.ppy << " -> 106x60, crop -> 58x98, bicubic AA -> 58x87 @10Hz\n";
+  }
   void thread_main() {
+    auto last_sample = std::chrono::steady_clock::time_point{};
     while (!stop_.load() && !g_stop_requested.load()) {
       try {
         auto frameset = pipe_.wait_for_frames(std::max(1, int(2000 / std::max(1, args_.rs_fps))));
         auto df = frameset.get_depth_frame();
         if (!df) continue;
+        const auto now = std::chrono::steady_clock::now();
+        if (args_.variant == "php" && std::chrono::duration<double>(now - last_sample).count() < 0.095) continue;
         cv::Mat raw(cv::Size(args_.rs_width, args_.rs_height), CV_16UC1, (void*)df.get_data(), cv::Mat::AUTO_STEP);
         cv::Mat depth_m;
         raw.convertTo(depth_m, CV_32FC1, depth_scale_);
@@ -643,16 +742,18 @@ class RealSenseDepthSource final : public DepthSource {
           float v = depth_m.at<float>(r,c);
           if (v > 0.f) { ++valid_count; mn=std::min(mn,v); mx=std::max(mx,v); sum += v; }
         }
+        std::lock_guard<std::mutex> lk(mtx_);
         if (valid_count > 0) { raw_min_=mn; raw_max_=mx; raw_mean_=sum/valid_count; zero_frac_=1.f - valid_count / static_cast<float>(depth_m.rows*depth_m.cols); }
         else { raw_min_=raw_max_=raw_mean_=0.f; zero_frac_=1.f; }
+        if (args_.variant == "php" && valid_count == 0) continue;
         auto frame = preprocess(depth_m);
-        std::lock_guard<std::mutex> lk(mtx_);
+        last_sample = now;
         ++frame_count_;
         last_time_ = std::chrono::steady_clock::now();
         if (frames_.empty()) for (int i=0;i<buffer_len_;++i) frames_.push_back(frame);
         else { if ((int)frames_.size() >= buffer_len_) frames_.erase(frames_.begin()); frames_.push_back(std::move(frame)); }
       } catch (const std::exception& e) {
-        std::cerr << "[generic_sensor_policy_player][instinct_parkour] RealSense warning: " << e.what() << "\n";
+        std::cerr << "[generic_sensor_policy_player][" << args_.variant << "] RealSense warning: " << e.what() << "\n";
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
       }
     }
@@ -664,6 +765,7 @@ class RealSenseDepthSource final : public DepthSource {
   std::atomic<bool> stop_{false};
 #endif
   DepthConfig cfg_;
+  cv::Mat php_map_x_, php_map_y_;
   Args args_;
   int real_skip_{5};
   int buffer_len_{60};
@@ -678,8 +780,11 @@ class RealSenseDepthSource final : public DepthSource {
 
 int run_depth_camera_check_only(const Args& args) {
   DepthConfig cfg;
+  if (args.variant == "php") { cfg.num_frames = 1; cfg.depth_h = 58; cfg.depth_w = 87; }
   std::unique_ptr<DepthSource> depth = std::make_unique<RealSenseDepthSource>(cfg, args);
-  std::cout << "[generic_sensor_policy_player][instinct_parkour] depth-camera-check OK: "
+  const auto image = depth->observation();
+  yamlc::require_size("camera depth pixels", cfg.num_frames * cfg.depth_h * cfg.depth_w, image.size());
+  std::cout << "[generic_sensor_policy_player][" << args.variant << "] depth-camera-check OK: "
             << depth->stats() << "\n";
   return 0;
 }
@@ -705,14 +810,23 @@ std::string hash_float_vector(const std::vector<float>& values) {
   return out.str();
 }
 
-class InstinctPolicy {
+class DepthActorPolicy {
  public:
   struct StateSnapshot {
     std::map<std::string, HistoryBuffer> histories;
     std::vector<float> last_action;
   };
 
-  explicit InstinctPolicy(Args args) : args_(std::move(args)), logdir_(fs::absolute(args_.logdir)) {
+  explicit DepthActorPolicy(Args args) : args_(std::move(args)), logdir_(fs::absolute(args_.logdir)) {
+    if (args_.variant == "php") {
+      env_cfg_ = YAML::LoadFile(args_.params);
+      parse_php_config();
+      load_php_models();
+      last_action_.assign(kNumJoints, 0.f);
+      depth_monitor_ = std::make_unique<action_go::runtime::DepthMonitorPublisher>("/tmp/action_go_php_depth.sock");
+      if (!args_.trace_file.empty()) trace_ = std::make_unique<action_go::runtime::AsyncTraceWriter>(args_.trace_file);
+      return;
+    }
     // New action_go layout uses model/ + config/.  Keep compatibility with
     // older exported training directories that used exported/ + params/.
     exported_ = fs::exists(logdir_/"model") ? (logdir_/"model") : (logdir_/"exported");
@@ -728,11 +842,24 @@ class InstinctPolicy {
   const std::vector<float>& default_joint_pos() const { return default_joint_pos_; }
   const std::vector<float>& kp() const { return kp_; }
   const std::vector<float>& kd() const { return kd_; }
+  const std::vector<float>& startup_q() const { return startup_q_.empty() ? default_joint_pos_ : startup_q_; }
+  const std::vector<float>& startup_kp() const { return startup_kp_.empty() ? kp_ : startup_kp_; }
+  const std::vector<float>& startup_kd() const { return startup_kd_.empty() ? kd_ : startup_kd_; }
   const std::vector<std::string>& joint_names() const { return joint_names_; }
   const std::vector<int>& joint_map() const { return joint_map_; }
   const std::vector<float>& joint_signs() const { return joint_signs_; }
   const std::vector<float>& lower_limits() const { return lower_limits_; }
   const std::vector<float>& upper_limits() const { return upper_limits_; }
+  const std::vector<float>& torque_limits() const { return torque_limits_; }
+  int command_index() const { return last_php_command_; }
+  const char* command_name() const {
+    static constexpr std::array<const char*,15> names{
+      "stand", "low_forward", "low_left_45", "low_left_90", "low_right_45", "low_right_90",
+      "high_forward", "high_left_45", "high_left_90", "high_right_45", "high_right_90",
+      "back", "unused_12", "unused_13", "unused_14"};
+    return last_php_command_ >= 0 && last_php_command_ < static_cast<int>(names.size())
+        ? names[static_cast<size_t>(last_php_command_)] : "unavailable";
+  }
   const std::string& joint_name(int i) const {
     static const std::string unknown = "unknown";
     return i >= 0 && i < static_cast<int>(joint_names_.size()) ? joint_names_[static_cast<size_t>(i)] : unknown;
@@ -756,7 +883,11 @@ class InstinctPolicy {
     return action;
   }
   void check() const {
-    std::cout << "[generic_sensor_policy_player][instinct_parkour] check-only OK\n"
+    if (args_.variant == "php") {
+      std::cout << "[generic_sensor_policy_player][php] check-only OK depth=[1,58,87] latent=32 obs=140 actions=29\n";
+      return;
+    }
+    std::cout << "[generic_sensor_policy_player][" << args_.variant << "] check-only OK\n"
               << "  logdir: " << logdir_ << "\n"
               << "  raw_obs_dim=" << raw_dim_ << " proprio_dim=" << proprio_dim_ << " normalizer_source=none use_normalizer=" << (args_.use_normalizer?"true":"false") << "\n"
               << "  depth_encoder input=[" << depth_shape_[0] << ", " << depth_shape_[1] << ", " << depth_shape_[2] << ", " << depth_shape_[3] << "] output=[" << depth_out_shape_[0] << ", " << depth_out_shape_[1] << "]\n"
@@ -769,6 +900,7 @@ class InstinctPolicy {
               << "  depth_cfg: output_resolution=(" << depth_cfg_.out_w << "," << depth_cfg_.out_h << ") crop=[" << depth_cfg_.crop[0] << "," << depth_cfg_.crop[1] << "," << depth_cfg_.crop[2] << "," << depth_cfg_.crop[3] << "] depth_shape=(" << depth_cfg_.num_frames << "," << depth_cfg_.depth_h << "," << depth_cfg_.depth_w << ")\n";
   }
   std::vector<float> infer(const RobotState& state, const Command& command, const std::vector<float>& depth_obs) {
+    if (args_.variant == "php") return infer_php(state, command, depth_obs);
     auto raw = build_raw_obs(state, command, depth_obs);
     const int depth_size = depth_cfg_.num_frames * depth_cfg_.depth_h * depth_cfg_.depth_w;
     if (raw.size() != static_cast<size_t>(raw_dim_)) {
@@ -809,7 +941,8 @@ class InstinctPolicy {
     std::vector<float> target(kNumJoints);
     for (int i=0; i<kNumJoints; ++i) {
       target[i] = action_offset_[i] + action[i] * action_scale_[i];
-      target[i] = std::clamp(target[i], lower_limits_[static_cast<size_t>(i)], upper_limits_[static_cast<size_t>(i)]);
+      if (args_.command_limit_source != "pd_torque")
+        target[i] = std::clamp(target[i], lower_limits_[static_cast<size_t>(i)], upper_limits_[static_cast<size_t>(i)]);
       if (args_.clip_by_torque) {
         const float kp = kp_override && kp_override->size() == static_cast<size_t>(kNumJoints)
             ? (*kp_override)[static_cast<size_t>(i)] : kp_[static_cast<size_t>(i)];
@@ -824,6 +957,179 @@ class InstinctPolicy {
     return target;
   }
  private:
+  void parse_php_config() {
+    yamlc::require_size("robot.motor_count", kNumJoints, yamlc::required_scalar<int>(env_cfg_, "robot.motor_count"));
+    joint_names_ = yamlc::required_vector_size<std::string>(env_cfg_, "robot.policy_joint_order", kNumJoints);
+    joint_map_ = yamlc::required_vector_size<int>(env_cfg_, "robot.joint_map", kNumJoints);
+    yamlc::require_permutation("robot.joint_map", joint_map_, kNumJoints);
+    joint_signs_ = yamlc::required_vector_size<float>(env_cfg_, "robot.joint_signs", kNumJoints);
+    default_joint_pos_ = yamlc::required_vector_size<float>(env_cfg_, "robot.default_angles", kNumJoints);
+    default_joint_vel_ = yamlc::required_vector_size<float>(env_cfg_, "robot.default_velocities", kNumJoints);
+    action_scale_ = yamlc::required_vector_size<float>(env_cfg_, "robot.action_scale", kNumJoints);
+    action_offset_ = default_joint_pos_;
+    kp_ = yamlc::required_vector_size<float>(env_cfg_, "robot.kp", kNumJoints);
+    kd_ = yamlc::required_vector_size<float>(env_cfg_, "robot.kd", kNumJoints);
+    startup_q_ = yamlc::required_vector_size<float>(env_cfg_, "robot.startup_angles", kNumJoints);
+    startup_kp_ = yamlc::required_vector_size<float>(env_cfg_, "robot.startup_kp", kNumJoints);
+    startup_kd_ = yamlc::required_vector_size<float>(env_cfg_, "robot.startup_kd", kNumJoints);
+    torque_limits_ = yamlc::required_vector_size<float>(env_cfg_, "robot.torque_limits", kNumJoints);
+    lower_limits_ = yamlc::required_vector_size<float>(env_cfg_, "robot.joint_pos_lower_limit", kNumJoints);
+    upper_limits_ = yamlc::required_vector_size<float>(env_cfg_, "robot.joint_pos_upper_limit", kNumJoints);
+    if (args_.command_limit_source == "simulation_model_action") {
+      if (args_.net != "lo" || args_.depth_source != "shm")
+        throw std::runtime_error("simulation_model_action command limits require loopback DDS and simulation depth SHM");
+      for (int joint = 0; joint < kNumJoints; ++joint) {
+        lower_limits_[joint] = default_joint_pos_[joint] - 100.f * action_scale_[joint];
+        upper_limits_[joint] = default_joint_pos_[joint] + 100.f * action_scale_[joint];
+      }
+    } else if (args_.command_limit_source != "joint_position" && args_.command_limit_source != "pd_torque") {
+      throw std::runtime_error("unsupported command limit source: " + args_.command_limit_source);
+    }
+    raw_dim_ = kPhpProtocolObsDim;
+    proprio_dim_ = kPhpProtocolObsDim - kPhpProtocolDepthLatentDim;
+    depth_cfg_.num_frames = 1;
+    depth_cfg_.depth_h = yamlc::required_scalar<int>(env_cfg_, "depth.height");
+    depth_cfg_.depth_w = yamlc::required_scalar<int>(env_cfg_, "depth.width");
+    yamlc::require_size("depth.height", 58, depth_cfg_.depth_h);
+    yamlc::require_size("depth.width", 87, depth_cfg_.depth_w);
+  }
+  void load_php_models() {
+    Ort::SessionOptions options;
+    options.SetIntraOpNumThreads(args_.onnx_threads);
+    options.SetInterOpNumThreads(1);
+    depth_sess_ = std::make_unique<Ort::Session>(env_, args_.depth_model.c_str(), options);
+    actor_sess_ = std::make_unique<Ort::Session>(env_, args_.actor_model.c_str(), options);
+    const auto require_tensor = [](Ort::Session& session, size_t index, bool input,
+                                   const std::string& name, const std::vector<int64_t>& shape) {
+      Ort::AllocatorWithDefaultOptions allocator;
+      const auto actual_name = input ? session.GetInputNameAllocated(index, allocator) : session.GetOutputNameAllocated(index, allocator);
+      const auto type = input ? session.GetInputTypeInfo(index) : session.GetOutputTypeInfo(index);
+      const auto info = type.GetTensorTypeAndShapeInfo();
+      if (name != actual_name.get() || info.GetShape() != shape || info.GetElementType() != ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT)
+        throw std::runtime_error("PHP ONNX tensor mismatch: " + name);
+    };
+    if (depth_sess_->GetInputCount() != 1 || actor_sess_->GetInputCount() != 2) throw std::runtime_error("PHP ONNX input count mismatch");
+    require_tensor(*depth_sess_, 0, true, "depth_image", {1,58,87});
+    require_tensor(*depth_sess_, 0, false, "depth_latent", {1,32});
+    require_tensor(*actor_sess_, 0, true, "obs", {1,140});
+    require_tensor(*actor_sess_, 1, true, "time_step", {1,1});
+    require_tensor(*actor_sess_, 0, false, "actions", {1,29});
+    Ort::AllocatorWithDefaultOptions allocator;
+    const auto metadata = actor_sess_->GetModelMetadata();
+    const auto names = metadata.LookupCustomMetadataMapAllocated("joint_names", allocator);
+    std::stringstream stream(names ? names.get() : "");
+    std::vector<std::string> model_names;
+    std::string name;
+    while (std::getline(stream, name, ',')) model_names.push_back(name);
+    if (model_names != joint_names_) throw std::runtime_error("PHP joint order differs from ONNX metadata");
+  }
+  int php_command(const RobotState& state) const {
+    int index = args_.command_index;
+    if (!args_.command_file.empty()) {
+      std::ifstream input(args_.command_file);
+      if (!(input >> index)) throw std::runtime_error("cannot read PHP command file");
+    } else if (args_.command_source == "remote") {
+      const float forward = read_float_le(state.wireless_remote, 20);
+      const float left = -read_float_le(state.wireless_remote, 4);
+      const float yaw = -read_float_le(state.wireless_remote, 8);
+      const bool fast = remote_button(state.wireless_remote, kRemoteR1);
+      if (std::hypot(forward, left) < 0.05f) index = std::abs(yaw) < 0.05f ? 0 : (yaw > 0 ? 3 : 5);
+      else {
+        const float angle = std::atan2(left, forward) * 180.f / kPi;
+        if (angle >= -22.5f && angle <= 22.5f) index = 1;
+        else if (angle > 22.5f && angle <= 67.5f) index = 2;
+        else if (angle > 67.5f && angle <= 112.5f) index = 3;
+        else if (angle >= -67.5f && angle < -22.5f) index = 4;
+        else if (angle >= -112.5f && angle < -67.5f) index = 5;
+        else index = 11;
+      }
+      if (fast && index >= 1 && index <= 5) index += 5;
+    }
+    if (index < 0 || index >= kPhpProtocolCommandDim) throw std::runtime_error("invalid PHP direction command");
+    return index;
+  }
+  std::vector<float> infer_php(const RobotState& state, const Command&, const std::vector<float>& depth) {
+    if (args_.require_torso_imu && (!state.torso_imu_connected ||
+        state.torso_imu_age_ms > args_.torso_imu_timeout_sec * 1000.0))
+      throw std::runtime_error("PHP torso IMU is missing or stale");
+    yamlc::require_size("PHP depth pixels", 58 * 87, depth.size());
+    const std::array<int64_t,3> depth_shape{1,58,87};
+    auto depth_tensor = Ort::Value::CreateTensor<float>(mem_, const_cast<float*>(depth.data()), depth.size(), depth_shape.data(), depth_shape.size());
+    const char* depth_input = "depth_image";
+    const char* depth_output = "depth_latent";
+    auto encoded = depth_sess_->Run(Ort::RunOptions{nullptr}, &depth_input, &depth_tensor, 1, &depth_output, 1);
+    const auto latent = tensor_to_vec_exact(encoded[0], kPhpProtocolDepthLatentDim, "PHP depth");
+    auto anchor = state.quat;
+    if (!state.torso_imu_connected) {
+      const std::array<std::string,3> names{"waist_yaw_joint","waist_roll_joint","waist_pitch_joint"};
+      const std::array<int,3> axes{3,1,2};
+      for (size_t axis = 0; axis < names.size(); ++axis) {
+        const auto found = std::find(joint_names_.begin(), joint_names_.end(), names[axis]);
+        const float angle = state.q_sim[static_cast<size_t>(found - joint_names_.begin())];
+        std::array<float,4> rotation{std::cos(angle * 0.5f),0,0,0};
+        rotation[axes[axis]] = std::sin(angle * 0.5f);
+        const auto previous = anchor;
+        anchor = {previous[0]*rotation[0]-previous[1]*rotation[1]-previous[2]*rotation[2]-previous[3]*rotation[3],
+                  previous[0]*rotation[1]+previous[1]*rotation[0]+previous[2]*rotation[3]-previous[3]*rotation[2],
+                  previous[0]*rotation[2]-previous[1]*rotation[3]+previous[2]*rotation[0]+previous[3]*rotation[1],
+                  previous[0]*rotation[3]+previous[1]*rotation[2]-previous[2]*rotation[1]+previous[3]*rotation[0]};
+      }
+    }
+    if (depth_monitor_) depth_monitor_->publish(depth, anchor, state.torso_imu_connected);
+    const auto gravity = projected_gravity_from_quat(anchor);
+    std::vector<float> obs = last_action_;
+    obs.insert(obs.end(), state.gyro.begin(), state.gyro.end());
+    for (int joint = 0; joint < kNumJoints; ++joint) obs.push_back(state.q_sim[joint] - default_joint_pos_[joint]);
+    obs.insert(obs.end(), state.dq_sim.begin(), state.dq_sim.end());
+    obs.insert(obs.end(), gravity.begin(), gravity.end());
+    const int command = php_command(state);
+    if (command != last_php_command_) {
+      last_php_command_ = command;
+      std::cout << "[generic_sensor_policy_player][php] policy_command=" << command
+                << "(" << command_name() << ") source=" << args_.command_source << "\n";
+    }
+    for (int index = 0; index < kPhpProtocolCommandDim; ++index) obs.push_back(index == command ? 1.f : 0.f);
+    obs.insert(obs.end(), latent.begin(), latent.end());
+    float time = 0.f;
+    const std::array<int64_t,2> obs_shape{1,kPhpProtocolObsDim}, time_shape{1,1};
+    std::vector<Ort::Value> inputs;
+    inputs.push_back(Ort::Value::CreateTensor<float>(mem_, obs.data(), obs.size(), obs_shape.data(), 2));
+    inputs.push_back(Ort::Value::CreateTensor<float>(mem_, &time, 1, time_shape.data(), 2));
+    const std::array<const char*,2> names{"obs","time_step"};
+    const char* output = "actions";
+    auto outputs = actor_sess_->Run(Ort::RunOptions{nullptr}, names.data(), inputs.data(), inputs.size(), &output, 1);
+    auto action = tensor_to_vec_exact(outputs[0], kNumJoints, "PHP student");
+    for (float& value : action) value = std::clamp(value, -100.f, 100.f);
+    if (trace_) {
+      const auto time_unix_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+          std::chrono::system_clock::now().time_since_epoch()).count();
+      trace_->submit([state, depth, obs, latent, action, command, time_unix_ns,
+                      previous_action = last_action_, target = action_to_target(action, state)] {
+        YAML::Emitter record;
+        record.SetFloatPrecision(9);
+        record << YAML::Flow << YAML::BeginMap
+             << YAML::Key << "time_unix_ns" << YAML::Value << time_unix_ns
+             << YAML::Key << "state_seq" << YAML::Value << state.seq
+             << YAML::Key << "q" << YAML::Value << state.q_sim
+             << YAML::Key << "dq" << YAML::Value << state.dq_sim << YAML::Key << "gyro" << YAML::Value << std::vector<float>(state.gyro.begin(),state.gyro.end())
+             << YAML::Key << "tau_est" << YAML::Value << state.tau_est_sim
+             << YAML::Key << "quat" << YAML::Value << std::vector<float>(state.quat.begin(),state.quat.end())
+             << YAML::Key << "pelvis_quat" << YAML::Value << std::vector<float>(state.pelvis_quat.begin(),state.pelvis_quat.end())
+             << YAML::Key << "imu_source" << YAML::Value << state.imu_source
+             << YAML::Key << "torso_imu_age_ms" << YAML::Value << state.torso_imu_age_ms
+             << YAML::Key << "gyro_source" << YAML::Value << "pelvis"
+             << YAML::Key << "previous_action" << YAML::Value << previous_action << YAML::Key << "command" << YAML::Value << command
+             << YAML::Key << "depth" << YAML::Value << depth << YAML::Key << "obs" << YAML::Value << obs
+             << YAML::Key << "latent" << YAML::Value << latent << YAML::Key << "action" << YAML::Value << action
+             << YAML::Key << "target" << YAML::Value << target << YAML::EndMap;
+        return std::string(record.c_str());
+      });
+    }
+    last_action_ = action;
+    return action;
+  }
+  std::unique_ptr<action_go::runtime::AsyncTraceWriter> trace_;
+  std::unique_ptr<action_go::runtime::DepthMonitorPublisher> depth_monitor_;
   void parse_config() {
     yamlc::require_size("robot.motor_count", kNumJoints,
                         static_cast<size_t>(yamlc::required_scalar<int>(env_cfg_, "robot.motor_count")));
@@ -990,6 +1296,7 @@ class InstinctPolicy {
   YAML::Node env_cfg_, depth_params_;
   DepthConfig depth_cfg_;
   std::vector<float> default_joint_pos_, default_joint_vel_, action_scale_, action_offset_, kp_, kd_, last_action_;
+  std::vector<float> startup_q_, startup_kp_, startup_kd_;
   std::vector<float> torque_limits_, lower_limits_, upper_limits_, joint_signs_;
   std::vector<int> joint_map_;
   std::vector<std::string> joint_names_;
@@ -998,6 +1305,7 @@ class InstinctPolicy {
   std::map<std::string,int> history_len_;
   std::map<std::string,HistoryBuffer> histories_;
   int raw_dim_{0}, proprio_dim_{0}, batch_{1};
+  int last_php_command_{-1};
   std::array<int64_t,4> depth_shape_{1,8,18,32};
   std::array<int64_t,2> depth_out_shape_{1,128}, actor_shape_{1,896}, actor_out_shape_{1,29};
   Ort::Env env_{ORT_LOGGING_LEVEL_WARNING, "generic_sensor_policy_player"};
@@ -1013,11 +1321,13 @@ class UnitreeDDS {
              std::vector<int> joint_map,
              std::vector<float> joint_signs,
              std::vector<float> lower_limits,
-             std::vector<float> upper_limits)
+             std::vector<float> upper_limits,
+             std::vector<float> torque_limits)
       : args_(args),
         publish_enabled_(publish_enabled),
         joint_map_(std::move(joint_map)),
-        joint_signs_(std::move(joint_signs)) {
+        joint_signs_(std::move(joint_signs)),
+        activation_blend_(args.activation_blend_sec) {
     event_log_.open_append(args_.event_log);
     yamlc::require_permutation("robot.joint_map", joint_map_, kNumJoints);
     yamlc::require_size("robot.joint_signs", kNumJoints, joint_signs_.size());
@@ -1025,17 +1335,28 @@ class UnitreeDDS {
     yamlc::require_size("robot.joint_pos_upper_limit", kNumJoints, upper_limits.size());
     CommandSafetyConfig safety_cfg;
     safety_cfg.lowstate_timeout_sec = 0.2;
+    safety_cfg.kp_max = args_.kp_max;
+    safety_cfg.kd_max = args_.kd_max;
+    safety_cfg.preserve_pd_torque = args_.command_limit_source == "pd_torque";
     safety_filter_.set_config(safety_cfg);
     safety_limits_.lower = std::move(lower_limits);
     safety_limits_.upper = std::move(upper_limits);
+    safety_limits_.torque = std::move(torque_limits);
+    if (!args_.trace_file.empty()) {
+      command_trace_ = std::make_unique<action_go::runtime::AsyncTraceWriter>(args_.trace_file + ".lowcmd.yaml");
+    }
     unitree::robot::ChannelFactory::Instance()->Init(0, args_.net);
     if (publish_enabled_) { publisher_.reset(new unitree::robot::ChannelPublisher<LowCmd>(args_.cmd_topic)); publisher_->InitChannel(); }
-    subscriber_.reset(new unitree::robot::ChannelSubscriber<LowState>(args_.state_topic));
-    subscriber_->InitChannel(std::bind(&UnitreeDDS::on_low_state, this, std::placeholders::_1), 1);
+    subscriber_ = unitree::robot::ChannelFactory::Instance()->CreateRecvChannel<LowState>(
+        args_.state_topic, std::bind(&UnitreeDDS::on_low_state, this, std::placeholders::_1), 1);
     if (args_.use_torso_imu) {
-      torso_imu_subscriber_.reset(new unitree::robot::ChannelSubscriber<IMUState>(args_.torso_imu_topic));
-      torso_imu_subscriber_->InitChannel(std::bind(&UnitreeDDS::on_torso_imu, this, std::placeholders::_1), 1);
+      torso_imu_subscriber_ = unitree::robot::ChannelFactory::Instance()->CreateRecvChannel<IMUState>(
+          args_.torso_imu_topic, std::bind(&UnitreeDDS::on_torso_imu, this, std::placeholders::_1), 1);
     }
+  }
+  ~UnitreeDDS() {
+    close_reader(torso_imu_subscriber_);
+    close_reader(subscriber_);
   }
   void wait_for_state() {
     auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
@@ -1054,7 +1375,7 @@ class UnitreeDDS {
         throw std::runtime_error("timeout waiting for torso IMU topic " + args_.torso_imu_topic);
       }
     }
-    std::cout << "[generic_sensor_policy_player][instinct_parkour] lowstate connected";
+    std::cout << "[generic_sensor_policy_player][" << args_.variant << "] lowstate connected";
     if (args_.use_torso_imu) {
       std::cout << "; torso_imu=" << (torso_imu_connected_.load() ? "connected" : "waiting/fallback")
                 << " topic=" << args_.torso_imu_topic;
@@ -1066,9 +1387,10 @@ class UnitreeDDS {
   RobotState snapshot() const {
     std::lock_guard<std::mutex> lk(mtx_);
     RobotState out = state_;
+    out.pelvis_quat = out.quat;
     if (args_.use_torso_imu && torso_imu_connected_.load()) {
       out.quat = torso_quat_;
-      out.gyro = torso_gyro_;
+      if (args_.variant != "php") out.gyro = torso_gyro_;
       out.torso_imu_connected = true;
       out.imu_source = "torso";
       out.torso_imu_age_ms = std::chrono::duration<double, std::milli>(
@@ -1079,14 +1401,16 @@ class UnitreeDDS {
     return out;
   }
   void publish(const std::vector<float>& target, const std::vector<float>& kp, const std::vector<float>& kd,
-               bool allow_stale_state = false, bool active_command = true) {
+               bool allow_stale_state = false, bool active_command = true,
+               bool bypass_activation = false) {
     if (!publish_enabled_ || !publisher_) return;
+    std::lock_guard<std::mutex> publish_lock(publish_mtx_);
     if (!active_command && args_.experimental_no_prestart_hold) {
       if (!prestart_hold_suppressed_logged_) {
         prestart_hold_suppressed_logged_ = true;
         event_log_.log("prestart_hold_suppressed",
                        {event_string("player", "generic_sensor_policy_player"),
-                        event_string("variant", "instinct_parkour"),
+                        event_string("variant", args_.variant),
                         event_string("reason", "experimental_handoff_ablation")});
       }
       return;
@@ -1097,17 +1421,46 @@ class UnitreeDDS {
     safety_state.stamp = s.recv_stamp;
     safety_state.seq = s.seq;
     safety_state.q = s.q_sim;
+    safety_state.dq = s.dq_sim;
+    JointCommand command{target, kp, kd};
+    action_go::runtime::ActivationBlendResult blend_result;
+    if (active_command) {
+      blend_result = activation_blend_.apply(command, ActivationBlend::Clock::now(),
+                                             bypass_activation);
+      command = std::move(blend_result.command);
+      if (blend_result.started) {
+        event_log_.log("activation_blend_started",
+                       {event_string("player", "generic_sensor_policy_player"),
+                        event_string("variant", args_.variant),
+                        event_number("duration_sec", args_.activation_blend_sec),
+                        event_number("max_q_delta", blend_result.max_q_delta),
+                        event_number("max_kp_delta", blend_result.max_kp_delta),
+                        event_number("max_kd_delta", blend_result.max_kd_delta)});
+      }
+      if (bypass_activation && !activation_blend_bypass_logged_) {
+        activation_blend_bypass_logged_ = true;
+        event_log_.log("activation_blend_bypassed",
+                       {event_string("player", "generic_sensor_policy_player"),
+                        event_string("variant", args_.variant),
+                        event_string("reason", "preview_commit")});
+      }
+    }
     action_go::runtime::FilteredCommand filtered;
     try {
-      filtered = safety_filter_.filter(target, kp, kd, safety_state, safety_limits_, kNumJoints, allow_stale_state);
+      if (args_.variant == "php" && args_.require_torso_imu && !allow_stale_state &&
+          (!s.torso_imu_connected || s.torso_imu_age_ms > args_.torso_imu_timeout_sec * 1000.0))
+        throw std::runtime_error("PHP torso IMU is missing or stale");
+      filtered = safety_filter_.filter(command.q, command.kp, command.kd,
+                                       safety_state, safety_limits_, kNumJoints,
+                                       allow_stale_state);
     } catch (const std::exception& e) {
       safety_failed_.store(true);
       event_log_.log("safety_stop",
                      {event_string("player", "generic_sensor_policy_player"),
-                      event_string("variant", "instinct_parkour"),
+                      event_string("variant", args_.variant),
                       event_string("reason", e.what()),
                       event_int("state_seq", static_cast<long long>(s.seq))});
-      std::cerr << "[generic_sensor_policy_player][instinct_parkour] safety stop: " << e.what() << "\n";
+      std::cerr << "[generic_sensor_policy_player][" << args_.variant << "] safety stop: " << e.what() << "\n";
       g_stop_requested.store(true);
       return;
     }
@@ -1117,16 +1470,50 @@ class UnitreeDDS {
       int real = joint_map_[static_cast<size_t>(sim)]; if (real >= (int)cmd.motor_cmd().size()) continue;
       cmd.motor_cmd()[real].mode() = 1;
       cmd.motor_cmd()[real].q() = filtered.q[sim] * joint_signs_[static_cast<size_t>(sim)];
-      cmd.motor_cmd()[real].dq() = 0.f; cmd.motor_cmd()[real].tau() = 0.f;
+      cmd.motor_cmd()[real].dq() = 0.f;
+      cmd.motor_cmd()[real].tau() = filtered.tau[sim] * joint_signs_[static_cast<size_t>(sim)];
       cmd.motor_cmd()[real].kp() = filtered.kp[sim]; cmd.motor_cmd()[real].kd() = filtered.kd[sim];
     }
     cmd.crc() = crc32_core((uint32_t*)&cmd, (sizeof(cmd) >> 2) - 1);
     publisher_->Write(cmd);
+    if (command_trace_ && command_trace_count_++ % 10 == 0) {
+      const auto time_unix_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+          std::chrono::system_clock::now().time_since_epoch()).count();
+      command_trace_->submit([s, command, filtered, time_unix_ns, torque_limits = safety_limits_.torque] {
+        YAML::Emitter record;
+        record.SetFloatPrecision(9);
+        record << YAML::Flow << YAML::BeginMap
+             << YAML::Key << "time_unix_ns" << YAML::Value << time_unix_ns
+             << YAML::Key << "state_seq" << YAML::Value << s.seq
+             << YAML::Key << "state_q" << YAML::Value << s.q_sim
+             << YAML::Key << "state_dq" << YAML::Value << s.dq_sim
+             << YAML::Key << "state_tau_est" << YAML::Value << s.tau_est_sim
+             << YAML::Key << "requested_q" << YAML::Value << command.q
+             << YAML::Key << "requested_kp" << YAML::Value << command.kp
+             << YAML::Key << "requested_kd" << YAML::Value << command.kd
+             << YAML::Key << "q" << YAML::Value << filtered.q
+             << YAML::Key << "kp" << YAML::Value << filtered.kp
+             << YAML::Key << "kd" << YAML::Value << filtered.kd
+             << YAML::Key << "tau" << YAML::Value << filtered.tau
+             << YAML::Key << "torque_limits" << YAML::Value << torque_limits
+             << YAML::EndMap;
+        return std::string(record.c_str());
+      });
+    }
+    if (!active_command) {
+      activation_blend_.observe_hold({filtered.q, filtered.kp, filtered.kd});
+    } else if (blend_result.completed && !blend_result.bypassed &&
+               args_.activation_blend_sec > 0.0) {
+      event_log_.log("activation_blend_completed",
+                     {event_string("player", "generic_sensor_policy_player"),
+                      event_string("variant", args_.variant),
+                      event_number("duration_sec", args_.activation_blend_sec)});
+    }
     if (!first_command_logged_) {
       first_command_logged_ = true;
       event_log_.log("first_command_published",
                      {event_string("player", "generic_sensor_policy_player"),
-                      event_string("variant", "instinct_parkour"),
+                      event_string("variant", args_.variant),
                       event_string("command_phase", active_command ? "active" : "hold"),
                       event_int("state_seq", static_cast<long long>(s.seq)),
                       event_int("mode_machine", s.mode_machine > 0 ? s.mode_machine : args_.mode_machine)});
@@ -1135,7 +1522,7 @@ class UnitreeDDS {
       first_hold_logged_ = true;
       event_log_.log("first_hold_published",
                      {event_string("player", "generic_sensor_policy_player"),
-                      event_string("variant", "instinct_parkour"),
+                      event_string("variant", args_.variant),
                       event_int("state_seq", static_cast<long long>(s.seq)),
                       event_int("mode_machine", s.mode_machine > 0 ? s.mode_machine : args_.mode_machine)});
     }
@@ -1143,7 +1530,7 @@ class UnitreeDDS {
       first_active_command_logged_ = true;
       event_log_.log("first_active_command",
                      {event_string("player", "generic_sensor_policy_player"),
-                      event_string("variant", "instinct_parkour"),
+                      event_string("variant", args_.variant),
                       event_int("state_seq", static_cast<long long>(s.seq)),
                       event_int("mode_machine", s.mode_machine > 0 ? s.mode_machine : args_.mode_machine)});
     }
@@ -1161,6 +1548,12 @@ class UnitreeDDS {
  private:
   void on_torso_imu(const void* msg) {
     const auto imu = *(const IMUState*)msg;
+    const auto finite = [](float value) { return std::isfinite(value); };
+    if (!std::all_of(imu.quaternion().begin(), imu.quaternion().end(), finite) ||
+        !std::all_of(imu.gyroscope().begin(), imu.gyroscope().end(), finite)) return;
+    float norm_squared = 0.f;
+    for (float value : imu.quaternion()) norm_squared += value * value;
+    if (args_.variant == "php" && (norm_squared < 0.5f || norm_squared > 1.5f)) return;
     {
       std::lock_guard<std::mutex> lk(mtx_);
       torso_quat_ = imu.quaternion();
@@ -1183,22 +1576,35 @@ class UnitreeDDS {
       if (real < 0 || real >= static_cast<int>(low.motor_state().size())) return;
       s.q_sim[sim]=low.motor_state()[real].q()*joint_signs_[static_cast<size_t>(sim)];
       s.dq_sim[sim]=low.motor_state()[real].dq()*joint_signs_[static_cast<size_t>(sim)];
+      s.tau_est_sim[sim]=low.motor_state()[real].tau_est()*joint_signs_[static_cast<size_t>(sim)];
       if (!finite(s.q_sim[sim]) || !finite(s.dq_sim[sim])) return;
     }
     const auto& r = low.wireless_remote(); for (size_t i=0; i<s.wireless_remote.size() && i<r.size(); ++i) s.wireless_remote[i] = static_cast<uint8_t>(r[i]);
     { std::lock_guard<std::mutex> lk(mtx_); state_ = s; }
     connected_.store(true);
   }
+  template <typename Message>
+  static void close_reader(unitree::robot::ChannelPtr<Message>& channel) {
+    if (!channel) return;
+    auto reader = channel->GetReader()->GetNative();
+    reader.close();
+    channel.reset();
+  }
   Args args_; bool publish_enabled_{false}; mutable std::mutex mtx_; RobotState state_;
   std::vector<int> joint_map_;
   std::vector<float> joint_signs_;
   CommandSafetyFilter safety_filter_;
+  std::mutex publish_mtx_;
   CommandSafetyLimits safety_limits_;
+  std::unique_ptr<action_go::runtime::AsyncTraceWriter> command_trace_;
+  uint64_t command_trace_count_{0};
   RuntimeEventLogger event_log_;
+  ActivationBlend activation_blend_;
   bool first_command_logged_{false};
   bool first_hold_logged_{false};
   bool first_active_command_logged_{false};
   bool prestart_hold_suppressed_logged_{false};
+  bool activation_blend_bypass_logged_{false};
   std::atomic<bool> safety_failed_{false};
   std::array<float, 4> torso_quat_{1.f,0.f,0.f,0.f};
   std::array<float, 3> torso_gyro_{0.f,0.f,0.f};
@@ -1206,11 +1612,11 @@ class UnitreeDDS {
   std::atomic<bool> connected_{false}, torso_imu_connected_{false};
   std::atomic<uint64_t> sequence_{0};
   unitree::robot::ChannelPublisherPtr<LowCmd> publisher_;
-  std::shared_ptr<unitree::robot::ChannelSubscriber<LowState>> subscriber_;
-  std::shared_ptr<unitree::robot::ChannelSubscriber<IMUState>> torso_imu_subscriber_;
+  unitree::robot::ChannelPtr<LowState> subscriber_;
+  unitree::robot::ChannelPtr<IMUState> torso_imu_subscriber_;
 };
 
-struct RunStats { int count{0}; bool nonfinite{false}; float max_action_abs{0}, max_target_err{0}, max_dq{0}, max_tilt{0}; };
+struct RunStats { int count{0}, max_dq_joint{0}; bool nonfinite{false}; float max_action_abs{0}, max_target_err{0}, max_dq{0}, max_tilt{0}; };
 
 class Runtime {
  public:
@@ -1219,7 +1625,7 @@ class Runtime {
     if (!args_.standdir.empty()) {
       Args stand_args = args_;
       stand_args.logdir = args_.standdir;
-      stand_policy_ = std::make_unique<InstinctPolicy>(stand_args);
+      stand_policy_ = std::make_unique<DepthActorPolicy>(stand_args);
     }
   }
   int run() {
@@ -1228,14 +1634,14 @@ class Runtime {
       check_stand_policy();
       event_log_.log("model_loaded",
                      {event_string("player", "generic_sensor_policy_player"),
-                      event_string("variant", "instinct_parkour"),
+                      event_string("variant", args_.variant),
                       event_string("model", args_.logdir)});
       event_log_.log("check_only_ok",
                      {event_string("player", "generic_sensor_policy_player"),
-                      event_string("variant", "instinct_parkour")});
+                      event_string("variant", args_.variant)});
       return 0;
     }
-    if (args_.dry_run && !args_.camera_check) { policy_.check(); check_stand_policy(); depth_ = std::make_unique<ZeroDepthSource>(policy_.depth_config()); inference_loop(nullptr); std::cout << "[generic_sensor_policy_player][instinct_parkour] dry-run completed\n"; return 0; }
+    if (args_.dry_run && !args_.camera_check) { policy_.check(); check_stand_policy(); depth_ = std::make_unique<ZeroDepthSource>(policy_.depth_config()); inference_loop(nullptr); std::cout << "[generic_sensor_policy_player][" << args_.variant << "] dry-run completed\n"; return 0; }
     if (args_.dds_dry_run) {
       policy_.check();
       check_stand_policy();
@@ -1244,28 +1650,34 @@ class Runtime {
       init_depth();
       inference_loop(dds_.get());
       check_preflight();
-      std::cout << "[generic_sensor_policy_player][instinct_parkour] DDS dry-run completed\n";
+      std::cout << "[generic_sensor_policy_player][" << args_.variant << "] DDS dry-run completed\n";
       return 0;
     }
-    if (args_.camera_check) { policy_.check(); check_stand_policy(); init_depth(); inference_loop(nullptr); std::cout << "[generic_sensor_policy_player][instinct_parkour] camera-check completed\n"; return 0; }
+    if (args_.camera_check) { policy_.check(); check_stand_policy(); init_depth(); inference_loop(nullptr); std::cout << "[generic_sensor_policy_player][" << args_.variant << "] camera-check completed\n"; return 0; }
     real_run(); return 0;
   }
  private:
   void check_stand_policy() const {
     if (!stand_policy_) return;
-    std::cout << "[generic_sensor_policy_player][instinct_parkour] stand policy configured: "
+    std::cout << "[generic_sensor_policy_player][" << args_.variant << "] stand policy configured: "
               << fs::absolute(args_.standdir) << "\n";
     stand_policy_->check();
   }
-  RobotState fake_state() const { RobotState s; s.connected=true; s.mode_machine=args_.mode_machine; s.q_sim = policy_.default_joint_pos(); return s; }
+  RobotState fake_state() const { RobotState s; s.connected=true; s.mode_machine=args_.mode_machine; s.q_sim = policy_.default_joint_pos(); s.torso_imu_connected=args_.require_torso_imu; s.torso_imu_age_ms=0.0; return s; }
   std::unique_ptr<UnitreeDDS> make_dds(bool publish_enabled) const {
     return std::make_unique<UnitreeDDS>(args_, publish_enabled,
                                         policy_.joint_map(),
                                         policy_.joint_signs(),
                                         policy_.lower_limits(),
-                                        policy_.upper_limits());
+                                        policy_.upper_limits(),
+                                        policy_.torque_limits());
   }
-  void init_depth() { if (depth_) return; if (args_.depth_source == "zero") depth_ = std::make_unique<ZeroDepthSource>(policy_.depth_config()); else depth_ = std::make_unique<RealSenseDepthSource>(policy_.depth_config(), args_); }
+  void init_depth() {
+    if (depth_) return;
+    if (args_.depth_source == "zero") depth_ = std::make_unique<ZeroDepthSource>(policy_.depth_config());
+    else if (args_.depth_source == "shm") depth_ = std::make_unique<SharedMemoryDepthSource>(policy_.depth_config(), args_);
+    else depth_ = std::make_unique<RealSenseDepthSource>(policy_.depth_config(), args_);
+  }
   std::vector<float> limit_target_rate(const std::vector<float>& target, const std::vector<float>& initial) {
     if (args_.target_rate_limit <= 1e-6) return target;
     const auto now = std::chrono::steady_clock::now();
@@ -1279,7 +1691,14 @@ class Runtime {
   }
   void update_stats(const RobotState& s, const std::vector<float>& action, const std::vector<float>& target) {
     ++stats_.count; stats_.max_tilt=std::max(stats_.max_tilt, tilt_deg_from_quat(s.quat));
-    for (int i=0;i<kNumJoints;++i) { stats_.max_action_abs=std::max(stats_.max_action_abs, std::abs(action[i])); stats_.max_target_err=std::max(stats_.max_target_err, std::abs(target[i]-s.q_sim[i])); stats_.max_dq=std::max(stats_.max_dq, std::abs(s.dq_sim[i])); }
+    for (int joint=0;joint<kNumJoints;++joint) {
+      stats_.max_action_abs=std::max(stats_.max_action_abs, std::abs(action[joint]));
+      stats_.max_target_err=std::max(stats_.max_target_err, std::abs(target[joint]-s.q_sim[joint]));
+      if (std::abs(s.dq_sim[joint]) > stats_.max_dq) {
+        stats_.max_dq = std::abs(s.dq_sim[joint]);
+        stats_.max_dq_joint = joint;
+      }
+    }
   }
   void inference_loop(UnitreeDDS* dds) {
     init_depth();
@@ -1295,28 +1714,40 @@ class Runtime {
         auto [action_abs, action_idx] = max_abs(action);
         auto [target_err, target_err_idx] = max_abs_diff(target, s.q_sim);
         auto [q_default_err, q_default_idx] = max_abs_diff(s.q_sim, policy_.default_joint_pos());
-        std::cout << std::fixed << std::setprecision(3) << "[generic_sensor_policy_player][instinct_parkour] infer avg=" << avg << "ms max=" << mx << "ms action=[" << *std::min_element(action.begin(),action.end()) << "," << *std::max_element(action.begin(),action.end()) << "] cmd=(" << cmd.vx << "," << cmd.vy << "," << cmd.yaw << ") tilt=" << std::setprecision(1) << tilt_deg_from_quat(s.quat) << "deg dq_max=" << stats_.max_dq << std::setprecision(2) << " depth_obs=[" << mn << "," << mxv << "] depth_mean=" << mean << " " << depth_->stats() << "\n";
+        const auto [current_dq, current_dq_joint] = max_abs(s.dq_sim);
+        std::cout << std::fixed << std::setprecision(3) << "[generic_sensor_policy_player][" << args_.variant << "] infer avg=" << avg << "ms max=" << mx << "ms action=[" << *std::min_element(action.begin(),action.end()) << "," << *std::max_element(action.begin(),action.end()) << "] cmd=(" << cmd.vx << "," << cmd.vy << "," << cmd.yaw << ") tilt=" << std::setprecision(1) << tilt_deg_from_quat(s.quat) << "deg dq_max=" << stats_.max_dq << std::setprecision(2) << " depth_obs=[" << mn << "," << mxv << "] depth_mean=" << mean << " " << depth_->stats() << "\n";
         std::cout << std::fixed << std::setprecision(3)
-                  << "[generic_sensor_policy_player][instinct_parkour] diag imu=" << s.imu_source
+                  << "[generic_sensor_policy_player][" << args_.variant << "] diag imu=" << s.imu_source
                   << (s.torso_imu_connected ? (" torso_age=" + std::to_string(static_cast<int>(s.torso_imu_age_ms)) + "ms") : "")
                   << " action_abs=" << action_abs << "@" << policy_.joint_name(action_idx)
                   << " target_err=" << target_err << "@" << policy_.joint_name(target_err_idx)
                   << " qerr_default=" << q_default_err << "@" << policy_.joint_name(q_default_idx)
                   << " max_target_err_seen=" << stats_.max_target_err
+                  << " dq_current=" << current_dq << "@" << policy_.joint_name(current_dq_joint)
+                  << " dq_peak=" << stats_.max_dq << "@" << policy_.joint_name(stats_.max_dq_joint)
+                  << (args_.variant == "php" ? (" policy_command=" + std::to_string(policy_.command_index()) + "(" + policy_.command_name() + ")") : "")
                   << "\n";
         event_log_.log("runtime_metrics",
                        {event_string("player", "generic_sensor_policy_player"),
                         event_string("template", "depth_conditioned_actor"),
-                        event_string("variant", "instinct_parkour"),
+                        event_string("variant", args_.variant),
                         event_int("step", count),
                         event_number("infer_ms_avg", avg),
                         event_number("infer_ms_max", mx),
                         event_number("action_abs_max", action_abs),
                         event_number("target_err_max", target_err),
+                        event_int("policy_command_index", policy_.command_index()),
+                        event_number("dq_current_max", current_dq),
+                        event_string("dq_current_joint", policy_.joint_name(current_dq_joint)),
+                        event_number("dq_peak", stats_.max_dq),
+                        event_string("dq_peak_joint", policy_.joint_name(stats_.max_dq_joint)),
                         event_number("tilt_deg", tilt_deg_from_quat(s.quat)),
                         event_number("depth_mean", mean),
                         event_int("policy_deadline_miss", policy_deadline_miss_.load()),
-                        event_int("publish_deadline_miss", publish_deadline_miss_.load())});
+                        event_int("publish_count", publish_count_.load()),
+                        event_int("publish_deadline_miss", publish_deadline_miss_.load()),
+                        event_number("max_publish_interval_ms",
+                                     max_publish_interval_ms_.load())});
         mx=0;
       }
       next += std::chrono::duration_cast<std::chrono::steady_clock::duration>(std::chrono::duration<double>(1.0/std::max(1,args_.hz))); auto now=std::chrono::steady_clock::now(); if (next < now) { ++policy_deadline_miss_; next=now; } std::this_thread::sleep_until(next);
@@ -1349,19 +1780,21 @@ class Runtime {
   bool get_latest(std::vector<float>& q, std::vector<float>& kp, std::vector<float>& kd, uint64_t& seq) { std::lock_guard<std::mutex> lk(target_mtx_); if (latest_q_.empty()) return false; q=latest_q_; kp=latest_kp_; kd=latest_kd_; seq=seq_; return true; }
   void wait_for_start_file() {
     if (args_.start_file.empty()) return;
-    std::cout << "[generic_sensor_policy_player][instinct_parkour] holding current pose until start file: "
+    std::cout << "[generic_sensor_policy_player][" << args_.variant << "] holding current pose until start file: "
               << args_.start_file << "\n";
     while (!g_stop_requested.load() && !fs::exists(args_.start_file)) {
+      if (args_.variant == "php") depth_->observation();
       std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
   }
   void publish_loop() {
-    std::vector<float> q,kp,kd,last_q,from,to; uint64_t seq=0,last_seq=0; get_latest(q,kp,kd,seq); from=to=q; last_q=q; auto interp_start=std::chrono::steady_clock::now(); auto next=std::chrono::steady_clock::now();
+    std::vector<float> q,kp,kd,last_q,from,to; uint64_t seq=0,last_seq=0; get_latest(q,kp,kd,seq); from=to=q; last_q=q; auto interp_start=std::chrono::steady_clock::now(); auto next=std::chrono::steady_clock::now(); auto previous_publish=std::chrono::steady_clock::time_point{};
     while (!g_stop_requested.load() && !publish_stop_.load()) {
       if (get_latest(q,kp,kd,seq) && seq!=last_seq) { from=last_q.empty()?q:last_q; to=q; interp_start=std::chrono::steady_clock::now(); last_seq=seq; }
       double a = args_.target_interp_sec > 1e-6 ? std::chrono::duration<double>(std::chrono::steady_clock::now()-interp_start).count()/args_.target_interp_sec : 1.0; a=std::clamp(a,0.0,1.0); last_q=from; if (from.size()==to.size()) for(size_t i=0;i<from.size();++i) last_q[i]=static_cast<float>(from[i]+a*(to[i]-from[i])); else last_q=to;
       const bool waiting_for_start = !args_.start_file.empty() && !fs::exists(args_.start_file);
-      dds_->publish(last_q,kp,kd,waiting_for_start,!waiting_for_start); next += std::chrono::duration_cast<std::chrono::steady_clock::duration>(std::chrono::duration<double>(1.0/std::max(args_.publish_hz,args_.hz))); auto now=std::chrono::steady_clock::now(); if(next<now) { ++publish_deadline_miss_; next=now; } std::this_thread::sleep_until(next);
+      if (waiting_for_start) last_q = dds_->snapshot().q_sim;
+      dds_->publish(last_q,kp,kd,waiting_for_start,!waiting_for_start,preview_mode_active_); auto published_at=std::chrono::steady_clock::now(); if(previous_publish.time_since_epoch().count()!=0) { const double interval_ms=std::chrono::duration<double,std::milli>(published_at-previous_publish).count(); double observed=max_publish_interval_ms_.load(); while(interval_ms>observed && !max_publish_interval_ms_.compare_exchange_weak(observed,interval_ms)) {} } previous_publish=published_at; ++publish_count_; next += std::chrono::duration_cast<std::chrono::steady_clock::duration>(std::chrono::duration<double>(1.0/std::max(args_.publish_hz,args_.hz))); auto now=std::chrono::steady_clock::now(); if(next<now) { ++publish_deadline_miss_; next=now; } std::this_thread::sleep_until(next);
     }
   }
   void run_startup_transition() {
@@ -1370,10 +1803,10 @@ class Runtime {
     const bool use_hold = args_.startup_hold_sec > 1e-6;
     if (!use_step && !use_time && !use_hold) return;
 
-    const auto default_q = policy_.default_joint_pos();
+    const auto default_q = policy_.startup_q();
     const auto initial_state = dds_->snapshot();
     const auto [initial_err, initial_idx] = max_abs_diff(initial_state.q_sim, default_q);
-    std::cout << "[generic_sensor_policy_player][instinct_parkour] startup transition to policy default: initial_qerr="
+    std::cout << "[generic_sensor_policy_player][" << args_.variant << "] startup transition to configured pose: initial_qerr="
               << std::fixed << std::setprecision(3) << initial_err << "@"
               << policy_.joint_name(initial_idx);
     if (use_step) {
@@ -1401,14 +1834,14 @@ class Runtime {
           last_target[static_cast<size_t>(i)] =
               s.q_sim[static_cast<size_t>(i)] + std::clamp(err, -step, step);
         }
-        set_latest(last_target, policy_.kp(), policy_.kd());
+        set_latest(last_target, policy_.startup_kp(), policy_.startup_kd());
         filtered_target_ = last_target;
         next += std::chrono::duration_cast<std::chrono::steady_clock::duration>(
             std::chrono::duration<double>(1.0 / std::max(1, args_.hz)));
         std::this_thread::sleep_until(next);
         if (max_err <= static_cast<float>(args_.startup_step_size) + 1e-3f) break;
       }
-      set_latest(default_q, policy_.kp(), policy_.kd());
+      set_latest(default_q, policy_.startup_kp(), policy_.startup_kd());
       filtered_target_ = default_q;
       last_target = default_q;
     } else if (use_time) {
@@ -1418,6 +1851,7 @@ class Runtime {
           std::chrono::duration<double>(args_.startup_sec));
       auto next = start;
       while (!g_stop_requested.load() && std::chrono::steady_clock::now() < end) {
+        if (args_.variant == "php") depth_->observation();
         const double a = std::clamp(std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count() /
                                     std::max(1e-6, args_.startup_sec), 0.0, 1.0);
         last_target.resize(kNumJoints);
@@ -1425,25 +1859,25 @@ class Runtime {
           last_target[static_cast<size_t>(i)] = static_cast<float>(
               from[static_cast<size_t>(i)] + a * (default_q[static_cast<size_t>(i)] - from[static_cast<size_t>(i)]));
         }
-        set_latest(last_target, policy_.kp(), policy_.kd());
+        set_latest(last_target, policy_.startup_kp(), policy_.startup_kd());
         filtered_target_ = last_target;
         next += std::chrono::duration_cast<std::chrono::steady_clock::duration>(
             std::chrono::duration<double>(1.0 / std::max(1, args_.hz)));
         std::this_thread::sleep_until(next);
       }
-      set_latest(default_q, policy_.kp(), policy_.kd());
+      set_latest(default_q, policy_.startup_kp(), policy_.startup_kd());
       filtered_target_ = default_q;
       last_target = default_q;
     }
 
     if (use_hold && !g_stop_requested.load()) {
-      set_latest(last_target, policy_.kp(), policy_.kd());
+      set_latest(last_target, policy_.startup_kp(), policy_.startup_kd());
       std::this_thread::sleep_for(std::chrono::duration_cast<std::chrono::steady_clock::duration>(
           std::chrono::duration<double>(args_.startup_hold_sec)));
     }
     const auto final_state = dds_->snapshot();
     const auto [final_err, final_idx] = max_abs_diff(final_state.q_sim, default_q);
-    std::cout << "[generic_sensor_policy_player][instinct_parkour] startup transition done: qerr="
+    std::cout << "[generic_sensor_policy_player][" << args_.variant << "] startup transition done: qerr="
               << std::fixed << std::setprecision(3) << final_err << "@"
               << policy_.joint_name(final_idx) << "\n";
   }
@@ -1459,7 +1893,7 @@ class Runtime {
 
     auto s0 = dds_->snapshot();
     auto [initial_err, initial_idx] = max_abs_diff(s0.q_sim, target_q);
-    std::cout << "[generic_sensor_policy_player][instinct_parkour] official cold_start before " << next_stage
+    std::cout << "[generic_sensor_policy_player][" << args_.variant << "] official cold_start before " << next_stage
               << ": initial_qerr="
               << std::fixed << std::setprecision(3) << initial_err << "@"
               << policy_.joint_name(initial_idx)
@@ -1496,7 +1930,7 @@ class Runtime {
 
       ++count;
       if (count % std::max(1, args_.stats_interval) == 0 || done) {
-        std::cout << "[generic_sensor_policy_player][instinct_parkour] cold_start diag qerr="
+        std::cout << "[generic_sensor_policy_player][" << args_.variant << "] cold_start diag qerr="
                   << std::fixed << std::setprecision(3) << max_err << "@"
                   << policy_.joint_name(max_idx) << "\n";
       }
@@ -1515,7 +1949,7 @@ class Runtime {
       filtered_target_ = target_q;
       policy_.seed_last_action(zero_action);
       if (stand_policy_) stand_policy_->seed_last_action(zero_action);
-      std::cout << "[generic_sensor_policy_player][instinct_parkour] official cold_start hold default for "
+      std::cout << "[generic_sensor_policy_player][" << args_.variant << "] official cold_start hold default for "
                 << std::fixed << std::setprecision(3) << args_.cold_start_hold_sec
                 << "s before " << next_stage << "\n";
       std::this_thread::sleep_for(std::chrono::duration_cast<std::chrono::steady_clock::duration>(
@@ -1524,7 +1958,7 @@ class Runtime {
     const auto sf = dds_->snapshot();
     auto [final_err, final_idx] = max_abs_diff(sf.q_sim, target_q);
     auto [final_dq, final_dq_idx] = max_abs(sf.dq_sim);
-    std::cout << "[generic_sensor_policy_player][instinct_parkour] official cold_start done: qerr="
+    std::cout << "[generic_sensor_policy_player][" << args_.variant << "] official cold_start done: qerr="
               << std::fixed << std::setprecision(3) << final_err << "@"
               << policy_.joint_name(final_idx)
               << " dq=" << final_dq << "@"
@@ -1534,7 +1968,7 @@ class Runtime {
     if (!stand_policy_) return;
     if (!args_.stand_until_l1 && args_.stand_warmup_sec <= 1e-6) return;
 
-    std::cout << "[generic_sensor_policy_player][instinct_parkour] running official stand policy";
+    std::cout << "[generic_sensor_policy_player][" << args_.variant << "] running official stand policy";
     if (args_.stand_until_l1) {
       std::cout << "; press L1 to switch to parkour";
       if (args_.stand_warmup_sec > 1e-6) {
@@ -1559,14 +1993,14 @@ class Runtime {
       const bool timeout = args_.stand_warmup_sec > 1e-6 &&
           std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count() >= args_.stand_warmup_sec;
       if (args_.stand_until_l1 && l1) {
-        std::cout << "[generic_sensor_policy_player][instinct_parkour] L1 pressed, switching stand -> parkour\n";
+        std::cout << "[generic_sensor_policy_player][" << args_.variant << "] L1 pressed, switching stand -> parkour\n";
         break;
       }
       if (!args_.stand_until_l1 && timeout) {
         break;
       }
       if (args_.stand_until_l1 && timeout) {
-        std::cout << "[generic_sensor_policy_player][instinct_parkour] stand warmup timeout, switching stand -> parkour\n";
+        std::cout << "[generic_sensor_policy_player][" << args_.variant << "] stand warmup timeout, switching stand -> parkour\n";
         break;
       }
 
@@ -1583,7 +2017,7 @@ class Runtime {
         auto [target_err, target_err_idx] = max_abs_diff(target, s.q_sim);
         auto [q_default_err, q_default_idx] = max_abs_diff(s.q_sim, stand_policy_->default_joint_pos());
         std::cout << std::fixed << std::setprecision(3)
-                  << "[generic_sensor_policy_player][instinct_parkour] stand diag imu=" << s.imu_source
+                  << "[generic_sensor_policy_player][" << args_.variant << "] stand diag imu=" << s.imu_source
                   << " action_abs=" << action_abs << "@" << policy_.joint_name(action_idx)
                   << " target_err=" << target_err << "@" << policy_.joint_name(target_err_idx)
                   << " qerr_default=" << q_default_err << "@" << policy_.joint_name(q_default_idx)
@@ -1604,30 +2038,38 @@ class Runtime {
       const auto depth = depth_->observation();
       const auto [mn, mxv, mean] = min_max_mean(depth);
       std::cout << std::fixed << std::setprecision(2)
-                << "[generic_sensor_policy_player][instinct_parkour] parkour depth handoff depth_obs=["
+                << "[generic_sensor_policy_player][" << args_.variant << "] parkour depth handoff depth_obs=["
                 << mn << "," << mxv << "] depth_mean=" << mean << " "
                 << depth_->stats() << "\n";
       if (depth_->frame_count() <= 0) {
-        std::cout << "[generic_sensor_policy_player][instinct_parkour] WARNING: parkour starts with no RealSense frames; "
+        std::cout << "[generic_sensor_policy_player][" << args_.variant << "] WARNING: parkour starts with no RealSense frames; "
                   << "depth input will be zero until frames arrive\n";
       }
     } catch (const std::exception& e) {
-      std::cout << "[generic_sensor_policy_player][instinct_parkour] WARNING: failed to read depth before parkour start: "
+      std::cout << "[generic_sensor_policy_player][" << args_.variant << "] WARNING: failed to read depth before parkour start: "
                 << e.what() << "\n";
     }
   }
   void real_run() {
     const bool preview_mode = !args_.preview_file.empty();
+    preview_mode_active_ = preview_mode;
     const bool prestart_handoff = !args_.start_file.empty() || preview_mode;
     dds_ = make_dds(true); dds_->wait_for_state(); auto s=dds_->snapshot(); set_latest(s.q_sim, std::vector<float>(kNumJoints,20.f), std::vector<float>(kNumJoints,1.f)); filtered_target_=s.q_sim;
     if (prestart_handoff) {
-      std::cout << "[generic_sensor_policy_player][instinct_parkour] prestart: initializing depth source before UserCtrl\n";
+      std::cout << "[generic_sensor_policy_player][" << args_.variant << "] prestart: initializing depth source before UserCtrl\n";
     }
     // In the prestart path, official walkrun is still active while RealSense
     // and ONNX/DDS are initialized.  If the depth camera is missing or the
     // policy config is wrong, fail here before UserCtrl is entered.
     init_depth();
-    std::optional<InstinctPolicy::StateSnapshot> preview_policy_state;
+    std::optional<DepthActorPolicy::StateSnapshot> preview_policy_state;
+    if (args_.variant == "php") {
+      s = dds_->snapshot();
+      const auto saved = policy_.snapshot_state();
+      const auto checked = policy_.infer(s, {}, depth_->observation());
+      policy_.action_to_target(checked, s);
+      policy_.restore_state(saved);
+    }
     std::vector<float> preview_target;
     if (preview_mode) {
       preview_policy_state = policy_.snapshot_state();
@@ -1640,7 +2082,7 @@ class Runtime {
       event_log_.log("preview_input_snapshot",
                      {event_string("player", "generic_sensor_policy_player"),
                       event_string("template", "depth_conditioned_actor"),
-                      event_string("variant", "instinct_parkour"),
+                      event_string("variant", args_.variant),
                       event_string("source", "depth_frame_history"),
                       event_int("input_sequence", static_cast<long long>(depth_->sequence())),
                       event_number("input_freshness_sec", depth_->age_sec()),
@@ -1648,6 +2090,17 @@ class Runtime {
     }
     publish_stop_.store(false);
     std::thread pub(&Runtime::publish_loop,this);
+    struct PublisherCleanup {
+      std::thread& thread;
+      std::atomic<bool>& stop;
+      UnitreeDDS& dds;
+      ~PublisherCleanup() {
+        if (!thread.joinable()) return;
+        stop.store(true);
+        thread.join();
+        if (std::uncaught_exceptions() > 0) dds.publish_damping_for_stop();
+      }
+    } publisher_cleanup{pub, publish_stop_, *dds_};
     // Publish at least one hold packet before telling action_go it is safe to
     // switch to UserCtrl.
     dds_->publish(s.q_sim, policy_.kp(), policy_.kd(), true, false);
@@ -1655,9 +2108,9 @@ class Runtime {
       touch_file(args_.ready_file);
       event_log_.log("ready_file_touched",
                      {event_string("player", "generic_sensor_policy_player"),
-                      event_string("variant", "instinct_parkour"),
+                      event_string("variant", args_.variant),
                       event_string("path", args_.ready_file)});
-      std::cout << "[generic_sensor_policy_player][instinct_parkour] ready file touched: "
+      std::cout << "[generic_sensor_policy_player][" << args_.variant << "] ready file touched: "
                 << args_.ready_file << "\n";
     }
     if (preview_mode) {
@@ -1672,7 +2125,7 @@ class Runtime {
         event_log_.log("preview_state_restored",
                        {event_string("player", "generic_sensor_policy_player"),
                         event_string("template", "depth_conditioned_actor"),
-                        event_string("variant", "instinct_parkour")});
+                        event_string("variant", args_.variant)});
         if (decision == action_go::runtime::PreviewLifecycleDecision::kTimeout) {
           throw std::runtime_error("transactional preview timed out before commit");
         }
@@ -1680,7 +2133,7 @@ class Runtime {
       }
       event_log_.log("preview_commit_first_command_consistent",
                      {event_string("player", "generic_sensor_policy_player"),
-                      event_string("variant", "instinct_parkour"),
+                      event_string("variant", args_.variant),
                       event_string("candidate_hash", hash_float_vector(preview_target))});
       std::this_thread::sleep_for(std::chrono::duration<double>(
           1.0 / std::max(1, args_.hz)));
@@ -1690,7 +2143,7 @@ class Runtime {
     if (!args_.start_file.empty() && fs::exists(args_.start_file)) {
       event_log_.log("start_file_seen",
                      {event_string("player", "generic_sensor_policy_player"),
-                      event_string("variant", "instinct_parkour"),
+                      event_string("variant", args_.variant),
                       event_string("path", args_.start_file)});
     }
     if (g_stop_requested.load()) {
@@ -1717,17 +2170,20 @@ class Runtime {
         g_stop_requested.store(true);
       }
     });
-    std::cout << "[generic_sensor_policy_player][instinct_parkour] start real DDS depth_source=" << args_.depth_source << " hz=" << args_.hz << " command_source=" << args_.command_source << " target_rate_limit=" << args_.target_rate_limit << " prestart=" << (prestart_handoff?"true":"false") << "\n";
+    std::cout << "[generic_sensor_policy_player][" << args_.variant << "] start real DDS depth_source=" << args_.depth_source << " hz=" << args_.hz << " command_source=" << args_.command_source << " target_rate_limit=" << args_.target_rate_limit << " prestart=" << (prestart_handoff?"true":"false") << "\n";
     const auto start=std::chrono::steady_clock::now(); while(!g_stop_requested.load()) { if(args_.duration_sec>0 && std::chrono::duration<double>(std::chrono::steady_clock::now()-start).count()>=args_.duration_sec) break; std::this_thread::sleep_for(std::chrono::milliseconds(50)); }
-    g_stop_requested.store(true); publish_stop_.store(true); if(inf.joinable()) inf.join(); if(pub.joinable()) pub.join(); if(!args_.no_damping_on_stop) dds_->publish_damping_for_stop(); if(dds_->safety_failed()) throw std::runtime_error("CommandSafetyFilter stopped Instinct publishing"); if(inference_failed.load()) throw std::runtime_error("inference loop failed: " + inference_error); event_log_.log("runtime_metrics", {event_string("player", "generic_sensor_policy_player"), event_string("template", "depth_conditioned_actor"), event_string("variant", "instinct_parkour"), event_int("policy_deadline_miss", policy_deadline_miss_.load()), event_int("publish_deadline_miss", publish_deadline_miss_.load())}); std::cout << "[generic_sensor_policy_player][instinct_parkour] completed\n";
+    g_stop_requested.store(true); publish_stop_.store(true); if(inf.joinable()) inf.join(); if(pub.joinable()) pub.join(); if(!args_.no_damping_on_stop) dds_->publish_damping_for_stop(); if(dds_->safety_failed()) throw std::runtime_error("CommandSafetyFilter stopped Instinct publishing"); if(inference_failed.load()) throw std::runtime_error("inference loop failed: " + inference_error); event_log_.log("runtime_metrics", {event_string("player", "generic_sensor_policy_player"), event_string("template", "depth_conditioned_actor"), event_string("variant", args_.variant), event_int("publish_count", publish_count_.load()), event_int("policy_deadline_miss", policy_deadline_miss_.load()), event_int("publish_deadline_miss", publish_deadline_miss_.load()), event_number("max_publish_interval_ms", max_publish_interval_ms_.load()), event_string("phase", "final")}); std::cout << "[generic_sensor_policy_player][" << args_.variant << "] completed\n";
   }
   void check_preflight() { if (!args_.fail_on_bad_input) return; std::vector<std::string> fail; if(stats_.count<=0) fail.push_back("no samples"); if(stats_.max_tilt>args_.max_preflight_tilt_deg) fail.push_back("tilt too large"); if(stats_.max_dq>args_.max_preflight_dq) fail.push_back("dq too large"); if(stats_.max_action_abs>args_.max_preflight_action_abs) fail.push_back("action too large"); if(stats_.max_target_err>args_.max_preflight_target_err) fail.push_back("target error too large"); if(args_.depth_source=="realsense" && depth_->frame_count()<args_.min_preflight_rs_frames) fail.push_back("not enough RealSense frames"); if(!fail.empty()) throw std::runtime_error("preflight sanity failed: " + fail.front()); }
 
-  Args args_; InstinctPolicy policy_; std::unique_ptr<InstinctPolicy> stand_policy_; std::unique_ptr<DepthSource> depth_; std::unique_ptr<UnitreeDDS> dds_; RunStats stats_;
+  Args args_; DepthActorPolicy policy_; std::unique_ptr<DepthActorPolicy> stand_policy_; std::unique_ptr<DepthSource> depth_; std::unique_ptr<UnitreeDDS> dds_; RunStats stats_;
   RuntimeEventLogger event_log_;
   std::atomic<long long> policy_deadline_miss_{0};
+  std::atomic<long long> publish_count_{0};
   std::atomic<long long> publish_deadline_miss_{0};
+  std::atomic<double> max_publish_interval_ms_{0.0};
   std::atomic<bool> publish_stop_{false};
+  bool preview_mode_active_{false};
   std::mutex target_mtx_; std::vector<float> latest_q_, latest_kp_, latest_kd_, filtered_target_; uint64_t seq_{0}; std::chrono::steady_clock::time_point filtered_time_{};
 };
 
@@ -1741,5 +2197,5 @@ int run_instinct_parkour_runtime(int argc, char** argv) {
     Runtime rt(std::move(args));
     return rt.run();
   }
-  catch (const std::exception& e) { std::cerr << "[generic_sensor_policy_player][instinct_parkour] ERROR: " << e.what() << "\n"; return 1; }
+  catch (const std::exception& e) { std::cerr << "[generic_sensor_policy_player] ERROR: " << e.what() << "\n"; return 1; }
 }

@@ -7,26 +7,34 @@ actions:
       params: config/generic_beyondmimic.yaml
       model: model/kick_right.onnx
       max_frames: 200
-      command: "{action_go_root}/build/generic_policy_player --net {net} --cmd-topic rt/user_lowcmd --state-topic rt/lowstate --spec {params} --model {model} --max-frames {max_frames} --ready-file {ready_file} --start-file {start_file} --no-damping-on-stop {event_log_arg}"
+      postrun_handoff_hold: true
+      switch_back_overlap_sec: 0.30
+      command: "{action_go_root}/build/generic_policy_player --net {net} --cmd-topic rt/user_lowcmd --state-topic rt/lowstate --spec {params} --model {model} --max-frames {max_frames} --ready-file {ready_file} --start-file {start_file} --handoff-complete-file {handoff_complete_file} --handoff-release-file {handoff_release_file} --no-damping-on-stop {event_log_arg}"
 
     hlqk:
       safety_enable: true
       params: config/generic_beyondmimic.yaml
-      model: model/hlqk.onnx
+      model: model/paoxiao.onnx
       max_frames: 3000
-      command: "{action_go_root}/build/generic_policy_player --net {net} --cmd-topic rt/user_lowcmd --state-topic rt/lowstate --spec {params} --model {model} --max-frames {max_frames} --ready-file {ready_file} --start-file {start_file} --no-damping-on-stop {event_log_arg}"
+      postrun_handoff_hold: true
+      switch_back_overlap_sec: 0.30
+      command: "{action_go_root}/build/generic_policy_player --net {net} --cmd-topic rt/user_lowcmd --state-topic rt/lowstate --spec {params} --model {model} --max-frames {max_frames} --ready-file {ready_file} --start-file {start_file} --handoff-complete-file {handoff_complete_file} --handoff-release-file {handoff_release_file} --no-damping-on-stop {event_log_arg}"
 
     wbst:
       safety_enable: false
       params: config/generic_beyondmimic.yaml
       model: model/wbst.onnx
       max_frames: 600
-      command: "{action_go_root}/build/generic_policy_player --net {net} --cmd-topic rt/user_lowcmd --state-topic rt/lowstate --spec {params} --model {model} --max-frames {max_frames} --ready-file {ready_file} --start-file {start_file} --no-damping-on-stop {event_log_arg}"
+      postrun_handoff_hold: true
+      switch_back_overlap_sec: 0.30
+      command: "{action_go_root}/build/generic_policy_player --net {net} --cmd-topic rt/user_lowcmd --state-topic rt/lowstate --spec {params} --model {model} --max-frames {max_frames} --ready-file {ready_file} --start-file {start_file} --handoff-complete-file {handoff_complete_file} --handoff-release-file {handoff_release_file} --no-damping-on-stop {event_log_arg}"
 
     lie_down_beyondmimic:
       safety_enable: false
       params: config/generic_beyondmimic.yaml
       model: model/lie.onnx
       max_frames: 145
+      postrun_handoff_hold: true
+      switch_back_overlap_sec: 0.30
       switch_back_mode: passive
-      command: "{action_go_root}/build/generic_policy_player --net {net} --cmd-topic rt/user_lowcmd --state-topic rt/lowstate --spec {params} --model {model} --max-frames {max_frames} --ready-file {ready_file} --start-file {start_file} --no-damping-on-stop {event_log_arg}"
+      command: "{action_go_root}/build/generic_policy_player --net {net} --cmd-topic rt/user_lowcmd --state-topic rt/lowstate --spec {params} --model {model} --max-frames {max_frames} --ready-file {ready_file} --start-file {start_file} --handoff-complete-file {handoff_complete_file} --handoff-release-file {handoff_release_file} --no-damping-on-stop {event_log_arg}"

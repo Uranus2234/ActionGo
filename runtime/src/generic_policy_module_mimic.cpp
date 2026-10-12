@@ -2,6 +2,18 @@
 
 namespace action_go::runtime::generic_policy_runtime {
 
+namespace {
+
+int required_joint_index(const std::vector<std::string>& joint_order, const std::string& joint_name) {
+    const auto it = std::find(joint_order.begin(), joint_order.end(), joint_name);
+    if (it == joint_order.end()) {
+      throw std::runtime_error("policy joint order is missing required torso joint: " + joint_name);
+    }
+    return static_cast<int>(std::distance(joint_order.begin(), it));
+}
+
+}  // namespace
+
 void GenericPolicyPlayer::load_spec_beyondmimic(const YAML::Node& y) {
     const YAML::Node mimic = y["mimic_time"];
     beyond_ref_body_count_ = yamlc::required_scalar<int>(y, "mimic_time.ref_body_count");
@@ -11,6 +23,31 @@ void GenericPolicyPlayer::load_spec_beyondmimic(const YAML::Node& y) {
       throw std::runtime_error("BeyondMimic mimic_time ref_body_count/anchor_body_index do not match protocol constraint");
     }
     beyond_warmup_steps_ = int_or(mimic, "warmup_steps", beyond_warmup_steps_);
+    beyond_initial_reference_step_ = int_or(mimic, "initial_reference_step", 0);
+    if (beyond_initial_reference_step_ < 0 || beyond_initial_reference_step_ >= max_frames_) {
+      throw std::runtime_error("mimic_time.initial_reference_step must be in [0, max_frames)");
+    }
+    const std::string yaw_alignment = scalar_or<std::string>(mimic, "yaw_alignment", "anchor_yaw");
+    if (yaw_alignment == "anchor_yaw") {
+      beyond_align_initial_yaw_ = true;
+    } else if (yaw_alignment == "none") {
+      beyond_align_initial_yaw_ = false;
+    } else {
+      throw std::runtime_error("mimic_time.yaw_alignment must be anchor_yaw or none");
+    }
+    const std::string policy_step_source =
+        scalar_or<std::string>(mimic, "policy_step_source", "wall_clock");
+    if (policy_step_source == "lowstate_tick") {
+      beyond_use_lowstate_tick_ = true;
+    } else if (policy_step_source == "wall_clock") {
+      beyond_use_lowstate_tick_ = false;
+    } else {
+      throw std::runtime_error("mimic_time.policy_step_source must be wall_clock or lowstate_tick");
+    }
+    beyond_policy_tick_ms_ = static_cast<uint32_t>(
+        int_or(mimic, "policy_tick_ms", std::max(1, 1000 / std::max(1, inference_hz_))));
+    beyond_sim_lockstep_sequence_ =
+        scalar_or<bool>(mimic, "sim_lockstep_sequence", false);
   }
 
 void GenericPolicyPlayer::load_spec_holosoma(const YAML::Node& y) {
@@ -54,6 +91,11 @@ void GenericPolicyPlayer::load_beyond_params() {
       throw std::runtime_error("BeyondMimic policy.num_obs does not match spec observation.obs_dim");
     }
     joint_order_ = yamlc::required_vector_size<std::string>(y, "robot.policy_joint_order", motor_count_);
+    beyond_waist_joint_idx_ = {
+        required_joint_index(joint_order_, "waist_yaw_joint"),
+        required_joint_index(joint_order_, "waist_roll_joint"),
+        required_joint_index(joint_order_, "waist_pitch_joint"),
+    };
     kp_ = yamlc::required_vector_size<float>(y, "robot.kp", motor_count_);
     kd_ = yamlc::required_vector_size<float>(y, "robot.kd", motor_count_);
     default_q_ = yamlc::required_vector_size<float>(y, "robot.default_angles", motor_count_);
@@ -108,7 +150,13 @@ void GenericPolicyPlayer::load_holosoma_params() {
 void GenericPolicyPlayer::schema_summary_beyondmimic() {
     schema_summary_common();
     std::cout << "  beyondmimic_contract ref_body_count=" << beyond_ref_body_count_
-              << " anchor_body_index=" << beyond_ref_anchor_idx_ << "\n";
+              << " anchor_body_index=" << beyond_ref_anchor_idx_
+              << " waist_joint_indices=" << beyond_waist_joint_idx_[0] << ","
+              << beyond_waist_joint_idx_[1] << "," << beyond_waist_joint_idx_[2]
+              << " warmup_steps=" << beyond_warmup_steps_
+              << " initial_reference_step=" << beyond_initial_reference_step_
+              << " policy_step_source=" << (beyond_use_lowstate_tick_ ? "lowstate_tick" : "wall_clock")
+              << " policy_tick_ms=" << beyond_policy_tick_ms_ << "\n";
   }
 
 void GenericPolicyPlayer::schema_summary_holosoma() {
@@ -119,7 +167,10 @@ void GenericPolicyPlayer::schema_summary_holosoma() {
 
 void GenericPolicyPlayer::check_only_beyondmimic() {
     std::cout << "  beyondmimic obs_dim=" << num_obs_ << " actions=" << beyond_action_.size()
-              << " max_frames=" << max_frames_ << "\n";
+              << " max_frames=" << max_frames_
+              << " warmup_steps=" << beyond_warmup_steps_
+              << " warmup_ms=" << (1000 * beyond_warmup_steps_ / std::max(1, inference_hz_))
+              << " initial_reference_step=" << beyond_initial_reference_step_ << "\n";
   }
 
 void GenericPolicyPlayer::check_only_holosoma() {
@@ -142,32 +193,41 @@ GenericPolicyPlayer::BeyondResult GenericPolicyPlayer::beyond_inference(const st
 
 void GenericPolicyPlayer::reset_beyond_controller() {
     policy_counter_ = 0;
+    beyond_motion_step_ = beyond_initial_reference_step_;
     beyond_init_to_world_ = {1.f, 0.f, 0.f, 0.f, 1.f, 0.f, 0.f, 0.f, 1.f};
-    auto r = beyond_inference(std::vector<float>(num_obs_, 0.f), 0.f);
-    beyond_action_ = r.actions;
+    auto r = beyond_inference(std::vector<float>(num_obs_, 0.f), static_cast<float>(beyond_motion_step_));
+    beyond_action_.assign(num_actions_, 0.f);
     beyond_ref_joint_pos_ = r.joint_pos;
     beyond_ref_joint_vel_ = r.joint_vel;
     beyond_ref_body_quat_w_ = r.body_quat_w;
   }
 
 bool GenericPolicyPlayer::build_beyond_target(const GenericPolicyPlayer::RobotState& s, std::vector<float>& q, std::vector<float>& kp, std::vector<float>& kd) {
-    if (policy_counter_ > static_cast<int64_t>(max_frames_) + beyond_warmup_steps_) return false;
+    if (beyond_motion_step_ >= static_cast<int64_t>(max_frames_)) return false;
     if (s.q.size() < static_cast<size_t>(num_actions_)) throw std::runtime_error("lowstate motor count too small");
     std::vector<float> qj(num_actions_, 0.f), dqj(num_actions_, 0.f);
+    std::vector<float> q_abs(num_actions_, 0.f);
     for (int i = 0; i < num_actions_; ++i) {
       const int mj = joint_index_[i];
+      q_abs[i] = s.q.at(mj);
       qj[i] = s.q.at(mj) - default_q_[i];
       dqj[i] = s.dq.at(mj);
     }
     std::array<float, 4> robot_q{s.quat[0], s.quat[1], s.quat[2], s.quat[3]};
-    robot_q = quat_mul_legacy(robot_q, quat_mul_legacy(axis_quat(qj.at(2), 'z'),
-                                                       quat_mul_legacy(axis_quat(qj.at(5), 'x'), axis_quat(qj.at(8), 'y'))));
+    robot_q = quat_mul_legacy(
+        robot_q,
+        quat_mul_legacy(
+            axis_quat(q_abs.at(beyond_waist_joint_idx_[0]), 'z'),
+            quat_mul_legacy(axis_quat(q_abs.at(beyond_waist_joint_idx_[1]), 'x'),
+                            axis_quat(q_abs.at(beyond_waist_joint_idx_[2]), 'y'))));
     std::array<float, 4> ref{beyond_ref_body_quat_w_[beyond_ref_anchor_idx_ * 4],
                              beyond_ref_body_quat_w_[beyond_ref_anchor_idx_ * 4 + 1],
                              beyond_ref_body_quat_w_[beyond_ref_anchor_idx_ * 4 + 2],
                              beyond_ref_body_quat_w_[beyond_ref_anchor_idx_ * 4 + 3]};
-    if (policy_counter_ < beyond_warmup_steps_) {
+    if (policy_counter_ == 0 && beyond_align_initial_yaw_) {
       beyond_init_to_world_ = mat_mul(matrix_from_quat(yaw_quat(robot_q)), mat_transpose(matrix_from_quat(yaw_quat(ref))));
+    }
+    if (policy_counter_ < beyond_warmup_steps_) {
       hold_current_pose(s, q, kp, kd);
       ++policy_counter_;
       return true;
@@ -183,7 +243,11 @@ bool GenericPolicyPlayer::build_beyond_target(const GenericPolicyPlayer::RobotSt
     append(obs, dqj);
     append(obs, beyond_action_);
     check_size("beyond obs", static_cast<size_t>(num_obs_), obs.size());
-    auto res = beyond_inference(obs, static_cast<float>(policy_counter_));
+    // MJLab evaluates the actor against the current reference frame, then
+    // advances the command time after the environment step.  Keep the ONNX
+    // time input aligned with that same 0,1,2,... sequence.
+    const int64_t current_motion_step = std::min<int64_t>(beyond_motion_step_, max_frames_ - 1);
+    auto res = beyond_inference(obs, static_cast<float>(current_motion_step));
     beyond_action_ = res.actions;
     beyond_ref_joint_pos_ = res.joint_pos;
     beyond_ref_joint_vel_ = res.joint_vel;
@@ -198,6 +262,18 @@ bool GenericPolicyPlayer::build_beyond_target(const GenericPolicyPlayer::RobotSt
       kd[mj] = kd_[i];
     }
     ++policy_counter_;
+    ++beyond_motion_step_;
+    if (beyond_motion_step_ < static_cast<int64_t>(max_frames_)) {
+      // The reference command advances with the MJLab environment step.  The
+      // actor output above belongs to frame N, while the next observation must
+      // carry frame N+1 even though the embedded reference is only exposed as
+      // an ONNX output.  Refresh that output without reusing its action.
+      const auto next_ref = beyond_inference(std::vector<float>(num_obs_, 0.f),
+                                             static_cast<float>(beyond_motion_step_));
+      beyond_ref_joint_pos_ = next_ref.joint_pos;
+      beyond_ref_joint_vel_ = next_ref.joint_vel;
+      beyond_ref_body_quat_w_ = next_ref.body_quat_w;
+    }
     return true;
   }
 
@@ -220,6 +296,7 @@ void GenericPolicyPlayer::control_loop_beyondmimic() {
     bool preview_committed = false;
     if (preview_mode_enabled()) {
       const auto saved_policy_counter = policy_counter_;
+      const auto saved_motion_step = beyond_motion_step_;
       const auto saved_init_to_world = beyond_init_to_world_;
       const auto saved_action = beyond_action_;
       const auto saved_ref_joint_pos = beyond_ref_joint_pos_;
@@ -227,6 +304,7 @@ void GenericPolicyPlayer::control_loop_beyondmimic() {
       const auto saved_ref_body_quat = beyond_ref_body_quat_w_;
       auto restore_preview_state = [&]() {
         policy_counter_ = saved_policy_counter;
+        beyond_motion_step_ = saved_motion_step;
         beyond_init_to_world_ = saved_init_to_world;
         beyond_action_ = saved_action;
         beyond_ref_joint_pos_ = saved_ref_joint_pos;
@@ -255,8 +333,48 @@ void GenericPolicyPlayer::control_loop_beyondmimic() {
       }
       preview_committed = true;
     } else {
-      wait_start_file(q, kp, kd, publish_hz);
+      const auto prestart_state = s;
+      // The official controller may continue making small posture corrections
+      // while the payload is hot-standby.  Keep the standby command aligned
+      // with the newest LowState so SwitchToUserCtrl never exposes an old pose
+      // target, even briefly, before the warmup hold takes over.
+      wait_start_file(q, kp, kd, publish_hz, {}, true);
       if (g_stop_requested.load()) return;
+      const auto handoff_state = snapshot();
+      double max_q_drift = 0.0;
+      int max_q_drift_motor = -1;
+      const size_t q_count = std::min(prestart_state.q.size(), handoff_state.q.size());
+      for (size_t index = 0; index < q_count; ++index) {
+        const double drift = std::abs(static_cast<double>(handoff_state.q[index]) -
+                                      prestart_state.q[index]);
+        if (drift > max_q_drift) {
+          max_q_drift = drift;
+          max_q_drift_motor = static_cast<int>(index);
+        }
+      }
+      double dq_abs_max = 0.0;
+      for (float value : handoff_state.dq) {
+        dq_abs_max = std::max(dq_abs_max, std::abs(static_cast<double>(value)));
+      }
+      double gyro_abs_max = 0.0;
+      for (float value : handoff_state.gyro) {
+        gyro_abs_max = std::max(gyro_abs_max, std::abs(static_cast<double>(value)));
+      }
+      std::cout << player_log_prefix() << " handoff state"
+                << " max_q_drift_from_ready=" << max_q_drift
+                << " max_q_drift_motor=" << max_q_drift_motor
+                << " dq_abs_max=" << dq_abs_max
+                << " gyro_abs_max=" << gyro_abs_max
+                << " source_tick=" << handoff_state.source_tick_ms << "\n";
+      event_log_.log("handoff_state",
+                     {event_string("player", player_label()),
+                      event_string("template", template_),
+                      event_string("variant", variant_),
+                      event_number("max_q_drift_from_ready", max_q_drift),
+                      event_int("max_q_drift_motor", max_q_drift_motor),
+                      event_number("dq_abs_max", dq_abs_max),
+                      event_number("gyro_abs_max", gyro_abs_max),
+                      event_int("source_tick_ms", handoff_state.source_tick_ms)});
     }
     auto start = std::chrono::steady_clock::now();
     auto next_policy = preview_committed ? start + policy_dt : start;
@@ -266,50 +384,379 @@ void GenericPolicyPlayer::control_loop_beyondmimic() {
     int64_t policy_deadline_miss = 0;
     int64_t publish_deadline_miss = 0;
     bool finished = false;
+    bool startup_interp_active = false;
+    bool startup_interp_started = false;
+    bool first_active_target_logged = false;
+    double inference_ms_total = 0.0;
+    double inference_ms_max = 0.0;
+    std::vector<float> startup_interp_from, startup_interp_to;
+    std::vector<float> startup_interp_from_kp, startup_interp_to_kp;
+    std::vector<float> startup_interp_from_kd, startup_interp_to_kd;
+    auto startup_interp_start = start;
+    uint32_t last_policy_tick_ms = snapshot().source_tick_ms;
+    auto model_joint_for_motor = [&](int motor_index) {
+      for (int model_index = 0; model_index < static_cast<int>(joint_index_.size()); ++model_index) {
+        if (joint_index_[model_index] == motor_index) return model_index;
+      }
+      return -1;
+    };
+    auto csv_values = [](const auto& values) {
+      std::ostringstream stream;
+      stream << std::setprecision(9);
+      for (size_t index = 0; index < values.size(); ++index) {
+        if (index != 0) stream << ',';
+        stream << values[index];
+      }
+      return stream.str();
+    };
     std::cout << player_log_prefix() << " start embedded_mimic_time/beyondmimic model=" << runtime_model_path_.string()
               << " max_frames=" << max_frames_ << " hz=" << inference_hz_ << " publish_hz=" << publish_hz << "\n";
     while (!g_stop_requested.load()) {
       const auto now = std::chrono::steady_clock::now();
-      if (duration_sec_ > 0.0 && std::chrono::duration<double>(now - start).count() >= duration_sec_) break;
-      if (now >= next_policy) {
-        policy_deadline_miss += advance_deadline(next_policy, policy_dt, now);
-        s = snapshot();
-        std::vector<float> next_q, next_kp, next_kd;
-        const auto t0 = std::chrono::steady_clock::now();
-        if (!build_beyond_target(s, next_q, next_kp, next_kd)) {
-          finished = true;
-        } else if (!next_q.empty()) {
-          q = std::move(next_q);
-          kp = std::move(next_kp);
-          kd = std::move(next_kd);
+      if (duration_sec_ > 0.0 &&
+          std::chrono::duration<double>(now - start).count() >= duration_sec_) {
+        finished = true;
+        break;
+      }
+      auto policy_state = snapshot();
+      const uint32_t tick_elapsed = policy_state.source_tick_ms - last_policy_tick_ms;
+      const bool tick_policy_due = inference_count == 0 || tick_elapsed >= beyond_policy_tick_ms_;
+      const bool policy_due = beyond_use_lowstate_tick_ ? tick_policy_due : now >= next_policy;
+      if (policy_due) {
+        if (beyond_use_lowstate_tick_) {
+          if (inference_count > 0 && tick_elapsed > beyond_policy_tick_ms_ * 2) {
+            policy_deadline_miss +=
+                static_cast<int64_t>(tick_elapsed / beyond_policy_tick_ms_) - 1;
+          }
+          last_policy_tick_ms = policy_state.source_tick_ms;
+        } else {
+          policy_deadline_miss += advance_deadline(next_policy, policy_dt, now);
         }
-        const auto t1 = std::chrono::steady_clock::now();
-        const double ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
-        ++inference_count;
-        if (stats_interval_ > 0 && inference_count % stats_interval_ == 0) {
-          event_log_.log("runtime_metrics",
-                         {event_string("player", player_label()),
-                          event_string("template", template_),
-                          event_string("variant", variant_),
-                          event_int("step", inference_count),
-                          event_number("infer_ms_last", ms),
-                          event_int("policy_deadline_miss", policy_deadline_miss),
-                          event_int("publish_deadline_miss", publish_deadline_miss)});
+        const double startup_elapsed = std::chrono::duration<double>(now - startup_interp_start).count();
+        bool startup_interp_just_finished = false;
+        if (startup_interp_active && startup_elapsed < startup_interp_sec_) {
+          // Keep the first policy target fixed while the robot ramps from its
+          // reset/default pose.  Advancing the embedded motion here would
+          // skip the opening frame before the ramp has completed.
+        } else {
+          if (startup_interp_active) {
+            q = startup_interp_to;
+            kp = startup_interp_to_kp;
+            kd = startup_interp_to_kd;
+            startup_interp_active = false;
+            startup_interp_just_finished = true;
+            double max_target_error = 0.0;
+            int max_target_error_motor = -1;
+            for (size_t index = 0; index < q.size() && index < policy_state.q.size(); ++index) {
+              const double error = std::abs(static_cast<double>(q[index]) - policy_state.q[index]);
+              if (error > max_target_error) {
+                max_target_error = error;
+                max_target_error_motor = static_cast<int>(index);
+              }
+            }
+            double dq_abs_max = 0.0;
+            for (float value : policy_state.dq) {
+              dq_abs_max = std::max(dq_abs_max, std::abs(static_cast<double>(value)));
+            }
+            double gyro_abs_max = 0.0;
+            for (float value : policy_state.gyro) {
+              gyro_abs_max = std::max(gyro_abs_max, std::abs(static_cast<double>(value)));
+            }
+            std::cout << player_log_prefix() << " startup interpolation completed"
+                      << " duration_sec=" << startup_interp_sec_
+                      << " max_target_error=" << max_target_error
+                      << " max_target_error_motor=" << max_target_error_motor
+                      << " dq_abs_max=" << dq_abs_max
+                      << " gyro_abs_max=" << gyro_abs_max
+                      << " source_tick=" << policy_state.source_tick_ms << "\n";
+            event_log_.log("startup_interpolation_completed",
+                           {event_string("player", player_label()),
+                            event_string("template", template_),
+                            event_string("variant", variant_),
+                            event_number("duration_sec", startup_interp_sec_),
+                            event_number("max_target_error", max_target_error),
+                            event_int("max_target_error_motor", max_target_error_motor),
+                            event_number("dq_abs_max", dq_abs_max),
+                            event_number("gyro_abs_max", gyro_abs_max),
+                            event_int("source_tick_ms", policy_state.source_tick_ms)});
+          }
+          s = policy_state;
+          std::vector<float> next_q, next_kp, next_kd;
+          const auto t0 = std::chrono::steady_clock::now();
+          const bool active_candidate = policy_counter_ >= beyond_warmup_steps_;
+          const int64_t active_frame = beyond_motion_step_;
+          // Commit the interpolation endpoint for this cycle.  Build the
+          // next policy target on the following cycle so frame 0 is not
+          // replaced by frame 1 at the exact ramp boundary.
+          if (!startup_interp_just_finished && !build_beyond_target(s, next_q, next_kp, next_kd)) {
+            finished = true;
+          } else if (!startup_interp_just_finished && !next_q.empty()) {
+            const int64_t active_step = policy_counter_ - beyond_warmup_steps_;
+            if (active_candidate && !first_active_target_logged) {
+              double max_abs_error = 0.0;
+              int max_error_index = -1;
+              for (size_t index = 0; index < next_q.size() && index < s.q.size(); ++index) {
+                const double error = std::abs(static_cast<double>(next_q[index]) - s.q[index]);
+                if (error > max_abs_error) {
+                  max_abs_error = error;
+                  max_error_index = static_cast<int>(index);
+                }
+              }
+              const auto rpy = quat_rpy(s.quat);
+              constexpr double kRadToDeg = 57.29577951308232;
+              const double target_min = *std::min_element(next_q.begin(), next_q.end());
+              const double target_max = *std::max_element(next_q.begin(), next_q.end());
+              const int max_error_model = model_joint_for_motor(max_error_index);
+              const std::string max_error_joint =
+                  max_error_model >= 0 && max_error_model < static_cast<int>(joint_order_.size())
+                      ? joint_order_[max_error_model] : "unknown";
+              const double current_q = max_error_index >= 0 && max_error_index < static_cast<int>(s.q.size())
+                  ? s.q[max_error_index] : 0.0;
+              const double target_q = max_error_index >= 0 && max_error_index < static_cast<int>(next_q.size())
+                  ? next_q[max_error_index] : 0.0;
+              std::vector<std::string> motor_joint_names(static_cast<size_t>(motor_count_), "unknown");
+              for (int model_index = 0; model_index < static_cast<int>(joint_index_.size()); ++model_index) {
+                const int motor_index = joint_index_[model_index];
+                if (motor_index >= 0 && motor_index < motor_count_ &&
+                    model_index < static_cast<int>(joint_order_.size())) {
+                  motor_joint_names[motor_index] = joint_order_[model_index];
+                }
+              }
+              const std::string joint_names_csv = csv_values(motor_joint_names);
+              const std::string current_q_csv = csv_values(s.q);
+              const std::string target_q_csv = csv_values(next_q);
+              const std::string current_dq_csv = csv_values(s.dq);
+              const std::string gyro_csv = csv_values(s.gyro);
+              const std::string quat_csv = csv_values(s.quat);
+              std::cout << player_log_prefix() << " first active target"
+                        << " frame=" << active_frame
+                        << " max_q_error=" << max_abs_error
+                        << " max_q_error_motor=" << max_error_index
+                        << " target_min=" << target_min
+                        << " target_max=" << target_max
+                        << " max_q_error_joint=" << max_error_joint
+                        << " current_q=" << current_q
+                        << " target_q=" << target_q
+                        << " imu_rpy_deg=" << (rpy[0] * kRadToDeg) << ","
+                        << (rpy[1] * kRadToDeg) << ","
+                        << (rpy[2] * kRadToDeg)
+                        << " source_tick=" << policy_state.source_tick_ms << "\n";
+              std::cout << player_log_prefix() << " first active state"
+                        << " joint_names=" << joint_names_csv
+                        << " current_q=" << current_q_csv
+                        << " target_q=" << target_q_csv
+                        << " current_dq=" << current_dq_csv
+                        << " gyro=" << gyro_csv
+                        << " quat_wxyz=" << quat_csv
+                        << " source_tick=" << policy_state.source_tick_ms << "\n";
+              event_log_.log("first_active_target",
+                             {event_string("player", player_label()),
+                              event_string("template", template_),
+                              event_string("variant", variant_),
+                              event_int("motion_frame", active_frame),
+                              event_number("max_q_error", max_abs_error),
+                              event_int("max_q_error_motor", max_error_index),
+                              event_number("target_min", target_min),
+                              event_number("target_max", target_max),
+                              event_string("max_q_error_joint", max_error_joint),
+                              event_number("current_q", current_q),
+                              event_number("target_q", target_q),
+                              event_number("imu_roll_deg", rpy[0] * kRadToDeg),
+                              event_number("imu_pitch_deg", rpy[1] * kRadToDeg),
+                              event_number("imu_yaw_deg", rpy[2] * kRadToDeg),
+                              event_int("source_tick_ms", policy_state.source_tick_ms)});
+              event_log_.log("first_active_state",
+                             {event_string("player", player_label()),
+                              event_string("template", template_),
+                              event_string("variant", variant_),
+                              event_string("joint_names_csv", joint_names_csv),
+                              event_string("current_q_csv", current_q_csv),
+                              event_string("target_q_csv", target_q_csv),
+                              event_string("current_dq_csv", current_dq_csv),
+                              event_string("gyro_csv", gyro_csv),
+                              event_string("quat_wxyz_csv", quat_csv),
+                              event_int("source_tick_ms", policy_state.source_tick_ms)});
+              first_active_target_logged = true;
+            }
+            if (active_candidate &&
+                (active_step == 4 || active_step == 9 || active_step == 24)) {
+              double max_abs_error = 0.0;
+              int max_error_index = -1;
+              for (size_t index = 0; index < next_q.size() && index < s.q.size(); ++index) {
+                const double error = std::abs(static_cast<double>(next_q[index]) - s.q[index]);
+                if (error > max_abs_error) {
+                  max_abs_error = error;
+                  max_error_index = static_cast<int>(index);
+                }
+              }
+              double action_abs_max = 0.0;
+              for (float value : beyond_action_) {
+                action_abs_max = std::max(action_abs_max, std::abs(static_cast<double>(value)));
+              }
+              double dq_abs_max = 0.0;
+              for (float value : s.dq) {
+                dq_abs_max = std::max(dq_abs_max, std::abs(static_cast<double>(value)));
+              }
+              double gyro_abs_max = 0.0;
+              for (float value : s.gyro) {
+                gyro_abs_max = std::max(gyro_abs_max, std::abs(static_cast<double>(value)));
+              }
+              const auto rpy = quat_rpy(s.quat);
+              constexpr double kRadToDeg = 57.29577951308232;
+              const int max_error_model = model_joint_for_motor(max_error_index);
+              const std::string max_error_joint =
+                  max_error_model >= 0 && max_error_model < static_cast<int>(joint_order_.size())
+                      ? joint_order_[max_error_model] : "unknown";
+              const double current_q = max_error_index >= 0 && max_error_index < static_cast<int>(s.q.size())
+                  ? s.q[max_error_index] : 0.0;
+              const double target_q = max_error_index >= 0 && max_error_index < static_cast<int>(next_q.size())
+                  ? next_q[max_error_index] : 0.0;
+              std::cout << player_log_prefix() << " early diagnostics"
+                        << " frame=" << active_frame
+                        << " max_q_error=" << max_abs_error
+                        << " max_q_error_motor=" << max_error_index
+                        << " max_q_error_joint=" << max_error_joint
+                        << " current_q=" << current_q
+                        << " target_q=" << target_q
+                        << " action_abs_max=" << action_abs_max
+                        << " dq_abs_max=" << dq_abs_max
+                        << " gyro_abs_max=" << gyro_abs_max
+                        << " imu_rpy_deg=" << (rpy[0] * kRadToDeg) << ","
+                        << (rpy[1] * kRadToDeg) << ","
+                        << (rpy[2] * kRadToDeg)
+                        << " source_tick=" << policy_state.source_tick_ms << "\n";
+              event_log_.log("early_runtime_diagnostics",
+                             {event_string("player", player_label()),
+                              event_string("template", template_),
+                              event_string("variant", variant_),
+                              event_int("motion_frame", active_frame),
+                              event_number("max_q_error", max_abs_error),
+                              event_int("max_q_error_motor", max_error_index),
+                              event_string("max_q_error_joint", max_error_joint),
+                              event_number("current_q", current_q),
+                              event_number("target_q", target_q),
+                              event_number("action_abs_max", action_abs_max),
+                              event_number("dq_abs_max", dq_abs_max),
+                              event_number("gyro_abs_max", gyro_abs_max),
+                              event_number("imu_roll_deg", rpy[0] * kRadToDeg),
+                              event_number("imu_pitch_deg", rpy[1] * kRadToDeg),
+                              event_number("imu_yaw_deg", rpy[2] * kRadToDeg),
+                              event_int("source_tick_ms", policy_state.source_tick_ms)});
+            }
+            if (!startup_interp_started && active_candidate && startup_interp_sec_ > 1e-6) {
+              startup_interp_from = q;
+              startup_interp_to = next_q;
+              startup_interp_from_kp = kp;
+              startup_interp_from_kd = kd;
+              startup_interp_to_kp = next_kp;
+              startup_interp_to_kd = next_kd;
+              startup_interp_start = now;
+              startup_interp_active = true;
+              startup_interp_started = true;
+              std::cout << player_log_prefix() << " startup interpolation"
+                        << " frame=" << active_frame
+                        << " duration_sec=" << startup_interp_sec_ << "\n";
+              event_log_.log("startup_interpolation_started",
+                             {event_string("player", player_label()),
+                              event_string("template", template_),
+                              event_string("variant", variant_),
+                              event_int("motion_frame", active_frame),
+                              event_number("duration_sec", startup_interp_sec_)});
+              kp = startup_interp_from_kp;
+              kd = startup_interp_from_kd;
+            } else {
+              q = std::move(next_q);
+              kp = std::move(next_kp);
+              kd = std::move(next_kd);
+            }
+          }
+          const auto t1 = std::chrono::steady_clock::now();
+          const double ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
+          ++inference_count;
+          inference_ms_total += ms;
+          inference_ms_max = std::max(inference_ms_max, ms);
+          if (stats_interval_ > 0 && inference_count % stats_interval_ == 0) {
+            const auto rpy = quat_rpy(policy_state.quat);
+            constexpr double kRadToDeg = 57.29577951308232;
+            std::cout << player_log_prefix() << " metrics frame=" << beyond_motion_step_
+                      << " infer_ms=" << ms
+                      << " policy_deadline_miss=" << policy_deadline_miss
+                      << " publish_deadline_miss=" << publish_deadline_miss
+                      << " imu_rpy_deg=" << (rpy[0] * kRadToDeg) << ","
+                      << (rpy[1] * kRadToDeg) << ","
+                      << (rpy[2] * kRadToDeg)
+                      << " source_tick=" << policy_state.source_tick_ms << "\n";
+            event_log_.log("runtime_metrics",
+                           {event_string("player", player_label()),
+                            event_string("template", template_),
+                            event_string("variant", variant_),
+                            event_int("step", inference_count),
+                            event_number("infer_ms_last", ms),
+                            event_int("policy_deadline_miss", policy_deadline_miss),
+                            event_int("publish_deadline_miss", publish_deadline_miss)});
+          }
         }
       }
       if (now >= next_publish) {
         publish_deadline_miss += advance_deadline(next_publish, publish_dt, now);
         s = snapshot();
-        publish(q, kp, kd, s.mode_machine);
+        std::vector<float> publish_q = q;
+        if (startup_interp_active && startup_interp_from.size() == startup_interp_to.size()) {
+          const double alpha = std::chrono::duration<double>(now - startup_interp_start).count() /
+                               std::max(startup_interp_sec_, 1e-6);
+          publish_q = lerp_vec(startup_interp_from, startup_interp_to, alpha);
+          kp = lerp_vec(startup_interp_from_kp, startup_interp_to_kp, alpha);
+          kd = lerp_vec(startup_interp_from_kd, startup_interp_to_kd, alpha);
+        }
+        publish(publish_q, kp, kd, s.mode_machine);
         ++publish_count;
       }
       if (finished) break;
-      const auto sleep_until = std::min(next_policy, next_publish);
+      const auto sleep_until = beyond_use_lowstate_tick_ ? next_publish : std::min(next_policy, next_publish);
       if (sleep_until > std::chrono::steady_clock::now()) std::this_thread::sleep_until(sleep_until);
+    }
+    if (finished && !g_stop_requested.load() && !handoff_complete_file_.empty()) {
+      if (last_published_q_.size() == static_cast<size_t>(motor_count_)) {
+        q = last_published_q_;
+        kp = last_published_kp_;
+        kd = last_published_kd_;
+      }
+      event_log_.log("handoff_hold_started",
+                     {event_string("player", player_label()),
+                      event_string("template", template_),
+                      event_string("variant", variant_),
+                      event_string("complete_file", handoff_complete_file_),
+                      event_string("release_file", handoff_release_file_)});
+      s = snapshot();
+      publish(q, kp, kd, s.mode_machine, false, CommandPhase::kHold);
+      ++publish_count;
+      touch_file(handoff_complete_file_);
+      auto next_hold_publish = std::chrono::steady_clock::now() + publish_dt;
+      while (!g_stop_requested.load() && !fs::exists(handoff_release_file_)) {
+        const auto now = std::chrono::steady_clock::now();
+        if (now >= next_hold_publish) {
+          s = snapshot();
+          publish(q, kp, kd, s.mode_machine, false, CommandPhase::kHold);
+          ++publish_count;
+          next_hold_publish += publish_dt;
+          if (next_hold_publish < now) next_hold_publish = now + publish_dt;
+        }
+        if (next_hold_publish > std::chrono::steady_clock::now()) {
+          std::this_thread::sleep_until(next_hold_publish);
+        }
+      }
+      event_log_.log("handoff_hold_stopped",
+                     {event_string("player", player_label()),
+                      event_string("template", template_),
+                      event_string("variant", variant_),
+                      event_bool("released", fs::exists(handoff_release_file_)),
+                      event_string("reason", g_stop_requested.load() ? "signal" : "release_file")});
     }
     if (g_stop_requested.load() && damping_on_stop_) publish_damping_for_stop();
     std::cout << player_log_prefix() << " beyondmimic stats inference=" << inference_count
               << " publish=" << publish_count
+              << " inference_ms_avg=" << (inference_count > 0 ? inference_ms_total / inference_count : 0.0)
+              << " inference_ms_max=" << inference_ms_max
               << " policy_deadline_miss=" << policy_deadline_miss
               << " publish_deadline_miss=" << publish_deadline_miss << "\n";
     event_log_.log("runtime_metrics",

@@ -2,6 +2,7 @@ name: generic_sonic
 runtime:
   template: motion_conditioned_tracking
   variant: sonic
+  checkpoint: default
   inference_hz: 50
   publish_hz: 500
   onnx_threads: 1
@@ -21,6 +22,10 @@ model:
       path: ../model/model_decoder.onnx
       input_names: [obs_dict]
       output_names: [action]
+    planner:
+      path: ../model/planner_sonic.onnx
+      input_names: [context_mujoco_qpos, target_vel, mode, movement_direction, facing_direction, random_seed, has_specific_target, specific_target_positions, specific_target_headings, allowed_pred_num_tokens, height]
+      output_names: [mujoco_qpos, num_pred_frames]
   provider:
     execution_provider: cpu
     device_id: 0
@@ -52,6 +57,22 @@ reference:
   input_timeout_sec: 3.0
   stale_sec: 0.1
   stale_stop_sec: 0.5
+planner:
+  enabled: true
+  version: 2
+  inference_hz: 10
+  output_hz: 30
+  reference_hz: 50
+  context_frames: 4
+  context_qpos_dim: 36
+  max_output_frames: 64
+  min_output_frames: 24
+  lookahead_steps: 2
+  blend_frames: 8
+  mode_count: 27
+  default_height: 0.788740
+  random_seed: 1234
+  allowed_pred_num_tokens: [0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0]
 action:
   type: target_q
   action_dim: 29
@@ -60,6 +81,7 @@ handoff:
   cmd_topic: rt/user_lowcmd
   state_topic: rt/lowstate
   mode_machine: 5
+  activation_blend_sec: 0.10
   damping_on_stop: false
 safety:
   enabled: true

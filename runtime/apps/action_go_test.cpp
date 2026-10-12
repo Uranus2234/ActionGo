@@ -133,8 +133,7 @@ Args parse_args(int argc, char** argv) {
     else if (k == "--help") {
       std::cout << "Usage: action_go_test --net enP8p1s0 --action kick_right [--config action_go/config/motion_actions.yaml] [--event-log events.jsonl] [--stop-after-sec SEC] [--dry-run]\n"
                 << "Emergency keys while action is running:\n"
-                << "  Ctrl+C once  -> emergencyStop(): stop action and try to restore ai_sport\n"
-                << "  Ctrl+C twice -> dampingStop(): force stop and enter official Damp\n"
+                << "  Ctrl+C       -> dampingStop(): force stop and enter official Damp\n"
                 << "  Ctrl+\\       -> dampingStop(): force stop and enter official Damp\n"
                 << "Remote mode:\n"
                 << "  --remote-control waits for Start to start\n"
@@ -214,7 +213,7 @@ int main(int argc, char** argv) {
           return 3;
         }
         if (stop_level == 1) {
-          controller.emergencyStop();
+          controller.dampingStop();
           return 2;
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(20));
@@ -228,7 +227,7 @@ int main(int argc, char** argv) {
           return 3;
         }
         if (stop_level == 1) {
-          controller.emergencyStop();
+          controller.dampingStop();
           return 2;
         }
         if (remote->consumeComboRising({kSelect, kStart})) {
@@ -248,8 +247,6 @@ int main(int argc, char** argv) {
       return 1;
     }
 
-    std::atomic<bool> emergency_done{false};
-    std::thread emergency_thread;
     std::optional<std::chrono::steady_clock::time_point> running_since;
 
     while (true) {
@@ -260,28 +257,10 @@ int main(int argc, char** argv) {
       }
 
       const int stop_level = g_stop_level.load();
-      if (stop_level >= 2) {
+      if (stop_level >= 1) {
         std::cerr << "[action_go_test] damping stop signal received" << std::endl;
         controller.dampingStop();
-        if (emergency_thread.joinable()) {
-          emergency_thread.join();
-        }
         return 3;
-      }
-      if (stop_level == 1) {
-        if (!emergency_thread.joinable()) {
-          std::cerr << "[action_go_test] emergency signal received; press Ctrl+C again or Ctrl+\\ to enter Damp immediately" << std::endl;
-          emergency_thread = std::thread([&controller, &emergency_done]() {
-            controller.emergencyStop();
-            emergency_done.store(true);
-          });
-        }
-        if (emergency_done.load()) {
-          emergency_thread.join();
-          return 2;
-        }
-        std::this_thread::sleep_for(std::chrono::milliseconds(20));
-        continue;
       }
 
       const auto status = controller.update();

@@ -58,6 +58,8 @@ int main(int argc, char** argv) {
   std::signal(SIGTERM, signal_handler);
   std::string ready_file;
   std::string start_file;
+  std::string complete_file;
+  std::string release_file;
   std::string environment_file;
   std::string descendant_marker;
   int sleep_ms = 0;
@@ -74,6 +76,8 @@ int main(int argc, char** argv) {
     };
     if (key == "--ready-file") ready_file = need();
     else if (key == "--start-file") start_file = need();
+    else if (key == "--handoff-complete-file") complete_file = need();
+    else if (key == "--handoff-release-file") release_file = need();
     else if (key == "--environment-file") environment_file = need();
     else if (key == "--descendant-marker") descendant_marker = need();
     else if (key == "--descendant-delay-ms") descendant_delay_ms = std::stoi(need());
@@ -106,6 +110,12 @@ int main(int argc, char** argv) {
   const auto run_deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(run_ms);
   while (!g_stop.load() && std::chrono::steady_clock::now() < run_deadline) {
     std::this_thread::sleep_for(std::chrono::milliseconds(2));
+  }
+  if (!g_stop.load() && !complete_file.empty()) {
+    touch(complete_file);
+    while (!g_stop.load() && !fs::exists(release_file)) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
   }
   return g_stop.load() ? 0 : exit_code;
 }

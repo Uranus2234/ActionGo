@@ -92,8 +92,8 @@ cmake -S . -B build \
 cmake --build build --parallel $(nproc)
 ```
 
-Then rebuild only OmniXtreme with the correct TensorRT ORT for your JetPack and
-copy that binary over the CPU/auto one:
+Configure the normal build tree with a separate TensorRT ORT used only by
+OmniXtreme:
 
 ```bash
 # JetPack 5.x / Ubuntu 20.04 example: ORT v1.14.1
@@ -102,13 +102,16 @@ export OMNI_ORT=$HOME/onnxruntime-trt-1.14.1
 # JetPack 6.x / Ubuntu 22.04 example: ORT v1.19.2
 # export OMNI_ORT=$HOME/onnxruntime-trt-1.19.2
 
-cmake -S . -B build_omni_trt \
+cmake -S . -B build \
   -Drealsense2_DIR=/usr/local/lib/cmake/realsense2 \
-  -DACTION_GO_BUILD_OMNIXTREME=ON \
-  -DACTION_GO_ONNXRUNTIME_DIR=$OMNI_ORT
-cmake --build build_omni_trt --target generic_composite_policy_player --parallel $(nproc)
-cp -a build_omni_trt/generic_composite_policy_player build/generic_composite_policy_player
+  -DACTION_GO_ONNXRUNTIME_DIR=$PWD/thirdparty/onnxruntime-linux-aarch64-1.22.0 \
+  -DACTION_GO_COMPOSITE_ONNXRUNTIME_DIR=$OMNI_ORT
+cmake --build build --target generic_composite_policy_player --parallel $(nproc)
 ```
+
+`ACTION_GO_COMPOSITE_ONNXRUNTIME_DIR` is persisted in `build/CMakeCache.txt`.
+Later rebuilds therefore keep OmniXtreme linked to TensorRT instead of silently
+replacing it with the bundled CPU ORT binary.
 
 Do not globally prepend one ORT for this split build.  The launcher scripts use
 `ACTION_GO_ORT_MODE=clean` by default: they remove ONNX Runtime entries from
@@ -500,6 +503,21 @@ tools/launch/start_dry_run.sh
 
 Real robot execution should be staged: `--check-only`, sim viewer, action_go dry-run,
 short `max_frames`, then full action.
+
+OmniXtreme 已关闭公共 `CommandSafetyFilter` 的机械关节位置 target clamp
+(`safety.joint_limit_enabled: false`)。这与官方部署语义一致：
+OmniXtreme 保留随关节速度变化的 torque/PD envelope，而不是把策略
+target 截断到机械关节角范围。NaN/Inf 拒绝、LowState 过期拒绝和
+kp/kd 上限仍保留。
+
+官方论文中的 `Joint Limit` 是对实际关节状态 `q` 越界的训练奖励惩罚，
+不是部署时对 PD setpoint 的固定机械角 clamp。论文和公开
+`deploy_mujoco.py` 的部署约束是 torque-speed envelope：根据当前 `q/dq`
+反算可达的 PD target。ActionGo 默认显式启用 `action.clip_envelope: true`。
+官方 MuJoCo 还在 envelope 后建模 Coulomb/粘性摩擦损失；ActionGo Omni
+仿真启动器会加 `--friction-feedforward` 复现该模型。真机电机本身已有该
+物理损失，且官方真机 C++ 尚未开源，所以真机默认不额外发布
+摩擦负力矩，避免重复计算。
 
 For OmniXtreme split segments, per-action IMU safety is disabled
 (`safety_enable: false`).  `Select+Start` still forces official passive/damping

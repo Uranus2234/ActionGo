@@ -359,6 +359,10 @@ def main(argv=None):
         "--startup-interp-sec", str(float(args.startup_interp_sec)),
         "--target-interp-sec", str(float(args.target_interp_sec)),
         "--sync-lowstate",
+        # Match official deploy_mujoco.py's actuator loss after the dynamic
+        # torque-speed envelope. This is simulation modeling, not a hardware
+        # recommendation to compensate physical motor friction via tau_ff.
+        "--friction-feedforward",
     ]
     if args.max_frames > 0:
         player_cmd += ["--max-frames", str(int(args.max_frames))]

@@ -88,11 +88,17 @@ IMU safety 触发后会自动执行：
   -> walkrun
 ```
 
-如果切回 walkrun 时短暂软掉，优先检查：
+BFM-Zero 的 `bfm_zero_stand` 已启用回切 hot-standby：收到切回 `walkrun` 请求后，
+先调用官方 7111 接口，同时继续发布最后一条经安全过滤的 BFM 命令 0.6 秒，随后才退出
+player。这样可以覆盖官方 walkrun 完成 ownership 接管的启动延迟，避免中间低刚度空窗。
+
+如果切回 walkrun 时仍短暂软掉，优先检查：
 
 1. `generic_policy_player` command 是否带 `--no-damping-on-stop`
 2. `recover_hold_ms` 是否太短，建议 `3000` 或更大
 3. `recover_angle_deg` 是否太宽，建议真机可试 `10.0`
+4. 官方 walkrun 是否在 0.6 秒内完成接管；若固件启动更慢，再按实测延长
+   `actions/bfm0/bfm_zero.yaml` 的 `switch_back_overlap_sec`
 
 示例：
 

@@ -1325,7 +1325,7 @@ def parse_args(argv=None):
     p.add_argument("--rs-resolution", nargs=2, type=int, default=[480, 270], metavar=("W", "H"))
     p.add_argument("--rs-fps", type=int, default=60)
     p.add_argument("--hz", type=int, default=50, help="ONNX inference/control update frequency")
-    p.add_argument("--publish-hz", type=int, default=500, help="LowCmd publish frequency")
+    p.add_argument("--publish-hz", type=int, default=50, help="LowCmd publish frequency")
     p.add_argument("--onnx-threads", type=int, default=2)
     p.add_argument("--target-interp-sec", type=float, default=0.02)
     p.add_argument("--target-rate-limit", type=float, default=0.0, help="rad/s per-joint target limiter after inference; 0 disables it")

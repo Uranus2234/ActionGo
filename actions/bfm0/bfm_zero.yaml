@@ -4,4 +4,6 @@ actions:
   generic_policy:
     bfm_zero_stand:
       safety_enable: true
+      switch_back: false
       params: config/generic_bfm_zero.yaml
+      switch_back_overlap_sec: 0.6

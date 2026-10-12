@@ -1,0 +1,6 @@
+actions:
+  php:
+    php_locomotion:
+      safety_enable: true
+      params: config/generic_php.yaml
+      command: "{action_go_root}/build/generic_sensor_policy_player --net {net} --cmd-topic rt/user_lowcmd --spec {params} --ready-file {ready_file} --start-file {start_file} --no-damping-on-stop {event_log_arg}"

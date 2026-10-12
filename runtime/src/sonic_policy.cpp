@@ -494,11 +494,15 @@ std::vector<float> SonicObservationBuilder::build_encoder_observation(
     const SonicReferenceCache& reference, int64_t current_frame,
     int future_frames, int future_step) const {
   if (history_.empty()) throw std::runtime_error("SONIC robot history is empty");
-  std::vector<float> output(kSonicEncoderObsDim, 0.f);
+  const bool v11 = layout_ == SonicObservationLayout::kV11;
+  const size_t encoder_obs_dim = v11 ? kSonicV11EncoderObsDim : kSonicEncoderObsDim;
+  std::vector<float> output(encoder_obs_dim, 0.f);
   const int encoder_mode = reference.frame_clamped(current_frame).encoder_mode;
   output[0] = static_cast<float>(encoder_mode);
   const Quat apply_heading = multiply(initial_robot_heading_, conjugate(initial_reference_heading_));
-  const Quat base_inverse = conjugate(normalize(history_.front().base_quat_wxyz));
+  const Quat orientation_inverse = v11
+      ? conjugate(heading(history_.front().base_quat_wxyz))
+      : conjugate(normalize(history_.front().base_quat_wxyz));
   if (encoder_mode == 0) {
     if (future_frames != kSonicReferenceFrames || future_step != kSonicReferenceStep) {
       throw std::runtime_error("SONIC G1 reference horizon does not match released checkpoint");
@@ -514,35 +518,33 @@ std::vector<float> SonicObservationBuilder::build_encoder_observation(
       std::copy(frame.joint_vel.begin(), frame.joint_vel.end(), output.begin() + offset);
       offset += kSonicMotorCount;
     }
-    // The released G1 encoder mode leaves root-z and single-frame anchor slots zeroed.
-    offset += kSonicReferenceFrames + 1 + 6;
+    if (!v11) {
+      offset += kSonicReferenceFrames + 1 + 6;
+    }
     for (int i = 0; i < future_frames; ++i) {
       const auto& frame = reference.frame_clamped(current_frame + i * future_step);
       const Quat aligned_reference = multiply(apply_heading, frame.body_quat_wxyz);
-      const auto orientation = rotation_6d(multiply(base_inverse, aligned_reference));
+      const auto orientation = rotation_6d(multiply(orientation_inverse, aligned_reference));
       std::copy(orientation.begin(), orientation.end(), output.begin() + offset);
       offset += orientation.size();
     }
   } else if (encoder_mode == 2) {
-    // Offsets follow the released 1762D observation_config.yaml. In SMPL mode
-    // only encoder_mode, 10x SMPL joints, 10x anchor orientation, and the six
-    // wrist joints are active; all G1/VR slots stay zero.
-    size_t offset = 922;
+    size_t offset = v11 ? 911 : 922;
     for (int i = 0; i < kSonicSmplFrames; ++i) {
       const auto& frame = reference.frame_clamped(current_frame + i);
       std::copy(frame.smpl_joints.begin(), frame.smpl_joints.end(), output.begin() + offset);
       offset += frame.smpl_joints.size();
     }
-    offset = 1642;
+    offset = v11 ? 1631 : 1642;
     for (int i = 0; i < kSonicSmplFrames; ++i) {
       const auto& frame = reference.frame_clamped(current_frame + i);
       const Quat aligned_reference = multiply(apply_heading, frame.body_quat_wxyz);
-      const auto orientation = rotation_6d(multiply(base_inverse, aligned_reference));
+      const auto orientation = rotation_6d(multiply(orientation_inverse, aligned_reference));
       std::copy(orientation.begin(), orientation.end(), output.begin() + offset);
       offset += orientation.size();
     }
     static constexpr std::array<int, 6> kWristPolicyIndices{23, 24, 25, 26, 27, 28};
-    offset = 1702;
+    offset = v11 ? 1691 : 1702;
     for (int i = 0; i < kSonicSmplFrames; ++i) {
       const auto& frame = reference.frame_clamped(current_frame + i);
       for (int joint : kWristPolicyIndices) output[offset++] = frame.joint_pos[joint];
@@ -551,7 +553,7 @@ std::vector<float> SonicObservationBuilder::build_encoder_observation(
     throw std::runtime_error("SONIC reference uses unsupported encoder mode " +
                              std::to_string(encoder_mode));
   }
-  if (output.size() != kSonicEncoderObsDim) throw std::runtime_error("SONIC encoder observation size mismatch");
+  if (output.size() != encoder_obs_dim) throw std::runtime_error("SONIC encoder observation size mismatch");
   return output;
 }
 

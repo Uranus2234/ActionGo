@@ -68,6 +68,10 @@ Cli parse_cli(int argc, char** argv) {
           k == "--net" || k == "--cmd-topic" || k == "--state-topic" ||
           k == "--ready-file" || k == "--start-file" ||
           k == "--preview-file" || k == "--commit-file" ||
+          k == "--depth-model" || k == "--actor-model" || k == "--variant" ||
+          k == "--trace-file" || k == "--command-file" || k == "--command-index" ||
+          k == "--command-source" || k == "--depth-shm-name" || k == "--command-limit-source" ||
+          k == "--kp-max" || k == "--kd-max" ||
           k == "--discard-file" || k == "--preview-timeout-sec" || k == "--hz" ||
           k == "--publish-hz" || k == "--onnx-threads" || k == "--duration-sec" ||
           k == "--object-source" || k == "--depth-source" || k == "--tag-size" ||
@@ -78,6 +82,7 @@ Cli parse_cli(int argc, char** argv) {
           k == "--min-depth-camera-frames" || k == "--torso-imu-timeout-sec" ||
           k == "--camera-timeout-sec" || k == "--pose-timeout-sec" ||
           k == "--warmup-steps" || k == "--model" || k == "--params" ||
+          k == "--activation-blend-sec" ||
           k == "--logdir" || k == "--standdir" || k == "--stand-logdir" ||
           k == "--rs-width" || k == "--rs-height" || k == "--rs-fps" ||
           k == "--rs-resolution" || k == "--mode-machine" || k == "--cmd" ||
@@ -227,6 +232,7 @@ std::vector<std::string> common_args(const fs::path& spec, const YAML::Node& y) 
   add_scalar<int>(args, "--onnx-threads", runtime, "onnx_threads");
   add_scalar<int>(args, "--stats-interval", runtime, "stats_interval");
   add_scalar<int>(args, "--mode-machine", handoff, "mode_machine");
+  add_scalar<double>(args, "--activation-blend-sec", handoff, "activation_blend_sec");
   add_scalar<double>(args, "--duration-sec", runtime, "duration_sec");
   add_damping_on_stop(args, handoff);
   (void)spec;
@@ -250,9 +256,23 @@ int run_instinct(const fs::path& spec, const YAML::Node& y,
   }
   require_string(sensor, "depth_source", "sensor");
   auto args = common_args(spec, y);
+  if (scalar_or<std::string>(y["runtime"], "variant", "") == "php") {
+    add(args, "--variant", "php");
+    add_path(args, "--params", spec, robot["params"].as<std::string>());
+    add_path(args, "--depth-model", spec, model["sessions"]["depth_encoder"]["path"].as<std::string>());
+    add_path(args, "--actor-model", spec, model["sessions"]["actor"]["path"].as<std::string>());
+    if (y["action"]["clip_by_torque"] && !y["action"]["clip_by_torque"].as<bool>()) args.push_back("--no-clip-by-torque");
+    add_scalar<float>(args, "--kp-max", y["safety"], "kp_max");
+    add(args, "--command-limit-source", require_string(y["safety"], "command_limit_source", "safety"));
+    add_scalar<float>(args, "--kd-max", y["safety"], "kd_max");
+    add(args, "--depth-shm-name", scalar_or<std::string>(sensor, "shm_name", "depth_img_shm"));
+  }
   add_path(args, "--logdir", spec, scalar_or<std::string>(model, "logdir", ".."));
   add_path(args, "--standdir", spec, scalar_or<std::string>(model, "standdir", ""));
   add(args, "--depth-source", scalar_or<std::string>(sensor, "depth_source", ""));
+  add_scalar<int>(args, "--rs-width", sensor, "rs_width");
+  add_scalar<int>(args, "--rs-height", sensor, "rs_height");
+  add_scalar<int>(args, "--rs-fps", sensor, "rs_fps");
   add_scalar<int>(args, "--min-depth-camera-frames", sensor, "min_depth_camera_frames");
   add_scalar<double>(args, "--depth-camera-timeout-sec", sensor, "depth_camera_timeout_sec");
   add_scalar<double>(args, "--torso-imu-timeout-sec", sensor, "torso_imu_timeout_sec");
@@ -317,6 +337,19 @@ int main(int argc, char** argv) {
   std::string tmpl;
   std::string variant;
   try {
+#ifdef ACTION_GO_WITH_REALSENSE
+    constexpr const char* kRealSenseBuildFeature = "enabled";
+#else
+    constexpr const char* kRealSenseBuildFeature = "disabled";
+#endif
+#ifdef ACTION_GO_WITH_APRILTAG
+    constexpr const char* kAprilTagBuildFeature = "enabled";
+#else
+    constexpr const char* kAprilTagBuildFeature = "disabled";
+#endif
+    std::cout << "[generic_sensor_policy_player] build features: realsense="
+              << kRealSenseBuildFeature << " apriltag=" << kAprilTagBuildFeature
+              << "\n";
     const Cli cli = parse_cli(argc, argv);
     event_log.open(cli.event_log);
     event_log.log("process_start",

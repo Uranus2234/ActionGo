@@ -99,9 +99,10 @@ S      ARM 并运行 bfm_zero_stand，对应遥控器 Start
 B      ARM 并运行 ufo_stand，对应遥控器 Left+B
 T      启动 ufo_tracking_zs7
 G      启动 ufo_stand
+V      重新启动命令行 `--auto-action` 指定的动作
 W      停止当前动作并进入模拟 walkrun
 P      停止当前动作并进入 passive
-R      重置仿真
+R      重置仿真并自动进入模拟 walkrun
 SPACE  暂停/继续
 ```
 

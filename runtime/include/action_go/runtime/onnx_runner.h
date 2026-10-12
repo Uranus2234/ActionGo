@@ -7,12 +7,16 @@
 #include <filesystem>
 #include <string>
 #include <unordered_map>
+#include <variant>
 #include <vector>
 
 namespace action_go::runtime {
 
 class OnnxRunner {
  public:
+  enum class TensorElementType { kFloat32, kInt32, kInt64 };
+  using TensorValues = std::variant<std::vector<float>, std::vector<int32_t>, std::vector<int64_t>>;
+
   struct LoadOptions {
     int threads{1};
     std::string execution_provider{"cpu"};
@@ -23,7 +27,23 @@ class OnnxRunner {
   };
 
   struct TensorInput {
-    std::vector<float> values;
+    TensorValues values;
+    std::vector<int64_t> shape;
+
+    TensorInput() = default;
+    TensorInput(std::vector<float> input_values, std::vector<int64_t> input_shape)
+        : values(std::move(input_values)), shape(std::move(input_shape)) {}
+    TensorInput(TensorValues input_values, std::vector<int64_t> input_shape)
+        : values(std::move(input_values)), shape(std::move(input_shape)) {}
+  };
+
+  struct TensorOutput {
+    TensorValues values;
+    std::vector<int64_t> shape;
+  };
+
+  struct TensorExpectation {
+    TensorElementType type{TensorElementType::kFloat32};
     std::vector<int64_t> shape;
   };
 
@@ -56,6 +76,10 @@ class OnnxRunner {
       const std::unordered_map<std::string, TensorInput>& named_inputs,
       const std::unordered_map<std::string, int>& output_dims);
 
+  std::unordered_map<std::string, TensorOutput> run_named_typed(
+      const std::unordered_map<std::string, TensorInput>& named_inputs,
+      const std::unordered_map<std::string, TensorExpectation>& outputs);
+
  private:
   Ort::Env env_{ORT_LOGGING_LEVEL_WARNING, "generic_policy_player"};
   Ort::Session session_{nullptr};
@@ -64,6 +88,8 @@ class OnnxRunner {
   std::vector<std::string> output_names_;
   std::unordered_map<std::string, size_t> output_idx_;
   std::vector<std::vector<int64_t>> input_shapes_;
+  std::unordered_map<std::string, TensorElementType> input_types_;
+  std::unordered_map<std::string, TensorElementType> output_types_;
   std::string selected_execution_provider_{"cpu"};
 };
 

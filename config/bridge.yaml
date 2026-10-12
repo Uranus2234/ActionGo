@@ -1,0 +1,12 @@
+# HandoffGuard runtime configuration. Keep the ONNX asset outside Git.
+risk_model: actions/handoffguard/model/handoffguard_risk_tcn.onnx
+b_action: walkrun
+bfm_action: bfm_zero_stand
+normal_combo: L2+B
+emergency_combo: L2+Y
+normal_confirm_steps: 2
+stand_confirm_steps: 5
+level3_observe_steps: 50
+level4_observe_steps: 25
+auto_switch_step: -1
+risk_boundaries_percent: [8.01123025, 10.5937071, 40.0]

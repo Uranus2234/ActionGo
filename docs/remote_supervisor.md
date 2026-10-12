@@ -76,12 +76,16 @@ SHELL_IDLE
 - 不切 UserCtrl
 - 不接管机器人
 
-按 `Start` 后进入运行态，动作和 safety 才会生效。
+按 `Start` 或 `Left+B` 只会进入 ARM 状态、选择 recovery backend，并启用动作和
+IMU safety 监控。ARM 本身不会切 `UserCtrl`、不会调用 7110，也不会启动 BFM/UFO
+payload；机器人保持当前官方模式。只有有效 IMU 倾角连续达到配置阈值满 60 ms，
+才进入 recovery。
 
 ## 默认遥控按键
 
 ```text
-Start         -> ARM，进入运行态，启用动作/safety
+Start         -> ARM，选择 bfm_zero_stand，启用动作/safety；不立即启动策略
+Left+B        -> ARM，选择备用 ufo_stand；不立即启动策略
 R2+A          -> 停止当前模型，切官方 walkrun，回到 SHELL_IDLE/睡眠态，程序不退出
 Select+Start  -> 切官方 passive，回到 SHELL_IDLE，程序不退出
 
@@ -110,7 +114,8 @@ config/remote_actions.yaml
 ```
 
 Instinct Parkour 额外保护：启动 `g1_parkour` 时会先在官方 walkrun 仍接管的状态下初始化 RealSense、`rt/secondary_imu` torso IMU、ONNX/DDS，并发布当前姿态 hold；ready 后才切 UserCtrl。没有检测到 RealSense 深度相机、没有深度帧或没有 torso IMU 时，不会切 UserCtrl，不会启动策略，并请求保持/回到官方 `walkrun`。切入 UserCtrl 后执行 official ColdStartAgent-style 过渡到 `default_joint_pos`，然后默认直接进入 parkour 模型。
-Instinct parkour 的 LowCmd 发送频率和目标更新按官方方式设置为 `publish_hz=50`、不插值、不限速。
+Instinct parkour 保持官方的 `inference_hz=50`、不做策略帧间插值且不限速；LowCmd
+由独立发布线程以 `publish_hz=500` 重发最新策略目标，避免推理阻塞命令发布。
 当前 `actions/instinct` checkpoint 是官方 InstinctLab onboard 导出，部署时必须使用旧版 `instinct_onboard` 的 shoulder-first 关节顺序；C++ player 已按这个顺序发送和解析 LowCmd/LowState。若改成 InstinctMJ 的 waist-first 顺序，典型现象是 stand 刚开始能顶住一小会儿，随后手、腿、身体乱摆。
 
 ## IMU Safety
@@ -118,7 +123,7 @@ Instinct parkour 的 LowCmd 发送频率和目标更新按官方方式设置为 
 逻辑：
 
 ```text
-任意动作/官方 walkrun 中
+ARM 后的任意动作/官方 walkrun 中
   -> 检测倾角 >= fall_angle_deg 持续 fall_hold_ms
   -> 中断当前动作，不先切回官方
   -> 启动 bfm_zero_stand
@@ -137,6 +142,40 @@ fall_hold_ms: 60
 recover_hold_ms: 200
 safety_cooldown_ms: 1000
 ```
+
+倾角回落到阈值以下、IMU 无效或 IMU 时间戳超过 500 ms 都会清空 60 ms 计时；恢复
+新鲜数据后必须重新连续计满。即使按 ARM 时机器人已经倾倒，也不会绕过去抖直接启动
+recovery。一次持续超阈值只触发一次，恢复完成后才重新启用下一次触发。
+
+远端配置还支持 `safety_auto_recovery`。默认值为 `false`：跌倒后进入阻尼并保持
+未使能，等待操作员重新 ARM；只有显式设为 `true` 时，阻尼后才允许自动启动当前
+选择的 recovery backend。无论开关如何设置，IMU 必须有效且未过期，不能用一次
+失真的遥测样本绕过 debounce gate。
+
+## Generic 策略启动平滑与发布线程
+
+四个 generic 入口默认读取：
+
+```yaml
+handoff:
+  activation_blend_sec: 0.10
+```
+
+也可用 `--activation-blend-sec` 覆盖，合法范围为 `[0, 5]` 秒，`0` 表示关闭。
+普通 ready/start 交权时，player 从最后一条经 `CommandSafetyFilter` 处理的 hold 命令
+开始，在 100 ms 内对 `q/kp/kd` 线性过渡到最新策略目标；策略推理和 motion 时间在
+blend 期间继续推进。warmup 和 current-pose hold 不消耗这 100 ms。transactional
+preview commit 保持 candidate 首帧一致，因此显式旁路 activation blend，并记录
+`activation_blend_bypassed=preview_commit`。
+
+BFM、Unitree、BeyondMimic、Holosoma、ProtoMotions、TWIST、HumanoidGPT 和
+SteadyTray 的 active loop 已将低频推理与高频 LowCmd 发布解耦；Sonic、Instinct 和
+OmniXtreme 保留原有解耦线程并使用相同的 activation blend 语义。`runtime_metrics`
+记录 `publish_count`、`publish_deadline_miss` 和 `max_publish_interval_ms`。
+
+这些指标和 `activation_blend_started/completed` 只能证明进程内软件命令的顺序与
+连续性，不能证明 7110/7111 后固件已经完成物理 ownership 切换。真机仍需结合独立
+`rt/user_lowcmd` 时间戳、LowState 姿态/关节速度和可见卡顿进行验收。
 
 如果 BFM-Zero 刚站起来就切 walkrun 后发软，可以增大：
 
@@ -194,6 +233,10 @@ python3 tools/remote/action_go_udp_send.py --host <机器人IP> --cmd emergency 
   --auth-key-file /run/secrets/actiongo-udp.key --auth-key-id lab-a
 ```
 
+`emergency` / `stop` 兼容命令和 `Select+Start` 都调用 `dampingStop()`：强制停止
+当前策略，进入官方 passive/damping 并回到 `SHELL_IDLE`，程序继续监听。
+停止不设置急停锁存；重新按 ARM 后可启动动作。`damping_exit` 使用同一停止实现，随后退出程序。
+
 UDP 只能选择 `MotionActionController` 已加载的 action，不能上传 command、路径、
 模型、YAML 或 shell 片段。action YAML 的 `command` 本身等同本机可执行代码，必须只
 加载经过审查的受信配置。
@@ -202,3 +245,21 @@ UDP 只能选择 `MotionActionController` 已加载的 action，不能上传 com
 reference 是独立的数据面，当前默认和实际支持范围都限于 loopback；非 loopback
 reference 会直接拒绝。其带 sender identity、时间窗口和重放保护的独立认证协议仍是
 后续工作，不能把 supervisor 命令的签名当作 reference 数据已经受保护。
+
+## 切回 Walkrun 的完成屏障
+
+正常手动停止在稳定 `Running` 状态下按 `7111 请求 -> API ack -> 300 ms overlap ->
+停止 payload` 执行。7111 调用和 overlap 期间不会提前设置 cancel，BFM 等策略会继续
+发布。若停止请求与尚未完成的 7110 UserCtrl RPC 竞态，仍会提前 cancel，并由 mode
+mutex 保证延迟完成的 7110 后面一定跟随 7111。
+
+BeyondMimic 有限动作到达末帧后不会立即退出。player 会冻结最后一帧经
+`CommandSafetyFilter` 处理的 q/kp/kd，以配置的 500 Hz 持续发布并写 complete 文件；
+supervisor 收到 7111 成功返回并完成 overlap 后写 release 文件，player 才停止 hold。
+7111 失败时状态为 `SwitchBackBlocked`，payload 保持运行，可再次请求正常切回，也可被
+emergency/passive damping 立即抢占。
+
+事件中的 `switch_back_ret` 仅表示 RPC 返回；`handoff_overlap_started`、
+`handoff_release_sent` 和 payload 的 `handoff_hold_stopped` 用于证明软件命令交接顺序。
+它们不表示固件物理接管已确认。当前不使用 `LowState.mode_machine`、`GetFsmId` 或
+`GetFsmMode` 作为 release 条件，因为仓库中没有它们与 7111 ownership 的可靠映射。

@@ -1,5 +1,8 @@
 #include "action_go/motion_action_controller.h"
 #include "action_go/runtime/network_command.h"
+#include "action_go/runtime/recovery_arm_gate.h"
+#include "action_go/runtime/bridge_gate.h"
+#include "action_go/runtime/bridge_risk_monitor.h"
 
 #include <unitree/idl/hg/LowState_.hpp>
 #include <unitree/robot/channel/channel_factory.hpp>
@@ -189,6 +192,13 @@ double tiltDegFromQuatWxyz(const std::array<float, 4>& quat_wxyz) {
   if (!std::all_of(quat_wxyz.begin(), quat_wxyz.end(), [](float value) { return std::isfinite(value); })) {
     return std::numeric_limits<double>::quiet_NaN();
   }
+  const double norm_sq = static_cast<double>(quat_wxyz[0]) * quat_wxyz[0] +
+                         static_cast<double>(quat_wxyz[1]) * quat_wxyz[1] +
+                         static_cast<double>(quat_wxyz[2]) * quat_wxyz[2] +
+                         static_cast<double>(quat_wxyz[3]) * quat_wxyz[3];
+  if (!(norm_sq > 1e-12) || !std::isfinite(norm_sq)) {
+    return std::numeric_limits<double>::quiet_NaN();
+  }
   const auto gravity = projectedGravityFromQuatWxyz(quat_wxyz);
   if (!std::isfinite(gravity[2])) return std::numeric_limits<double>::quiet_NaN();
   const double c = std::clamp(-gravity[2], -1.0, 1.0);
@@ -221,12 +231,18 @@ class RemoteMonitor {
     return ImuSample{has_imu_, tilt_deg_, quat_wxyz_, imu_stamp_};
   }
 
+  action_go::runtime::BridgeRiskState riskState() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return risk_state_;
+  }
+
  private:
   void onLowState(const void* message) {
     const auto* low = static_cast<const unitree_hg::msg::dds_::LowState_*>(message);
     const auto quat = low->imu_state().quaternion();
     const double tilt_deg = tiltDegFromQuatWxyz(quat);
     const auto stamp = std::chrono::steady_clock::now();
+    const auto gyro = low->imu_state().gyroscope();
 
     const auto& remote = low->wireless_remote();
 
@@ -237,6 +253,17 @@ class RemoteMonitor {
       imu_stamp_ = stamp;
       has_imu_ = std::isfinite(tilt_deg) &&
                  std::all_of(quat.begin(), quat.end(), [](float value) { return std::isfinite(value); });
+      risk_state_.stamp = stamp;
+      risk_state_.gyro = gyro;
+      risk_state_.projected_gravity = {static_cast<float>(projectedGravityFromQuatWxyz(quat)[0]),
+                                       static_cast<float>(projectedGravityFromQuatWxyz(quat)[1]),
+                                       static_cast<float>(projectedGravityFromQuatWxyz(quat)[2])};
+      if (low->motor_state().size() >= risk_state_.q.size()) {
+        for (size_t i = 0; i < risk_state_.q.size(); ++i) {
+          risk_state_.q[i] = low->motor_state()[i].q();
+          risk_state_.dq[i] = low->motor_state()[i].dq();
+        }
+      }
 
       if (remote.size() >= 4) {
         // RoboJuDo / Unitree mapping:
@@ -255,6 +282,7 @@ class RemoteMonitor {
   double tilt_deg_{0.0};
   std::chrono::steady_clock::time_point imu_stamp_{};
   bool has_imu_{false};
+  action_go::runtime::BridgeRiskState risk_state_{};
   std::atomic<bool> connected_{false};
 };
 
@@ -384,6 +412,7 @@ struct Binding {
 
 struct SafetyConfig {
   bool enable{true};
+  bool auto_recovery{false};
   std::string action{"ufo_stand"};
   std::string return_mode{"walkrun"};
   // RoboJuDo uses 1.0 rad (~57 deg) as the fallen threshold.
@@ -396,9 +425,9 @@ struct SafetyConfig {
 
 struct RemoteConfig {
   std::vector<Binding> bindings;
-  uint16_t emergency_combo{static_cast<uint16_t>(bit(kR2) | bit(kB))};
-  uint16_t walkrun_exit_combo{static_cast<uint16_t>(bit(kR2) | bit(kStart))};
-  uint16_t damping_exit_combo{static_cast<uint16_t>(bit(kR2) | bit(kX))};
+  uint16_t emergency_combo{0};
+  uint16_t walkrun_exit_combo{0};
+  uint16_t damping_exit_combo{0};
   uint16_t shell_start_combo{bit(kStart)};
   uint16_t shell_start_alt_combo{static_cast<uint16_t>(bit(kLeft) | bit(kB))};
   std::string shell_start_action{"bfm_zero_stand"};
@@ -423,6 +452,10 @@ struct Args {
   std::string udp_auth_key_file;
   std::string udp_auth_key_id;
   int udp_port{45678};
+  std::string risk_model;
+  std::string b_action{"walkrun"};
+  int auto_switch_step{-1};
+  bool bridge_enabled{true};
   RemoteConfig remote;
 };
 
@@ -504,6 +537,8 @@ RemoteConfig loadRemoteConfigFile(const std::string& path) {
       cfg.lie_action = value;
     } else if (key == "safety" || key == "safety_enable") {
       cfg.safety.enable = parseBoolText(value, cfg.safety.enable);
+    } else if (key == "safety_auto_recovery" || key == "auto_recovery") {
+      cfg.safety.auto_recovery = parseBoolText(value, cfg.safety.auto_recovery);
     } else if (key == "safety_action" || key == "recovery_action") {
       cfg.safety.action = value;
     } else if (key == "safety_return_mode" || key == "recovery_return_mode") {
@@ -561,6 +596,8 @@ Args parseArgs(int argc, char** argv) {
   std::vector<std::string> cli_bindings;
   bool cli_safety_enable_set = false;
   bool cli_safety_enable = args.remote.safety.enable;
+  bool cli_auto_recovery_set = false;
+  bool cli_auto_recovery = args.remote.safety.auto_recovery;
   std::string cli_safety_action;
   std::string cli_safety_return_mode;
   std::string cli_shell_start_combo;
@@ -594,8 +631,14 @@ Args parseArgs(int argc, char** argv) {
     else if (k == "--udp-group" || k == "--multicast-group") args.udp_group = need("--udp-group");
     else if (k == "--udp-auth-key-file") args.udp_auth_key_file = need("--udp-auth-key-file");
     else if (k == "--udp-auth-key-id") args.udp_auth_key_id = need("--udp-auth-key-id");
+    else if (k == "--risk-model") args.risk_model = need("--risk-model");
+    else if (k == "--b-action") args.b_action = need("--b-action");
+    else if (k == "--auto-switch-step") args.auto_switch_step = std::stoi(need("--auto-switch-step"));
+    else if (k == "--bridge-disable") args.bridge_enabled = false;
     else if (k == "--safety-enable") { cli_safety_enable_set = true; cli_safety_enable = true; }
     else if (k == "--safety-disable") { cli_safety_enable_set = true; cli_safety_enable = false; }
+    else if (k == "--safety-auto-recovery") { cli_auto_recovery_set = true; cli_auto_recovery = true; }
+    else if (k == "--safety-no-auto-recovery") { cli_auto_recovery_set = true; cli_auto_recovery = false; }
     else if (k == "--safety-action") cli_safety_action = need("--safety-action");
     else if (k == "--safety-return-mode") cli_safety_return_mode = need("--safety-return-mode");
     else if (k == "--shell-start-combo" || k == "--arm-combo") cli_shell_start_combo = need(k.c_str());
@@ -632,14 +675,16 @@ Args parseArgs(int argc, char** argv) {
           << "  lie_down: L2+Down\n"
           << "  lie_action: lie_down_beyondmimic\n"
           << "  safety_enable: true\n"
+          << "  safety_auto_recovery: false\n"
           << "  safety_action: ufo_stand\n"
           << "  fall_angle_deg: 57.3       # RoboJuDo 1.0 rad\n"
-          << "  recover_angle_deg: 20.0\n"
+          << "  recover_angle_deg: 30.0\n"
           << "  recover_hold_ms: 1200\n\n"
           << "Safety options:\n"
           << "  --safety-enable/--safety-disable\n"
+          << "  --safety-auto-recovery/--safety-no-auto-recovery\n"
           << "  --safety-action ufo_stand --safety-return-mode walkrun\n"
-          << "  --fall-angle-deg 57.3 --recover-angle-deg 20 --recover-hold-ms 1200\n\n"
+          << "  --fall-angle-deg 57.3 --recover-angle-deg 30 --recover-hold-ms 1200\n\n"
           << "Shell options:\n"
           << "  --shell-start-combo Start --shell-start-alt-combo Left+B\n"
           << "  --shell-damping-combo Select+Start --shell-walkrun-combo R2+A\n"
@@ -667,6 +712,9 @@ Args parseArgs(int argc, char** argv) {
 
   appendDefaultMotionConfigPath(args.config);
   appendDefaultRemoteMapPath(args.remote_map);
+  if (args.risk_model.empty()) {
+    if (const char* model = std::getenv("ACTION_GO_RISK_MODEL")) args.risk_model = model;
+  }
   if (args.event_log.empty()) {
     if (const char* env_log = std::getenv("ACTION_GO_EVENT_LOG")) {
       args.event_log = env_log;
@@ -678,6 +726,7 @@ Args parseArgs(int argc, char** argv) {
   }
 
   if (cli_safety_enable_set) args.remote.safety.enable = cli_safety_enable;
+  if (cli_auto_recovery_set) args.remote.safety.auto_recovery = cli_auto_recovery;
   if (!cli_safety_action.empty()) args.remote.safety.action = cli_safety_action;
   if (!cli_safety_return_mode.empty()) args.remote.safety.return_mode = cli_safety_return_mode;
   if (!cli_shell_start_combo.empty()) args.remote.shell_start_combo = parseOptionalCombo(cli_shell_start_combo);
@@ -794,7 +843,7 @@ int main(int argc, char** argv) {
         std::cout << "  " << comboName(combo) << " -> " << desc << "\n";
       }
     };
-    print_special_combo(args.remote.emergency_combo, "emergencyStop, keep alive");
+    print_special_combo(args.remote.emergency_combo, "dampingStop, return to shell");
     print_special_combo(args.remote.walkrun_exit_combo, "switch to WALKRUN, exit");
     print_special_combo(args.remote.damping_exit_combo, "dampingStop, exit");
     print_special_combo(args.remote.shell_start_combo, "ARM shell: enable actions/safety");
@@ -810,7 +859,8 @@ int main(int argc, char** argv) {
                 << args.remote.safety.fall_hold_ms << " ms; return "
                 << args.remote.safety.return_mode << " when tilt <= "
                 << args.remote.safety.recover_angle_deg << " deg for "
-                << args.remote.safety.recover_hold_ms << " ms\n";
+                << args.remote.safety.recover_hold_ms << " ms; auto recovery="
+                << (args.remote.safety.auto_recovery ? "on" : "off") << "\n";
     } else {
       std::cout << "  IMU safety disabled\n";
     }
@@ -842,17 +892,33 @@ int main(int argc, char** argv) {
     std::string scheduled_action;
     std::chrono::steady_clock::time_point scheduled_time;
 
-    enum class SafetyState { Normal, Recovering };
+    enum class SafetyState { Normal, Recovering, Damped };
     SafetyState safety_state = SafetyState::Normal;
-    bool fall_timer_active = false;
     bool recover_timer_active = false;
-    auto fall_since = std::chrono::steady_clock::now();
     auto recover_since = std::chrono::steady_clock::now();
     auto last_safety_finish = std::chrono::steady_clock::now() -
         std::chrono::milliseconds(std::max(0, args.remote.safety.cooldown_ms));
     bool shell_armed = false;
     bool lie_action_active = false;
+    std::unique_ptr<action_go::runtime::BridgeRiskMonitor> bridge_risk;
+    action_go::runtime::BridgeGate bridge_gate;
+    action_go::runtime::DoubleClickCombo normal_bridge_combo;
+    action_go::runtime::DoubleClickCombo emergency_bridge_combo;
+    int bridge_step = 0;
+    bool bridge_normal_pending = false;
+    bool bridge_emergency_pending = false;
+    if (args.bridge_enabled && !args.risk_model.empty()) {
+      bridge_risk = std::make_unique<action_go::runtime::BridgeRiskMonitor>(
+          action_go::runtime::BridgeRiskMonitor::Config{args.risk_model});
+      bridge_risk->load();
+      std::cout << "[action_go_remote_test][bridge] risk model loaded: " << args.risk_model
+                << " provider=" << bridge_risk->risk_percent() << " B=" << args.b_action << std::endl;
+    }
     std::string selected_safety_action = args.remote.safety.action;
+    action_go::runtime::RecoveryArmGate recovery_arm_gate({
+        args.remote.safety.fall_angle_deg,
+        std::chrono::milliseconds(args.remote.safety.fall_hold_ms),
+        std::chrono::milliseconds(500)});
 
     auto requestAction = [&](const std::string& action,
                              std::chrono::steady_clock::time_point when,
@@ -911,62 +977,119 @@ int main(int argc, char** argv) {
 
     auto startSafetyRecovery = [&](double tilt_deg) {
       scheduled_action.clear();
-      fall_timer_active = false;
       recover_timer_active = false;
-      safety_state = SafetyState::Recovering;
       std::cerr << "[action_go_remote_test][safety] robot fallen: tilt="
                 << tilt_deg << " deg >= " << args.remote.safety.fall_angle_deg
-                << " deg, switch to " << selected_safety_action << std::endl;
-      ensureSafetyRecoveryRunning("fall_detected");
+                << " deg, damping" << std::endl;
+      safety_state = SafetyState::Damped;
+      shell_armed = false;
+      active_action.clear();
+      controller.dampingStop();
+      if (args.remote.safety.auto_recovery) {
+        shell_armed = true;
+        safety_state = SafetyState::Recovering;
+        std::cerr << "[action_go_remote_test][safety] auto recovery enabled, switch to "
+                  << selected_safety_action << std::endl;
+        ensureSafetyRecoveryRunning("fall_detected");
+      }
     };
 
     auto safetyTick = [&]() {
       if (!args.remote.safety.enable) return;
-      if (safety_state == SafetyState::Normal && controller.isRunning()) {
+      if (safety_state == SafetyState::Damped) return;
+
+      const auto now = std::chrono::steady_clock::now();
+      const ImuSample imu = remote.imu();
+
+      if (safety_state == SafetyState::Recovering) {
+        // BFM/UFO owns recovery once started.  Do not apply the normal
+        // fall-angle safety path here: posture is expected to remain above
+        // fall_angle_deg during much of a get-up motion.  Keep only payload
+        // failure protection and the stable-upright handoff to walkrun.
+        const std::string current = controller.currentAction();
+        if (controller.hasError() || !controller.isRunning() ||
+            current != selected_safety_action) {
+          std::cerr << "[action_go_remote_test][safety] recovery failed; "
+                    << "enter damping and return to SHELL_IDLE: "
+                    << controller.lastError() << std::endl;
+          scheduled_action.clear();
+          active_action.clear();
+          shell_armed = false;
+          safety_state = SafetyState::Damped;
+          recover_timer_active = false;
+          controller.dampingStop();
+          last_status = controller.update();
+          return;
+        }
+
+        if (!imu.valid || now - imu.stamp > std::chrono::milliseconds(500)) {
+          recover_timer_active = false;
+          return;
+        }
+        if (imu.tilt_deg > args.remote.safety.recover_angle_deg) {
+          recover_timer_active = false;
+          return;
+        }
+        if (!recover_timer_active) {
+          recover_since = now;
+          recover_timer_active = true;
+        }
+        if (now - recover_since <
+            std::chrono::milliseconds(std::max(0, args.remote.safety.recover_hold_ms))) {
+          return;
+        }
+
+        std::cout << "[action_go_remote_test][safety] recovered upright: tilt="
+                  << imu.tilt_deg << " deg <= " << args.remote.safety.recover_angle_deg
+                  << " deg, switch back to " << args.remote.safety.return_mode << std::endl;
+        if (controller.stopAndSwitchToOfficial(args.remote.safety.return_mode)) {
+          active_action.clear();
+          scheduled_action.clear();
+          safety_state = SafetyState::Normal;
+          recover_timer_active = false;
+          last_safety_finish = now;
+          last_status = controller.update();
+        } else {
+          std::cerr << "[action_go_remote_test][safety] switch back warning: "
+                    << controller.lastError() << std::endl;
+          recover_timer_active = false;
+        }
+        return;
+      }
+
+      if (controller.isRunning()) {
         const std::string current = controller.currentAction();
         if (!current.empty() && !controller.actionSafetyEnabled(current)) {
-          fall_timer_active = false;
+          recovery_arm_gate.reset_debounce();
           recover_timer_active = false;
           return;
         }
       }
 
-      const auto now = std::chrono::steady_clock::now();
-      const ImuSample imu = remote.imu();
       // Invalid or stale samples must not allow a fall/recovery hold timer to
       // bridge a telemetry gap.  A later valid sample starts a new hold.
       if (!imu.valid || imu.stamp.time_since_epoch().count() == 0 ||
           now - imu.stamp > std::chrono::milliseconds(500)) {
-        fall_timer_active = false;
+        recovery_arm_gate.reset_debounce();
         recover_timer_active = false;
         return;
       }
 
-      const bool fallen = imu.tilt_deg >= args.remote.safety.fall_angle_deg;
       const bool upright = imu.tilt_deg <= args.remote.safety.recover_angle_deg;
 
       if (safety_state == SafetyState::Normal) {
         recover_timer_active = false;
         if (now - last_safety_finish < std::chrono::milliseconds(std::max(0, args.remote.safety.cooldown_ms))) {
-          fall_timer_active = false;
+          recovery_arm_gate.reset_debounce();
           return;
         }
-        if (!fallen) {
-          fall_timer_active = false;
-          return;
-        }
-        if (!fall_timer_active) {
-          fall_since = now;
-          fall_timer_active = true;
-        }
-        if (now - fall_since >= std::chrono::milliseconds(std::max(0, args.remote.safety.fall_hold_ms))) {
+        if (recovery_arm_gate.observe(imu.valid, imu.tilt_deg, imu.stamp, now)) {
           startSafetyRecovery(imu.tilt_deg);
         }
         return;
       }
 
       // Recovering: keep BFM-Zero alive until the IMU is stable upright.
-      fall_timer_active = false;
       ensureSafetyRecoveryRunning("recovering_watchdog");
 
       if (!upright) {
@@ -988,6 +1111,7 @@ int main(int argc, char** argv) {
         active_action.clear();
         scheduled_action.clear();
         safety_state = SafetyState::Normal;
+        recovery_arm_gate.reset_debounce();
         recover_timer_active = false;
         last_safety_finish = now;
         last_status = controller.update();
@@ -1000,7 +1124,7 @@ int main(int argc, char** argv) {
 
     auto resetSafetyState = [&]() {
       safety_state = SafetyState::Normal;
-      fall_timer_active = false;
+      recovery_arm_gate.reset_debounce();
       recover_timer_active = false;
       last_safety_finish = std::chrono::steady_clock::now() -
           std::chrono::milliseconds(std::max(0, args.remote.safety.cooldown_ms));
@@ -1018,6 +1142,73 @@ int main(int argc, char** argv) {
       controller.dampingStop();
       g_stop_level.store(0);
       last_status = controller.update();
+    };
+
+    auto switchToBridgeB = [&]() {
+      if (args.b_action == "walkrun") return controller.stopAndSwitchToOfficial("walkrun");
+      if (!controller.hasAction(args.b_action)) {
+        std::cerr << "[action_go_remote_test][bridge] B action is not registered: " << args.b_action << std::endl;
+        return false;
+      }
+      return controller.startAction(args.b_action);
+    };
+
+    auto bridgeTick = [&]() {
+      if (!bridge_risk) return;
+      const float risk = bridge_risk->update(remote.riskState());
+      const uint16_t mask = remote.mask();
+      const bool normal_request = shell_armed &&
+          normal_bridge_combo.update((mask & bit(kL2)) != 0, (mask & bit(kB)) != 0);
+      const bool emergency_request = shell_armed &&
+          emergency_bridge_combo.update((mask & bit(kL2)) != 0, (mask & bit(kY)) != 0);
+      if (normal_request) bridge_normal_pending = true;
+      if (emergency_request) bridge_emergency_pending = true;
+      ++bridge_step;
+      const bool auto_normal = args.auto_switch_step >= 0 && bridge_step == args.auto_switch_step;
+      const auto imu = remote.imu();
+      const auto state = remote.riskState();
+      double dq_rms = 0.0;
+      for (float value : state.dq) dq_rms += static_cast<double>(value) * value;
+      dq_rms = std::sqrt(dq_rms / state.dq.size());
+      double gyro_norm = 0.0;
+      for (float value : state.gyro) gyro_norm += static_cast<double>(value) * value;
+      const bool stand_ready = imu.valid && imu.tilt_deg <= 20.0 &&
+                               std::sqrt(gyro_norm) <= 0.8 && dq_rms <= 1.5;
+      const auto output = bridge_gate.tick(risk,
+                                           bridge_normal_pending || (shell_armed && auto_normal),
+                                           bridge_emergency_pending, stand_ready);
+      if (output.command == action_go::runtime::BridgeCommand::kStartBfm ||
+          output.command == action_go::runtime::BridgeCommand::kDamping ||
+          output.rejected) {
+        bridge_normal_pending = false;
+        bridge_emergency_pending = false;
+      }
+      if (output.rejected) {
+        std::cerr << "[action_go_remote_test][bridge] normal switch rejected risk=" << risk
+                  << " level=" << output.risk_level << std::endl;
+      }
+      if (output.command == action_go::runtime::BridgeCommand::kStartBfm) {
+        if (controller.isRunning()) controller.interruptForRecovery();
+        if (!controller.startAction("bfm_zero_stand")) {
+          std::cerr << "[action_go_remote_test][bridge] BFM start failed: " << controller.lastError() << std::endl;
+          bridge_gate.reset();
+          controller.dampingStop();
+        } else {
+          active_action = "bfm_zero_stand";
+          std::cout << "[action_go_remote_test][bridge] risk=" << risk << " -> BFM stand" << std::endl;
+        }
+      } else if (output.command == action_go::runtime::BridgeCommand::kDamping) {
+        std::cerr << "[action_go_remote_test][bridge] emergency observation timeout risk=" << risk << std::endl;
+        controller.dampingStop();
+      } else if (output.command == action_go::runtime::BridgeCommand::kSwitchToB) {
+        if (!switchToBridgeB()) {
+          std::cerr << "[action_go_remote_test][bridge] B switch failed: " << controller.lastError() << std::endl;
+          controller.dampingStop();
+        } else {
+          active_action.clear();
+          std::cout << "[action_go_remote_test][bridge] BFM ready -> B=" << args.b_action << std::endl;
+        }
+      }
     };
 
     auto enterShellWalkrun = [&](const std::string& source) {
@@ -1038,10 +1229,6 @@ int main(int argc, char** argv) {
     };
 
     auto armShell = [&](const std::string& source, const std::string& recovery_action) {
-      if (controller.emergencyLatched()) {
-        controller.clearEmergencyLatch();
-        std::cout << "[action_go_remote_test][shell] local reset cleared emergency latch\n";
-      }
       if (controller.isRunning()) {
         std::cerr << "[action_go_remote_test][shell] cannot arm while action is running: "
                   << controller.currentAction() << std::endl;
@@ -1049,15 +1236,15 @@ int main(int argc, char** argv) {
       }
       shell_armed = true;
       selected_safety_action = recovery_action.empty() ? args.remote.safety.action : recovery_action;
+      recovery_arm_gate.arm(selected_safety_action);
       scheduled_action.clear();
       resetSafetyState();
       std::cout << "[action_go_remote_test][shell] ARMED by " << source
-                << ": actions and IMU safety enabled, recovery="
+                << ": actions and IMU fall monitoring enabled, recovery="
                 << selected_safety_action << std::endl;
-      safety_state = SafetyState::Recovering;
-      fall_timer_active = false;
-      recover_timer_active = false;
-      ensureSafetyRecoveryRunning("arm:" + source);
+      // ARM only enables the shell and chooses the recovery backend.  The
+      // debounced IMU path is the sole transition into recovery.
+      safety_state = SafetyState::Normal;
     };
 
     auto startLieAction = [&](const std::string& source) {
@@ -1087,12 +1274,7 @@ int main(int argc, char** argv) {
 
     auto handleNetworkCommand = [&](const NetworkCommand& cmd) -> bool {
       if (cmd.type == NetworkCommandType::kEmergency) {
-        std::cerr << "[action_go_remote_test] udp emergency requested" << std::endl;
-        controller.emergencyStop();
-        active_action.clear();
-        scheduled_action.clear();
-        shell_armed = false;
-        lie_action_active = false;
+        enterShellDamping("udp stop");
         return false;
       }
       if (cmd.type == NetworkCommandType::kDampingExit) {
@@ -1180,19 +1362,14 @@ int main(int argc, char** argv) {
       if (comboRising(now_mask, prev_mask, args.remote.lie_down_combo)) {
         startLieAction("remote " + comboName(args.remote.lie_down_combo));
       }
-      if (stop_level == 1 || comboRising(now_mask, prev_mask, args.remote.emergency_combo)) {
-        std::cerr << "[action_go_remote_test] emergency stop requested" << std::endl;
-        controller.emergencyStop();
-        g_stop_level.store(0);
-        active_action.clear();
-        scheduled_action.clear();
-        shell_armed = false;
-        lie_action_active = false;
+      if (comboRising(now_mask, prev_mask, args.remote.emergency_combo)) {
+        enterShellDamping("remote " + comboName(args.remote.emergency_combo));
       }
 
       if (shell_armed) {
         safetyTick();
       }
+      bridgeTick();
 
       if (shell_armed && !scheduled_action.empty() && std::chrono::steady_clock::now() >= scheduled_time) {
         const std::string action = scheduled_action;
@@ -1235,6 +1412,7 @@ int main(int argc, char** argv) {
         } else if (status == MotionActionController::Status::Failed) {
           std::cerr << "[action_go_remote_test] action failed: "
                     << controller.lastError() << std::endl;
+          const std::string failed_action = active_action;
           if (lie_action_active || active_action == args.remote.lie_action) {
             lie_action_active = false;
             shell_armed = false;
@@ -1247,6 +1425,10 @@ int main(int argc, char** argv) {
             continue;
           }
           active_action.clear();
+          if (failed_action == "bfm_zero_stand") {
+            bridge_gate.reset();
+            controller.dampingStop();
+          }
         }
         last_status = status;
       }

@@ -36,6 +36,7 @@ FilteredCommand CommandSafetyFilter::filter(const std::vector<float>& q,
     out.q.resize(motor_count, config_.fallback_q);
     out.kp.resize(motor_count, 0.f);
     out.kd.resize(motor_count, 0.f);
+    out.tau.resize(motor_count, 0.f);
     return out;
   }
 
@@ -55,6 +56,7 @@ FilteredCommand CommandSafetyFilter::filter(const std::vector<float>& q,
   out.q.resize(motor_count);
   out.kp.resize(motor_count);
   out.kd.resize(motor_count);
+  out.tau.resize(motor_count, 0.f);
 
   for (size_t i = 0; i < motor_count; ++i) {
     float q_fallback = config_.fallback_q;
@@ -63,6 +65,19 @@ FilteredCommand CommandSafetyFilter::filter(const std::vector<float>& q,
     float qv = checked_finite(safe_at(q, i, q_fallback), "q", i, config_.finite_check);
     float kpv = checked_finite(safe_at(kp, i, 0.f), "kp", i, config_.finite_check);
     float kdv = checked_finite(safe_at(kd, i, 0.f), "kd", i, config_.finite_check);
+    kpv = std::clamp(kpv, 0.f, std::max(0.f, config_.kp_max));
+    kdv = std::clamp(kdv, 0.f, std::max(0.f, config_.kd_max));
+    float desired_torque = 0.f;
+    if (config_.preserve_pd_torque && !allow_stale_state) {
+      if (i >= state.q.size() || i >= state.dq.size() || i >= limits.torque.size() ||
+          !std::isfinite(state.q[i]) || !std::isfinite(state.dq[i]) ||
+          !std::isfinite(limits.torque[i]) || limits.torque[i] <= 0.f) {
+        throw std::runtime_error("PD torque filter requires finite q/dq and positive torque limits");
+      }
+      desired_torque = std::clamp(kpv * (qv - state.q[i]) - kdv * state.dq[i],
+                                  -limits.torque[i], limits.torque[i]);
+      if (kpv > 1e-6f) qv = state.q[i] + (desired_torque + kdv * state.dq[i]) / kpv;
+    }
 
     if (config_.finite_check && i < state.q.size() && !std::isfinite(state.q[i])) {
       throw std::runtime_error("command safety rejected LowState q[" + std::to_string(i) + "] NaN/Inf");
@@ -78,8 +93,15 @@ FilteredCommand CommandSafetyFilter::filter(const std::vector<float>& q,
       qv = std::clamp(qv, state.q[i] - step, state.q[i] + step);
     }
 
-    kpv = std::clamp(kpv, 0.f, std::max(0.f, config_.kp_max));
-    kdv = std::clamp(kdv, 0.f, std::max(0.f, config_.kd_max));
+    if (config_.preserve_pd_torque && !allow_stale_state) {
+      out.tau[i] = desired_torque - (kpv * (qv - state.q[i]) - kdv * state.dq[i]);
+      if (std::abs(out.tau[i]) > limits.torque[i] + 1e-3f) {
+        kpv = 0.f;
+        kdv = 0.f;
+        out.tau[i] = desired_torque;
+      }
+      checked_finite(out.tau[i], "tau", i, config_.finite_check);
+    }
 
     out.q[i] = qv;
     out.kp[i] = kpv;

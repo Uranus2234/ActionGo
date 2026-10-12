@@ -29,6 +29,7 @@ public:
         SwitchingToUserCtrl,
         Running,
         SwitchingBack,
+        SwitchBackBlocked,
         Done,
         Failed
     };
@@ -67,6 +68,10 @@ public:
         double prestart_ready_timeout_sec{3.0};
         std::string ready_file;
         std::string start_file;
+        bool postrun_handoff_hold{false};
+        std::string handoff_complete_file;
+        std::string handoff_release_file;
+        double switch_back_overlap_sec{0.30};
         std::string supervisor_event_log;
         std::string payload_event_log;
         std::string event_log_arg;
@@ -107,10 +112,7 @@ public:
     // switching back to official walkrun/passive, so a recovery action can be
     // started immediately.
     void interruptForRecovery();
-    void emergencyStop();
     void dampingStop();
-    void clearEmergencyLatch();
-    bool emergencyLatched() const;
     bool stopAndSwitchToOfficial(const std::string& mode = "walkrun");
 
     bool isRunning() const;
@@ -138,7 +140,8 @@ private:
                           std::string& error_message,
                           const std::string& phase);
     bool startCommandStringAsync(const std::string& command, std::string& error_message);
-    bool waitRunningCommand(const std::string& command, std::string& error_message);
+    bool waitRunningCommand(const std::string& command, std::string& error_message,
+                            const ActionConfig* action = nullptr);
     bool waitForFile(const std::string& path, double timeout_sec, std::string& error_message);
     bool touchFile(const std::string& path, std::string& error_message);
     void prepareActionEventLog(ActionConfig& action);
@@ -148,6 +151,11 @@ private:
                                     const std::string& mode,
                                     const ActionConfig& action,
                                     const std::string& reason);
+    bool completeSwitchBack(const ActionConfig& action,
+                            const std::string& mode,
+                            const std::string& reason,
+                            std::string& error_message);
+    ActionConfig currentActionConfig() const;
     void terminateRunningProcess(bool force);
     void joinWorkerIfJoinable();
     bool waitDurationOrCancel(double duration_sec);
@@ -178,10 +186,11 @@ private:
     std::mutex worker_mutex_;
     std::mutex process_mutex_;
     std::mutex control_mode_mutex_;
+    std::mutex switch_back_mutex_;
     std::thread worker_;
     std::atomic<bool> cancel_requested_{false};
     std::atomic<bool> suppress_switch_back_on_cancel_{false};
-    std::atomic<bool> emergency_latched_{false};
+    std::atomic<bool> handoff_release_sent_{false};
     std::atomic<Status> status_{Status::Idle};
     std::atomic<pid_t> running_pid_{-1};
     std::string current_action_;

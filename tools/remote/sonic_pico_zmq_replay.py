@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Replay or synthesize the upstream GEAR-SONIC PICO protocol-v3 pose stream."""
+"""Replay or synthesize upstream GEAR-SONIC PICO pose/planner streams."""
 
 from __future__ import annotations
 
@@ -29,7 +29,7 @@ def dtype_name(value: np.ndarray) -> str:
     return names[dtype]
 
 
-def pack_pose(fields: dict[str, np.ndarray], topic: str) -> bytes:
+def pack_message(fields: dict[str, np.ndarray], topic: str, version: int) -> bytes:
     metadata = []
     payload = []
     for name, raw in fields.items():
@@ -39,12 +39,30 @@ def pack_pose(fields: dict[str, np.ndarray], topic: str) -> bytes:
         metadata.append({"name": name, "dtype": dtype_name(value), "shape": list(value.shape)})
         payload.append(value.tobytes())
     header = json.dumps(
-        {"v": 3, "endian": "le", "count": 1, "fields": metadata},
+        {"v": version, "endian": "le", "count": 1, "fields": metadata},
         separators=(",", ":"),
     ).encode("utf-8")
     if len(header) > HEADER_SIZE:
         raise ValueError(f"header is too large: {len(header)} > {HEADER_SIZE}")
     return topic.encode("utf-8") + header.ljust(HEADER_SIZE, b"\0") + b"".join(payload)
+
+
+def planner_fields(args: argparse.Namespace) -> dict[str, np.ndarray]:
+    return {
+        "mode": np.asarray([args.planner_mode], dtype=np.int32),
+        "movement": np.asarray(args.movement, dtype=np.float32),
+        "facing": np.asarray(args.facing, dtype=np.float32),
+        "speed": np.asarray([args.speed], dtype=np.float32),
+        "height": np.asarray([args.height], dtype=np.float32),
+    }
+
+
+def command_fields(*, start: bool, stop: bool, planner: bool) -> dict[str, np.ndarray]:
+    return {
+        "start": np.asarray([start], dtype=np.uint8),
+        "stop": np.asarray([stop], dtype=np.uint8),
+        "planner": np.asarray([planner], dtype=np.uint8),
+    }
 
 
 def synthetic_window(first_frame: int, count: int) -> dict[str, np.ndarray]:
@@ -79,6 +97,12 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--bind", default="tcp://*:5556")
     parser.add_argument("--topic", default="pose")
+    parser.add_argument("--mode", choices=("planner", "pose"), default="pose")
+    parser.add_argument("--planner-mode", type=int, choices=range(27), default=2)
+    parser.add_argument("--movement", type=float, nargs=3, metavar=("X", "Y", "Z"), default=(0.3, 0.0, 0.0))
+    parser.add_argument("--facing", type=float, nargs=3, metavar=("X", "Y", "Z"), default=(1.0, 0.0, 0.0))
+    parser.add_argument("--speed", type=float, default=-1.0)
+    parser.add_argument("--height", type=float, default=-1.0)
     parser.add_argument("--recording", type=Path, help="pose_*.npz file or directory from the upstream streamer")
     parser.add_argument("--hz", type=float, default=50.0)
     parser.add_argument("--frames-per-packet", type=int, default=5)
@@ -86,14 +110,31 @@ def main() -> int:
     args = parser.parse_args()
     if args.hz <= 0 or args.frames_per_packet <= 0:
         parser.error("--hz and --frames-per-packet must be positive")
+    if args.mode == "planner" and args.recording:
+        parser.error("--recording is only valid with --mode pose")
+    if not np.all(np.isfinite((*args.movement, *args.facing, args.speed, args.height))):
+        parser.error("planner command values must be finite")
 
     recordings = load_recordings(args.recording.expanduser()) if args.recording else []
     context = zmq.Context.instance()
     socket = context.socket(zmq.PUB)
     socket.setsockopt(zmq.LINGER, 0)
     socket.bind(args.bind)
-    print(f"[sonic_pico_replay] PUB {args.bind} topic={args.topic} protocol=v3")
+    data_topic = "planner" if args.mode == "planner" else args.topic
+    data_version = 1 if args.mode == "planner" else 3
+    print(f"[sonic_pico_replay] PUB {args.bind} mode={args.mode} topic={data_topic} protocol=v{data_version}")
     time.sleep(0.5)
+
+    data = pack_message(planner_fields(args), "planner", 1) if args.mode == "planner" else None
+    control = pack_message(
+        command_fields(start=True, stop=False, planner=args.mode == "planner"), "command", 1
+    )
+    # Match the manager ordering: publish one valid data packet before handing over control.
+    if data is not None:
+        socket.send(data)
+    else:
+        socket.send(pack_message(synthetic_window(0, args.frames_per_packet), args.topic, 3))
+    socket.send(control)
 
     period = 1.0 / args.hz
     started = time.monotonic()
@@ -101,10 +142,17 @@ def main() -> int:
     try:
         while args.duration_sec <= 0 or time.monotonic() - started < args.duration_sec:
             tick = time.monotonic()
-            fields = recordings[sequence % len(recordings)] if recordings else synthetic_window(
-                sequence, args.frames_per_packet
-            )
-            socket.send(pack_pose(fields, args.topic))
+            if args.mode == "planner":
+                socket.send(data)
+            else:
+                fields = recordings[sequence % len(recordings)] if recordings else synthetic_window(
+                    sequence, args.frames_per_packet
+                )
+                socket.send(pack_message(fields, args.topic, 3))
+            # A real operator sends this after the player is listening. Repeating the
+            # idempotent state makes unattended replay robust to PUB/SUB slow joiners.
+            if sequence % max(1, int(round(args.hz))) == 0:
+                socket.send(control)
             sequence += 1
             remaining = tick + period - time.monotonic()
             if remaining > 0:
@@ -112,6 +160,8 @@ def main() -> int:
     except KeyboardInterrupt:
         pass
     finally:
+        socket.send(pack_message(command_fields(start=False, stop=True, planner=True), "command", 1))
+        time.sleep(0.02)
         socket.close()
     print(f"[sonic_pico_replay] sent={sequence}")
     return 0

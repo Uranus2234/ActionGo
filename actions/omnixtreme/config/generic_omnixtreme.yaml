@@ -50,11 +50,23 @@ action:
   action_dim: 29
   residual_gain: 1.0
   initial_noise_scale: 1.0
+  # Official deploy_mujoco.py default: dynamically back-solve admissible PD
+  # targets from the Unitree torque-speed envelope.
+  clip_envelope: true
+  # Real hardware already contains actuator friction. The official public
+  # release only applies this modeled loss in MuJoCo; the sim launcher below
+  # overrides this to true, while the unreleased real-robot C++ path cannot be
+  # used as evidence for adding feedforward torque on hardware.
   friction_feedforward: false
   joint_limit_clamp: false
 handoff:
   cmd_topic: rt/user_lowcmd
   state_topic: rt/lowstate
   mode_machine: 5
+  activation_blend_sec: 0.10
   damping_on_stop: false
-safety: {}
+safety:
+  # The official OmniXtreme deployment uses its dynamic torque-speed envelope,
+  # not a mechanical joint-angle clamp on the PD target. Keep the shared
+  # finite/stale/kp/kd checks while preserving the policy target semantics.
+  joint_limit_enabled: false

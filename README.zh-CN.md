@@ -8,7 +8,13 @@ ActionGo 是面向 Unitree G1 的模板化全身策略运行时：用 YAML 描�
 
 ## 安装与构建
 
-要求 CMake 3.22+、C++17、Unitree SDK2、Eigen3、yaml-cpp、zlib 和 OpenSSL。CPU ONNX Runtime 不随源码仓库打包，使用固定版本和 SHA256 的下载器安装：
+要求 CMake 3.22+、C++17、Unitree SDK2、Eigen3、yaml-cpp、zlib、OpenSSL 和 nlohmann/json。Ubuntu 可先安装系统开发头文件：
+
+```bash
+sudo apt install libeigen3-dev libyaml-cpp-dev zlib1g-dev libssl-dev nlohmann-json3-dev
+```
+
+CPU ONNX Runtime 不随源码仓库打包，使用固定版本和 SHA256 的下载器安装：
 
 ```bash
 tools/deps/fetch_onnxruntime.sh
@@ -39,7 +45,7 @@ ACTION_GO_NET=lo tools/launch/start_dry_run.sh
 ACTION_GO_NET=<机器人网卡> tools/launch/start_safe.sh
 ```
 
-程序默认停在 `SHELL_IDLE`，不会立即接管。确认机器人已在官方 walkrun 或 damping 后再 ARM。`R2+A` 停止动作并回官方 walkrun，`Select+Start` 强制进入 passive/damping。OmniXtreme、SteadyTray、部分 BeyondMimic/UFO 恢复动作和 unitree_rl_mjlab 默认关闭 supervisor IMU interruption，必须在更强物理保护下单独审核。
+程序默认停在 `SHELL_IDLE`，不会立即接管。确认机器人已在官方 walkrun 或 damping 后再 ARM。`Start`/`Left+B` 只选择 recovery backend 并启用监控，不切 `UserCtrl`、不启动 BFM/UFO；倾角连续超过 `57.3 deg` 满 `60 ms` 后才触发 recovery。`R2+A` 停止动作并回官方 walkrun，`Select+Start` 强制进入 passive/damping。OmniXtreme、SteadyTray、部分 BeyondMimic/UFO 恢复动作和 unitree_rl_mjlab 默认关闭 supervisor IMU interruption，必须在更强物理保护下单独审核。
 
 ### 默认遥控按键
 
@@ -47,8 +53,8 @@ ACTION_GO_NET=<机器人网卡> tools/launch/start_safe.sh
 
 | 按键 | 行为 |
 |---|---|
-| `Start` | 使用 `bfm_zero_stand` ARM，启用动作和 IMU safety |
-| `Left+B` | 使用备用 `ufo_stand` recovery backend ARM |
+| `Start` | 使用 `bfm_zero_stand` ARM，启用动作和 IMU safety；不立即启动策略 |
+| `Left+B` | 使用备用 `ufo_stand` recovery backend ARM；不立即启动策略 |
 | `R2+A` | 停止当前动作，回官方 walkrun，进入 `SHELL_IDLE` |
 | `Select+Start` | 停止当前动作，进入官方 passive/damping 和 `SHELL_IDLE` |
 | `R2+Down` | `kick_right` |

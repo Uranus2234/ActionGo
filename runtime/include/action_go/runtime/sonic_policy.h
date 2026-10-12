@@ -13,6 +13,11 @@ namespace action_go::runtime {
 inline constexpr int kSonicMotorCount = 29;
 inline constexpr int kSonicSmplFrames = kSonicSmplReferenceFrames;
 
+enum class SonicObservationLayout {
+  kDefault,
+  kV11,
+};
+
 struct SonicReferenceFrame {
   std::array<float, kSonicMotorCount> joint_pos{};
   std::array<float, kSonicMotorCount> joint_vel{};
@@ -53,6 +58,7 @@ class SonicReferenceCache {
 
 class SonicObservationBuilder {
  public:
+  void set_layout(SonicObservationLayout layout) { layout_ = layout; }
   void reset(const SonicRobotFrame& initial_robot, const SonicReferenceFrame& initial_reference);
   void reset_heading(const SonicRobotFrame& robot, const SonicReferenceFrame& reference);
   void push_robot_frame(const SonicRobotFrame& frame);
@@ -64,6 +70,7 @@ class SonicObservationBuilder {
   std::vector<float> build_decoder_observation(const std::vector<float>& token) const;
 
  private:
+  SonicObservationLayout layout_{SonicObservationLayout::kDefault};
   std::vector<SonicRobotFrame> history_;
   std::array<float, 4> initial_robot_heading_{1.f, 0.f, 0.f, 0.f};
   std::array<float, 4> initial_reference_heading_{1.f, 0.f, 0.f, 0.f};

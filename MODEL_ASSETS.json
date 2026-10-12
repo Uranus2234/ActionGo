@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "policy": "All managed model, motion, dataset, and printable assets must be listed here. Bundled assets are blocked from public redistribution until their asset-specific terms are verified. An upstream source-code license does not automatically license weights or data.",
+  "policy": "Bundled weights are blocked from public redistribution until the weight-specific terms are verified. An upstream source-code license does not automatically license model weights.",
   "assets": [
     {
       "paths": [
@@ -105,11 +105,13 @@
     {
       "paths": [
         "actions/sonic/model/model_decoder.onnx",
-        "actions/sonic/model/model_encoder.onnx"
+        "actions/sonic/model/model_encoder.onnx",
+        "actions/sonic/model/planner_sonic.onnx"
       ],
       "sha256": [
         "c7241a123eaa36b5d64bad19540efde93cac1ad443bd4572fd12ca99898118ed",
-        "013ab0287236aa2721e13f1e936d699db982302d0de0bfcdae76d5c3245362d3"
+        "013ab0287236aa2721e13f1e936d699db982302d0de0bfcdae76d5c3245362d3",
+        "39b553e197f62f077975ba38512bc04781a3fc37c2af7c6756e04629f760edea"
       ],
       "source": "upstream GEAR-SONIC release; exact revision and weight terms required",
       "upstream_revision": "unknown",
@@ -142,115 +144,6 @@
       "upstream_revision": "local export; source checkpoint path must be replaced with a release identifier",
       "upstream_code_license": "unverified",
       "weight_license": "unverified",
-      "redistribution": "blocked_pending_review"
-    },
-    {
-      "paths": [
-        "actions/humanoid_gpt/motions/human_walking_50Hz_29dof.npz",
-        "actions/omnixtreme/motions/motion.npz",
-        "actions/omnixtreme/motions/segments/10_back_hand_flip.npz",
-        "actions/omnixtreme/motions/segments/11_side_flip_roll.npz",
-        "actions/omnixtreme/motions/segments/12_wbst_motive.npz",
-        "actions/omnixtreme/motions/segments/13_ceshoufan_double.npz",
-        "actions/omnixtreme/motions/segments/14_yewendun-kick.npz",
-        "actions/omnixtreme/motions/segments/15_front_paxing.npz",
-        "actions/omnixtreme/motions/segments/1_fuck_floor.npz",
-        "actions/omnixtreme/motions/segments/2_back_hand_flip_roll.npz",
-        "actions/omnixtreme/motions/segments/3_back_hand_flip.npz",
-        "actions/omnixtreme/motions/segments/4_wbst_stand.npz",
-        "actions/omnixtreme/motions/segments/5_side_roll_kick.npz",
-        "actions/omnixtreme/motions/segments/6_front_roll.npz",
-        "actions/omnixtreme/motions/segments/7_back_roll.npz",
-        "actions/omnixtreme/motions/segments/8_none.npz",
-        "actions/omnixtreme/motions/segments/9_back_hand_flip.npz",
-        "actions/protomotions/motions/dance1_subject2.50fps.npz",
-        "actions/protomotions/motions/output_walk.50fps.npz",
-        "actions/sonic/motions/squat_001__A359/body_ang_vel.csv",
-        "actions/sonic/motions/squat_001__A359/body_lin_vel.csv",
-        "actions/sonic/motions/squat_001__A359/body_pos.csv",
-        "actions/sonic/motions/squat_001__A359/body_quat.csv",
-        "actions/sonic/motions/squat_001__A359/joint_pos.csv",
-        "actions/sonic/motions/squat_001__A359/joint_vel.csv",
-        "actions/steadytray/tags/tagStandard41h12_id0_tagsize50mm_A4.pdf",
-        "actions/steadytray/tags/tagStandard41h12_id0_tagsize60mm_A4.pdf",
-        "actions/steadytray/tags/tagStandard41h12_id0_tagsize70mm_A4.pdf",
-        "actions/steadytray/tags/tagStandard41h12_id0_tagsize80mm_A4.pdf",
-        "actions/steadytray/tags/tagStandard41h12_ids0-3_tagsize40mm_A4.pdf",
-        "actions/twist/motions/01_01.pkl",
-        "actions/twist/motions/125_SLP201.pkl",
-        "actions/twist/motions/A3__Swing_arms.pkl",
-        "actions/twist/motions/A6___lift_box.pkl",
-        "actions/ufo/config/ufo_tracking_zs7.npy"
-      ],
-      "sha256": [
-        "4ab95256ec8987bea42ae416d949993124ed73ba93763a83b639ff093456e44d",
-        "efc8f7fa86df93f00c371d3e9d7d4183d4c72e8dfd08056bd4ddea69fd6d4155",
-        "fd254559ae6de9e821fc3a14681e8062fe1eddf9e0e114dc429f9383c7391a4d",
-        "a8f96f77f0e3ddf163352afc147fab3b1043ef4549139dd325c61a99e7b58206",
-        "2007acc31087ded950f1d34e941da5eea1fad30b97e6f36e1d036b0e813dd6df",
-        "10e6aa3e1230c138fc95ba6257c214196991dcabd680efd170eceffbb11ab435",
-        "bfda34bdb7bd63a1e7aba0f4ddea2c1a467d72d07e140791073a6bea91954ab1",
-        "4fab306f9e41d7c56bfff83c8db759ae2f432ce6d08375570beed9e897ca0740",
-        "f8542e69efc4675121a1ba218629c46b33c46e984982d3fccf89afaccbb5cfd8",
-        "dcace28822982369083a6347eb5e8463444764ba6afee57c5f1ed75b98f2ed0d",
-        "bbfa86db1352c622ad17ee1f17b64818fb84a5a50d4673e9c8f9c35a6216d173",
-        "a83df6ee447d172ff0d038f764d06dd9cfd1544fbf7d4769442c50ef3779e97e",
-        "fa1ae1aa195b45e16d778d6018eceae36c18f85aa242f2288dcadedfcfae4097",
-        "5da4bbc1a9b99b73999cced6af22bdd7de8a4bf8cbc0faf57ddc2d4fbc7a9a96",
-        "aab601bb36aa4e713f453168292be5e22fbebf154da85c4ac324143e0419596a",
-        "93f127b79943548d5ef862bc511d2fdf14e54796cea17921a9fe4ebfcec24d44",
-        "688759068c057c84a815d0761215c3c6eaaffa24297c0356f84db63923fc6bab",
-        "5f0772df2b1f6a7a89da3e55aa7f01938aae07f818ae980d91ca3284db402111",
-        "3f55af299db17545b6b40c10eb2844e4f8da76ee93c6358ace6d7727201171aa",
-        "9de87460d6dedc06cc36214912abd998aed6645658b7340c170b1e4d0f68c08d",
-        "5908f9da9d5767326386ada07311596a6ffff63080c700fb1fc1ce8ef1222d2b",
-        "ad98ccf42203c2246f2cdf43a64806642a2930bf525a3fef77956f6d727a7a09",
-        "b1e6ab7b81de682fed07720ee6d21ba99f02812631f262bfcf77f6c39e0c164b",
-        "fd6b07ac5d66a3ffb78999eefc12f6934402b3103853e71d4667858dab088e8d",
-        "246e8225dcdf410339bbaa6700375e92b217166de6e497c5168c4c4eb34dd38c",
-        "8f13d5f95c67a7a44f94b40aea0514e1c14521d1c904c7a339b187a3ef4b6429",
-        "16f329d032c78cba64153647e8f4d632deb5ff8436450cea6944b84621f89f3a",
-        "db372ab50d0d63c9131a03578aac2ddddf202d17fc5fc3a3df51fa9a47464587",
-        "4d7a1c11cb5705c04b1b8339cae2f58126cfffbcb646fca7c3b742e0482d4120",
-        "296eb0f16e32a282dbd40f43da6b1c88b296bdd72b7818f850ef5eb84217dfa4",
-        "30ac0a7449d94f0abc3bda28807a5d31ff9935baa484992d4a50824490618535",
-        "a4e909c34e7fc151b111e064fdb66d678b20caf56e63987c687883d54bf02920",
-        "fb0417b6049819876aa517f5852240e3cd75f418b5a4c1f6694fbe08a74e7d04",
-        "b031bb9261f5319b4181fb3823179f800d7460eb21c0eac9c21e29d018f92689",
-        "b5929738c544c300c38b963089273f6d3ffdc5259994a626380e1eb17af0c98e"
-      ],
-      "source": "mixed upstream action fixtures; each package requires asset-specific provenance review",
-      "upstream_revision": "mixed or unknown",
-      "upstream_code_license": "not applicable to data assets",
-      "weight_license": "unverified",
-      "redistribution": "blocked_pending_review"
-    },
-    {
-      "paths": [
-        "actions/steadytray/tags/src/tag41_12_00000.png",
-        "actions/steadytray/tags/src/tag41_12_00001.png",
-        "actions/steadytray/tags/src/tag41_12_00002.png",
-        "actions/steadytray/tags/src/tag41_12_00003.png"
-      ],
-      "sha256": [
-        "ad5bc161c157634f05afcfd3cfba34334b9303609dd3afc9c000b86e031da02a",
-        "0d3011b7e8f187cb5dd7822d9075299a0141c170ba45a38b9aafdbf31292d9aa",
-        "d769e493648845f67555b3b07e508855beec0ed6266474eb0da0b14bb56db97b",
-        "da1764b41d3a1be7ce50a962210862efcb7bb73b0e512ba14e7fe2f18584b29b"
-      ],
-      "source": "AprilRobotics tag36h11/tag41_12 generated marker assets; verify upstream revision before redistribution",
-      "upstream_revision": "unknown",
-      "upstream_code_license": "unverified",
-      "weight_license": "not applicable",
-      "redistribution": "blocked_pending_review"
-    },
-    {
-      "paths": ["actions/humanoid_gpt/assets/g1_mjx_track_meshless.xml"],
-      "sha256": ["c5cd50aa2d13abda5c45f17869989463bcf80b8ec6a057b1409146cc90d05887"],
-      "source": "Humanoid-GPT/MuJoCo conversion asset; exact upstream revision required",
-      "upstream_revision": "unknown",
-      "upstream_code_license": "unverified",
-      "weight_license": "not applicable",
       "redistribution": "blocked_pending_review"
     }
   ]

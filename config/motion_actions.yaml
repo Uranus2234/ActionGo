@@ -14,6 +14,8 @@
 # - command: 外部 player 命令，支持 {action_go_root}/{config_dir}/{action_dir}/{player}/{net}/{model}/{params}/{trajectory}
 # - switch_back_mode: walkrun / passive / last
 # - prestart_before_userctrl: 先启动 player 发布 hold，再切 UserCtrl，用于减少切换空窗
+# - postrun_handoff_hold: 有限动作结束后保持最后安全命令，等待 complete/release 屏障
+# - switch_back_overlap_sec: 7111 成功返回后继续发布 payload 命令的时间，默认 0.30 秒
 # - safety_enable: 是否允许 remote supervisor 的 IMU safety 打断该动作；默认 true
 
 defaults:
@@ -26,6 +28,10 @@ defaults:
   safety_enable: true
 
 type_defaults:
+  php:
+    switch_back_mode: walkrun
+    prestart_before_userctrl: true
+    prestart_ready_timeout_sec: 10.0
   # ---------------------------------------------------------------------------
   # Generic Policy Runtime 默认值
   # - 覆盖已迁移的 self/embedded 类 policy：
@@ -113,11 +119,13 @@ type_defaults:
 # 每个动作默认继承 defaults.safety_enable=true；如需禁用某个动作的 IMU safety，
 # 在对应 action 下写 safety_enable: false。
 action_files:
+  php: actions/php/php.yaml
   beyondmimic: actions/beyondmimic/beyondmimic.yaml                    # generic_policy: kick_right / hlqk / wbst / lie_down_beyondmimic
   bfm_zero: actions/bfm0/bfm_zero.yaml                                 # generic_policy: bfm_zero_stand
   ufo: actions/ufo/ufo.yaml                                            # generic_policy: fixed prompts / tracking / recovery
   instinct_parkour: actions/instinct/instinct_parkour.yaml             # g1_parkour
   holosoma_wbt: actions/holosoma/holosoma_wbt.yaml                     # generic_policy: holosoma_dance
+  mjlab: actions/mjlab/mjlab.yaml                                      # generic_policy: reverse_vault flat / terrain
   humanoid_gpt: actions/humanoid_gpt/humanoid_gpt.yaml                  # generic_motion_tracking: humanoid_gpt_offline / humanoid_gpt_realtime
   sonic: actions/sonic/sonic.yaml                                      # generic_motion_tracking: offline / G1 ZMQ / PICO SMPL teleop
   protomotions_tracker: actions/protomotions/protomotions_tracker.yaml  # generic_motion_tracking: proto_walk / proto_dance

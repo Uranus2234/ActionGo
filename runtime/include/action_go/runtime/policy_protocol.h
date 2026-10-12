@@ -39,6 +39,7 @@ inline constexpr int kHumanoidGptProtocolKeypointCount = 14;
 inline constexpr int kHumanoidGptProtocolHmcpHeaderSize = 20;
 
 inline constexpr int kSonicEncoderObsDim = 1762;
+inline constexpr int kSonicV11EncoderObsDim = 1751;
 inline constexpr int kSonicTokenDim = 64;
 inline constexpr int kSonicDecoderObsDim = 994;
 inline constexpr int kSonicHistoryLen = 10;
@@ -48,11 +49,18 @@ inline constexpr int kSonicSmplJointCount = 24;
 inline constexpr int kSonicSmplPoseCount = 21;
 inline constexpr int kSonicSmplReferenceFrames = 10;
 inline constexpr int kSonicZmqHeaderSize = 1280;
+inline constexpr int kSonicPlannerContextFrames = 4;
+inline constexpr int kSonicPlannerQposDim = 36;
+inline constexpr int kSonicPlannerOutputFrames = 64;
+inline constexpr int kSonicPlannerModeCount = 27;
 
 inline constexpr int kInstinctProtocolObsDim = 5376;
 inline constexpr int kInstinctProtocolProprioDim = 768;
 inline constexpr int kInstinctProtocolDepthLatentDim = 128;
 inline constexpr int kInstinctProtocolActorInputDim = 896;
+inline constexpr int kPhpProtocolObsDim = 140;
+inline constexpr int kPhpProtocolCommandDim = 15;
+inline constexpr int kPhpProtocolDepthLatentDim = 32;
 
 inline constexpr int kSteadyTrayProtocolObsDim = 480;
 inline constexpr int kSteadyTrayProtocolFrameDim = 96;

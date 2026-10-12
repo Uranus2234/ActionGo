@@ -6,9 +6,12 @@ bindings:
   R2+Down: kick_right
   Left+X: hlqk
   Left+A: ufo_tracking_zs7
-  # Left+Y reserved for a future action.
+  Left+Y: dance1_subject2_mjlab
   F1+A: wbst
+  Up+X: reverse_vault_flat_mjlab
+  Up+A: reverse_vault_terrain_mjlab
   Up+Y: g1_parkour
+  Up+B: php_locomotion
   Right+X: proto_walk
   Right+Y: proto_dance
   R1+F1: holosoma_dance
@@ -26,7 +29,7 @@ bindings:
 
 # 外壳模式：
 # 启动 action_go_remote_test 后默认只监听遥控器，不启用动作/safety，不接管机器人。
-# Start 进入“运行态”并运行 BFM stand；Left+B 进入“运行态”并运行 UFO stand。
+# Start/Left+B 只进入“运行态”并启用动作与 IMU safety；仅检测到摔倒后才运行对应 stand recovery。
 # Select+Start 立即切官方阻尼并回到外壳态，程序保持运行。
 # R2+A 无论当前是否在跑模型，都会停止当前模型、切回官方 walkrun，并回到外壳/睡眠态。
 shell_start: Start
@@ -49,15 +52,16 @@ normal_exit: disabled
 damping_exit: disabled
 
 
-# RoboJuDo-style IMU safety：ARM 时由 shell_start_action / shell_start_alt_action
-# 选择当前 recovery backend。safety_action 是未指定入口时的默认回退值。
-# 倾角超过 fall_angle_deg 持续 fall_hold_ms 后，立即中断当前动作/官方 walkrun，进入当前 ARM 入口选择的 stand 动作。
-# 倾角恢复到 recover_angle_deg 内并稳定 recover_hold_ms 后，自动切回 walkrun。
+# RoboJuDo-style IMU safety：超过 fall_angle_deg 后自动阻尼；自动 recovery 默认关闭。
+# Start/Left+B 在倾角不低于 recover_angle_deg 时启动对应 stand，低于该阈值只 enable；人工 recovery 不受 fall_angle_deg 上限限制。
+# BFM/UFO recovery 运行期间不参与 fall_angle safety；仅在稳定低于 recover_angle_deg
+# 达 recover_hold_ms 后自动切回 walkrun，player 失败时则阻尼并停止重试。
 safety_enable: true
+safety_auto_recovery: false
 safety_action: bfm_zero_stand
 safety_return_mode: walkrun
 fall_angle_deg: 57.3      # RoboJuDo 原始阈值 1.0 rad ≈ 57.3°
-recover_angle_deg: 20.0
+recover_angle_deg: 30.0
 fall_hold_ms: 60
 recover_hold_ms: 1200
 safety_cooldown_ms: 1000

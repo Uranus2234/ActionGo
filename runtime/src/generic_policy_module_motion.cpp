@@ -139,6 +139,18 @@ void GenericPolicyPlayer::load_spec_sonic(const YAML::Node& y) {
     const YAML::Node reference = y["reference"];
     const YAML::Node observation = y["observation"];
     const YAML::Node provider = y["model"]["provider"];
+    const YAML::Node planner = yamlc::required_node(y, "planner");
+    sonic_checkpoint_ = lower(scalar_or<std::string>(runtime, "checkpoint", "default"));
+    int expected_encoder_obs_dim = 0;
+    if (sonic_checkpoint_ == "default") {
+      expected_encoder_obs_dim = kSonicEncoderObsDim;
+      sonic_observation_builder_.set_layout(SonicObservationLayout::kDefault);
+    } else if (sonic_checkpoint_ == "sonic_v1_1") {
+      expected_encoder_obs_dim = kSonicV11EncoderObsDim;
+      sonic_observation_builder_.set_layout(SonicObservationLayout::kV11);
+    } else {
+      throw std::runtime_error("unsupported SONIC runtime.checkpoint: " + sonic_checkpoint_);
+    }
     sonic_encoder_obs_dim_ = yamlc::required_scalar<int>(y, "observation.encoder_obs_dim");
     sonic_decoder_obs_dim_ = configured_obs_dim_;
     sonic_token_dim_ = yamlc::required_scalar<int>(y, "observation.token_dim");
@@ -151,18 +163,19 @@ void GenericPolicyPlayer::load_spec_sonic(const YAML::Node& y) {
     sonic_future_frames_ = yamlc::required_scalar<int>(y, "reference.future_frames");
     sonic_future_step_ = yamlc::required_scalar<int>(y, "reference.future_step");
     sonic_zmq_header_size_ = yamlc::required_scalar<int>(y, "reference.zmq_header_size");
-    if (sonic_encoder_obs_dim_ != kSonicEncoderObsDim || sonic_decoder_obs_dim_ != kSonicDecoderObsDim ||
+    if (sonic_encoder_obs_dim_ != expected_encoder_obs_dim || sonic_decoder_obs_dim_ != kSonicDecoderObsDim ||
         sonic_token_dim_ != kSonicTokenDim || sonic_history_len_ != kSonicHistoryLen ||
         sonic_smpl_joint_count != kSonicSmplJointCount || sonic_smpl_pose_count != kSonicSmplPoseCount ||
         sonic_smpl_reference_frames != kSonicSmplReferenceFrames ||
         sonic_future_frames_ != kSonicReferenceFrames || sonic_future_step_ != kSonicReferenceStep ||
         sonic_zmq_header_size_ != kSonicZmqHeaderSize ||
         sonic_zmq_protocol_versions != std::vector<int>({1, 2, 3})) {
-      throw std::runtime_error("SONIC spec dimensions do not match the released checkpoint protocol");
+      throw std::runtime_error("SONIC spec dimensions do not match runtime.checkpoint=" + sonic_checkpoint_);
     }
     sonic_input_source_ = lower(args_.input_override.empty()
                                     ? scalar_or<std::string>(reference, "source", "offline-csv")
                                     : args_.input_override);
+    sonic_pico_control_ = sonic_input_source_ == "pico" || sonic_input_source_ == "pico-zmq";
     if (sonic_input_source_ == "offline" || sonic_input_source_ == "csv") sonic_input_source_ = "offline-csv";
     if (sonic_input_source_ == "realtime" || sonic_input_source_ == "zmq" ||
         sonic_input_source_ == "realtime-zmq-v1" || sonic_input_source_ == "realtime-zmq-v3" ||
@@ -195,6 +208,28 @@ void GenericPolicyPlayer::load_spec_sonic(const YAML::Node& y) {
                                                               : scalar_or<size_t>(provider, "tensorrt_workspace_size", 1ULL << 30);
     sonic_trt_fp16_ = args_.trt_fp16_set ? args_.trt_fp16 : scalar_or<bool>(provider, "tensorrt_fp16", false);
     sonic_warmup_iters_ = args_.warmup_iters >= 0 ? args_.warmup_iters : scalar_or<int>(provider, "warmup_iters", 1);
+    if (yamlc::required_scalar<bool>(planner, "enabled")) {
+      sonic_planner_config_.version = yamlc::required_scalar<int>(planner, "version");
+      if (yamlc::required_scalar<int>(planner, "inference_hz") != 10 ||
+          yamlc::required_scalar<int>(planner, "output_hz") != 30 ||
+          yamlc::required_scalar<int>(planner, "reference_hz") != 50 ||
+          yamlc::required_scalar<int>(planner, "context_frames") != kSonicPlannerContextFrames ||
+          yamlc::required_scalar<int>(planner, "context_qpos_dim") != kSonicPlannerQposDim ||
+          yamlc::required_scalar<int>(planner, "mode_count") != kSonicPlannerModeCount) {
+        throw std::runtime_error("SONIC planner timing or tensor dimensions differ from the V2 contract");
+      }
+      sonic_planner_config_.lookahead_steps = yamlc::required_scalar<int>(planner, "lookahead_steps");
+      sonic_planner_config_.blend_frames = yamlc::required_scalar<int>(planner, "blend_frames");
+      sonic_planner_config_.min_output_frames = yamlc::required_scalar<int>(planner, "min_output_frames");
+      sonic_planner_config_.max_output_frames = yamlc::required_scalar<int>(planner, "max_output_frames");
+      sonic_planner_config_.default_height = yamlc::required_scalar<float>(planner, "default_height");
+      sonic_planner_config_.random_seed = yamlc::required_scalar<int64_t>(planner, "random_seed");
+      const auto allowed = yamlc::required_vector_size<int64_t>(planner, "allowed_pred_num_tokens", 11);
+      std::copy(allowed.begin(), allowed.end(), sonic_planner_config_.allowed_pred_num_tokens.begin());
+      sonic_planner_ = SonicPlanner(sonic_planner_config_);
+    } else if (sonic_pico_control_) {
+      throw std::runtime_error("SONIC pico-zmq input requires planner.enabled=true");
+    }
     (void)observation;
   }
 
@@ -253,6 +288,18 @@ void GenericPolicyPlayer::post_load_sonic() {
     if (sonic_encoder_.inferred_obs_dim(0) != sonic_encoder_obs_dim_ ||
         sonic_decoder_.inferred_obs_dim(0) != sonic_decoder_obs_dim_) {
       throw std::runtime_error("SONIC ONNX input dimensions do not match the spec");
+    }
+    if (sonic_pico_control_) {
+      if (!fs::exists(sonic_planner_path_)) {
+        throw std::runtime_error("SONIC planner not found: " + sonic_planner_path_.string());
+      }
+      sonic_planner_runner_.load(sonic_planner_path_, options);
+      sonic_planner_runner_.require_inputs({
+          "context_mujoco_qpos", "target_vel", "mode", "movement_direction",
+          "facing_direction", "random_seed", "has_specific_target",
+          "specific_target_positions", "specific_target_headings",
+          "allowed_pred_num_tokens", "height"});
+      sonic_planner_runner_.require_outputs({"mujoco_qpos", "num_pred_frames"});
     }
     setup_sonic_reference();
   }
@@ -396,7 +443,7 @@ void GenericPolicyPlayer::load_sonic_params() {
     if (!fs::exists(params_path_)) throw std::runtime_error("SONIC params not found: " + params_path_.string());
     const YAML::Node y = YAML::LoadFile(params_path_.string());
     if (yamlc::required_scalar<int>(y, "policy.num_actions") != motor_count_ ||
-        yamlc::required_scalar<int>(y, "policy.encoder_obs_dim") != kSonicEncoderObsDim ||
+        yamlc::required_scalar<int>(y, "policy.encoder_obs_dim") != sonic_encoder_obs_dim_ ||
         yamlc::required_scalar<int>(y, "policy.decoder_obs_dim") != kSonicDecoderObsDim ||
         yamlc::required_scalar<int>(y, "policy.token_dim") != kSonicTokenDim) {
       throw std::runtime_error("SONIC params dimensions do not match the released checkpoint");
@@ -550,7 +597,8 @@ void GenericPolicyPlayer::schema_summary_humanoid_gpt() {
 
 void GenericPolicyPlayer::schema_summary_sonic() {
     schema_summary_common();
-    std::cout << "  sonic_contract encoder_obs_dim=" << sonic_encoder_obs_dim_
+    std::cout << "  sonic_contract checkpoint=" << sonic_checkpoint_
+              << " encoder_obs_dim=" << sonic_encoder_obs_dim_
               << " token_dim=" << sonic_token_dim_
               << " decoder_obs_dim=" << sonic_decoder_obs_dim_
               << " history_len=" << sonic_history_len_
@@ -647,7 +695,11 @@ void GenericPolicyPlayer::check_only_sonic() {
     state.dq.assign(motor_count_, 0.f);
     state.quat = {1.f, 0.f, 0.f, 0.f};
     state.gyro = {0.f, 0.f, 0.f};
-    if (sonic_input_source_ == "realtime-zmq") {
+    if (sonic_pico_control_) {
+      sonic_planner_.initialize(sonic_planner_runner_, state.q);
+      sonic_use_planner_ = true;
+      sonic_reference_cache_.replace(sonic_planner_.reference_frames());
+    } else if (sonic_input_source_ == "realtime-zmq") {
       const auto sample = sonic_zmq_.current_sample(sonic_stale_sec_);
       if (sample.frames.empty()) {
         std::vector<SonicReferenceFrame> frames(
@@ -671,7 +723,9 @@ void GenericPolicyPlayer::check_only_sonic() {
     const auto action_range = std::minmax_element(action.begin(), action.end());
     const auto target_range = std::minmax_element(target.begin(), target.end());
     std::cout << "  sonic input=" << sonic_input_source_
+              << " checkpoint=" << sonic_checkpoint_
               << " provider=" << sonic_decoder_.selected_execution_provider()
+              << " planner=" << (sonic_pico_control_ ? "loaded" : "disabled")
               << " encoder_obs_dim=" << sonic_encoder_obs_dim_
               << " decoder_obs_dim=" << sonic_decoder_obs_dim_
               << " action_range=[" << *action_range.first << "," << *action_range.second << "]"
@@ -679,7 +733,23 @@ void GenericPolicyPlayer::check_only_sonic() {
   }
 
 bool GenericPolicyPlayer::wait_first_sonic_realtime() {
-    return sonic_zmq_.wait_first(sonic_input_timeout_sec_);
+    if (!sonic_pico_control_) return sonic_zmq_.wait_first(sonic_input_timeout_sec_);
+    const auto deadline = std::chrono::steady_clock::now() +
+        std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+            std::chrono::duration<double>(sonic_input_timeout_sec_));
+    while (!g_stop_requested.load() && std::chrono::steady_clock::now() < deadline) {
+      const auto control = sonic_zmq_.current_control_sample();
+      if (control.present && control.command.start && !control.command.stop) {
+        if (control.command.planner) {
+          if (sonic_zmq_.current_planner_sample(sonic_stale_sec_).freshness == SampleFreshness::kFresh) return true;
+        } else {
+          const auto pose = sonic_zmq_.current_sample(sonic_stale_sec_);
+          if (!pose.frames.empty() && pose.freshness == SampleFreshness::kFresh) return true;
+        }
+      }
+      std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+    return false;
   }
 
 SonicRobotFrame GenericPolicyPlayer::sonic_robot_frame(const GenericPolicyPlayer::RobotState& state) const {
@@ -705,6 +775,10 @@ SonicRobotFrame GenericPolicyPlayer::sonic_robot_frame(const GenericPolicyPlayer
 
 void GenericPolicyPlayer::reset_sonic_runtime(const GenericPolicyPlayer::RobotState& state) {
     last_action_.assign(motor_count_, 0.f);
+    if (sonic_pico_control_ && sonic_use_planner_ && sonic_planner_.initialized()) {
+      sonic_planner_.rewind();
+      sonic_reference_cache_.replace(sonic_planner_.reference_frames());
+    }
     sonic_reference_frame_ = sonic_input_source_ == "realtime-zmq"
                                  ? sonic_reference_cache_.first_frame_index() : 0;
     sonic_realtime_base_frame_ = sonic_input_source_ == "realtime-zmq"
@@ -723,8 +797,29 @@ void GenericPolicyPlayer::reset_sonic_runtime(const GenericPolicyPlayer::RobotSt
 
 void GenericPolicyPlayer::require_sonic_realtime_fresh(const char* phase, bool revoke_ready) {
     if (sonic_input_source_ != "realtime-zmq") return;
-    const auto sample = sonic_zmq_.current_sample(sonic_stale_sec_);
-    if (!sample.frames.empty() && sample.freshness == SampleFreshness::kFresh) return;
+    double age_sec = std::numeric_limits<double>::infinity();
+    bool fresh = false;
+    std::string source = "sonic_zmq_pose";
+    if (sonic_pico_control_) {
+      const auto control = sonic_zmq_.current_control_sample();
+      if (control.present && control.command.start && !control.command.stop) {
+        if (control.command.planner) {
+          const auto planner = sonic_zmq_.current_planner_sample(sonic_stale_sec_);
+          age_sec = planner.age_sec;
+          fresh = planner.freshness == SampleFreshness::kFresh;
+          source = "sonic_zmq_planner";
+        } else {
+          const auto pose = sonic_zmq_.current_sample(sonic_stale_sec_);
+          age_sec = pose.age_sec;
+          fresh = !pose.frames.empty() && pose.freshness == SampleFreshness::kFresh;
+        }
+      }
+    } else {
+      const auto pose = sonic_zmq_.current_sample(sonic_stale_sec_);
+      age_sec = pose.age_sec;
+      fresh = !pose.frames.empty() && pose.freshness == SampleFreshness::kFresh;
+    }
+    if (fresh) return;
     if (revoke_ready && !ready_file_.empty()) {
       std::error_code error;
       fs::remove(ready_file_, error);
@@ -733,14 +828,121 @@ void GenericPolicyPlayer::require_sonic_realtime_fresh(const char* phase, bool r
                    {event_string("player", player_label()),
                     event_string("template", template_),
                     event_string("variant", variant_),
-                    event_string("source", "sonic_zmq_pose"),
+                    event_string("source", source),
                     event_string("phase", phase),
-                    event_number("age_sec", sample.age_sec)});
+                    event_number("age_sec", age_sec)});
     throw std::runtime_error(std::string("SONIC realtime reference is not fresh during ") + phase);
   }
 
-bool GenericPolicyPlayer::update_sonic_reference(int64_t policy_step) {
+bool GenericPolicyPlayer::prepare_sonic_pico_source(const GenericPolicyPlayer::RobotState& state,
+                                                     bool require_started) {
+    const auto control = sonic_zmq_.current_control_sample();
+    if (!control.present || !control.command.start || control.command.stop) {
+      if (control.present && control.command.stop) sonic_remote_stop_ = true;
+      return !require_started;
+    }
+    sonic_last_control_sequence_ = control.sequence;
+    sonic_use_planner_ = control.command.planner;
+    if (sonic_use_planner_) {
+      const auto sample = sonic_zmq_.current_planner_sample(sonic_stale_sec_);
+      if (sample.freshness != SampleFreshness::kFresh) return false;
+      if (!sonic_planner_.initialized()) {
+        sonic_planner_.initialize(sonic_planner_runner_, state.q);
+      }
+      const auto now = std::chrono::steady_clock::now();
+      if (sonic_planner_.should_replan(sample.command, now)) {
+        sonic_planner_.replan(sonic_planner_runner_, sample.command, now);
+      }
+      sonic_reference_cache_.replace(sonic_planner_.reference_frames());
+      sonic_reference_frame_ = sonic_planner_.current_frame();
+      sonic_realtime_base_frame_ = 0;
+      sonic_realtime_frame_step_ = 1;
+      sonic_last_planner_sequence_ = sample.sequence;
+    } else {
+      const auto sample = sonic_zmq_.current_sample(sonic_stale_sec_);
+      if (sample.frames.empty() || sample.freshness != SampleFreshness::kFresh) return false;
+      sonic_reference_cache_.replace(sample.frames);
+      sonic_realtime_base_frame_ = sample.frames.front().frame_index;
+      sonic_reference_frame_ = sonic_realtime_base_frame_;
+      sonic_realtime_frame_step_ = sample.frames.size() > 1
+          ? sample.frames[1].frame_index - sample.frames[0].frame_index : 1;
+      sonic_last_realtime_sequence_ = sample.sequence;
+    }
+    sonic_realtime_heading_reset_ = true;
+    return true;
+  }
+
+bool GenericPolicyPlayer::update_sonic_reference(const GenericPolicyPlayer::RobotState& state,
+                                                  int64_t policy_step) {
     if (sonic_input_source_ != "realtime-zmq") return true;
+    if (sonic_pico_control_) {
+      const auto control = sonic_zmq_.current_control_sample();
+      if (!control.present || control.command.stop || !control.command.start) {
+        if (control.present && control.command.stop) sonic_remote_stop_ = true;
+        return false;
+      }
+      const bool mode_changed = control.sequence != sonic_last_control_sequence_ &&
+                                control.command.planner != sonic_use_planner_;
+      sonic_last_control_sequence_ = control.sequence;
+      if (mode_changed) {
+        sonic_use_planner_ = control.command.planner;
+        if (sonic_use_planner_) sonic_planner_ = SonicPlanner(sonic_planner_config_);
+        if (!prepare_sonic_pico_source(state, true)) {
+          sonic_hold_last_target_ = true;
+          return true;
+        }
+        sonic_observation_builder_.reset_heading(sonic_robot_frame(state),
+                                                  sonic_reference_cache_.frame_clamped(0));
+      }
+
+      SampleFreshness freshness = SampleFreshness::kMissing;
+      if (sonic_use_planner_) {
+        freshness = sonic_zmq_.current_planner_sample(sonic_stale_sec_).freshness;
+      } else {
+        freshness = sonic_zmq_.current_sample(sonic_stale_sec_).freshness;
+      }
+      const auto decision = sonic_stale_gate_.decide(freshness, StaleBehavior::kHoldThenStop,
+                                                     sonic_stale_stop_sec_, std::chrono::steady_clock::now());
+      if (decision.new_stale_event) ++sonic_stale_events_;
+      if (decision.action == StaleDecisionAction::kHoldLast) {
+        ++sonic_stale_hold_ticks_;
+        sonic_hold_last_target_ = true;
+        return true;
+      }
+      if (decision.action == StaleDecisionAction::kStop) {
+        ++sonic_stale_stop_events_;
+        throw std::runtime_error("SONIC PICO input remained stale beyond the hold window");
+      }
+
+      if (sonic_use_planner_) {
+        const auto sample = sonic_zmq_.current_planner_sample(sonic_stale_sec_);
+        const auto now = std::chrono::steady_clock::now();
+        if (!sonic_planner_.initialized()) {
+          sonic_planner_.initialize(sonic_planner_runner_, state.q);
+        }
+        if (sonic_planner_.should_replan(sample.command, now)) {
+          sonic_planner_.replan(sonic_planner_runner_, sample.command, now);
+          sonic_reference_cache_.replace(sonic_planner_.reference_frames());
+          sonic_reference_frame_ = sonic_planner_.current_frame();
+          sonic_realtime_heading_reset_ = true;
+          event_log_.log("sonic_planner_replan",
+                         {event_int("mode", sample.command.mode),
+                          event_string("mode_name", sonic_planner_mode_name(sample.command.mode)),
+                          event_number("speed", sample.command.speed),
+                          event_int("frames", static_cast<long long>(sonic_planner_.size()))});
+        }
+        sonic_last_planner_sequence_ = sample.sequence;
+      } else {
+        const auto sample = sonic_zmq_.current_sample(sonic_stale_sec_);
+        if (sample.sequence != sonic_last_realtime_sequence_ && !sample.frames.empty()) {
+          sonic_reference_cache_.merge_tail(sample.frames);
+          sonic_last_realtime_sequence_ = sample.sequence;
+        }
+      }
+      sonic_hold_last_target_ = false;
+      return true;
+    }
+
     const auto sample = sonic_zmq_.current_sample(sonic_stale_sec_);
     const auto decision = sonic_stale_gate_.decide(sample.freshness, StaleBehavior::kHoldThenStop,
                                                    sonic_stale_stop_sec_, std::chrono::steady_clock::now());
@@ -795,7 +997,7 @@ bool GenericPolicyPlayer::update_sonic_reference(int64_t policy_step) {
 
 bool GenericPolicyPlayer::build_sonic_target(const GenericPolicyPlayer::RobotState& state, int64_t policy_step,
                           std::vector<float>& target, std::vector<float>& raw_action) {
-    if (!update_sonic_reference(policy_step)) return false;
+    if (!update_sonic_reference(state, policy_step)) return false;
     if (sonic_hold_last_target_) return true;
     const auto robot = sonic_robot_frame(state);
     if (sonic_realtime_heading_reset_) {
@@ -837,9 +1039,14 @@ bool GenericPolicyPlayer::build_sonic_target(const GenericPolicyPlayer::RobotSta
         sonic_observation_builder_.reset(robot, sonic_reference_cache_.frame_clamped(0));
       }
     } else {
-      sonic_reference_frame_ += sonic_realtime_frame_step_;
-      const int64_t keep_from = sonic_reference_frame_ - 5 * sonic_realtime_frame_step_;
-      sonic_reference_cache_.discard_before(keep_from);
+      if (sonic_pico_control_ && sonic_use_planner_) {
+        sonic_planner_.advance();
+        sonic_reference_frame_ = sonic_planner_.current_frame();
+      } else {
+        sonic_reference_frame_ += sonic_realtime_frame_step_;
+        const int64_t keep_from = sonic_reference_frame_ - 5 * sonic_realtime_frame_step_;
+        sonic_reference_cache_.discard_before(keep_from);
+      }
     }
     return true;
   }
@@ -847,20 +1054,28 @@ bool GenericPolicyPlayer::build_sonic_target(const GenericPolicyPlayer::RobotSta
 void GenericPolicyPlayer::control_loop_sonic() {
     if (sonic_input_source_ == "realtime-zmq") {
       if (!wait_first_sonic_realtime()) {
-        throw std::runtime_error("timeout waiting for first SONIC realtime ZMQ pose packet");
+        throw std::runtime_error(sonic_pico_control_
+            ? "timeout waiting for PICO start command and fresh SONIC planner/pose packet"
+            : "timeout waiting for first SONIC realtime ZMQ pose packet");
       }
-      const auto first = sonic_zmq_.current_sample(sonic_stale_sec_);
-      if (first.frames.empty()) throw std::runtime_error("first SONIC realtime packet contains no frames");
-      sonic_realtime_base_frame_ = first.frames.front().frame_index;
-      sonic_reference_cache_.replace(first.frames);
-      sonic_reference_frame_ = sonic_realtime_base_frame_;
-      sonic_realtime_frame_step_ = first.frames.size() > 1
-          ? first.frames[1].frame_index - first.frames[0].frame_index : 1;
-      const int64_t required_frames = static_cast<int64_t>(sonic_future_frames_ - 1) * sonic_future_step_ + 1;
-      if (first.frames.front().encoder_mode == 0 && static_cast<int64_t>(first.frames.size()) < required_frames) {
-        throw std::runtime_error("first SONIC realtime packet does not contain the required lookahead window");
+      if (sonic_pico_control_) {
+        if (!prepare_sonic_pico_source(snapshot(), true)) {
+          throw std::runtime_error("PICO source became unavailable during planner initialization");
+        }
+      } else {
+        const auto first = sonic_zmq_.current_sample(sonic_stale_sec_);
+        if (first.frames.empty()) throw std::runtime_error("first SONIC realtime packet contains no frames");
+        sonic_realtime_base_frame_ = first.frames.front().frame_index;
+        sonic_reference_cache_.replace(first.frames);
+        sonic_reference_frame_ = sonic_realtime_base_frame_;
+        sonic_realtime_frame_step_ = first.frames.size() > 1
+            ? first.frames[1].frame_index - first.frames[0].frame_index : 1;
+        const int64_t required_frames = static_cast<int64_t>(sonic_future_frames_ - 1) * sonic_future_step_ + 1;
+        if (first.frames.front().encoder_mode == 0 && static_cast<int64_t>(first.frames.size()) < required_frames) {
+          throw std::runtime_error("first SONIC realtime packet does not contain the required lookahead window");
+        }
+        sonic_last_realtime_sequence_ = first.sequence;
       }
-      sonic_last_realtime_sequence_ = first.sequence;
     }
     const int publish_hz = std::max(inference_hz_, publish_hz_);
     const auto policy_dt = std::chrono::duration_cast<std::chrono::steady_clock::duration>(
@@ -949,8 +1164,11 @@ void GenericPolicyPlayer::control_loop_sonic() {
             event_log_.log("runtime_metrics",
                            {event_string("player", player_label()), event_string("template", template_),
                             event_string("variant", variant_), event_int("step", completed),
+                            event_int("publish_count", active_publish_count_.load()),
                             event_int("policy_deadline_miss", policy_deadline_miss.load()),
                             event_int("publish_deadline_miss", publish_deadline_miss.load()),
+                            event_number("max_publish_interval_ms",
+                                         max_active_publish_interval_ms_.load()),
                             event_int("stale_events", sonic_stale_events_),
                             event_number("target_min", *range.first), event_number("target_max", *range.second)});
           }
@@ -999,6 +1217,8 @@ void GenericPolicyPlayer::control_loop_sonic() {
                     event_int("publish_count", publish_count.load()),
                     event_int("policy_deadline_miss", policy_deadline_miss.load()),
                     event_int("publish_deadline_miss", publish_deadline_miss.load()),
+                    event_number("max_publish_interval_ms",
+                                 max_active_publish_interval_ms_.load()),
                     event_int("stale_events", sonic_stale_events_),
                     event_int("stale_holds", sonic_stale_hold_ticks_),
                     event_int("stale_stops", sonic_stale_stop_events_), event_string("phase", "final")});
@@ -1086,8 +1306,6 @@ void GenericPolicyPlayer::control_loop_protomotions() {
     const int publish_hz = std::max(inference_hz_, publish_hz_);
     const auto policy_dt = std::chrono::duration_cast<std::chrono::steady_clock::duration>(
         std::chrono::duration<double>(1.0 / std::max(1, inference_hz_)));
-    const auto publish_dt = std::chrono::duration_cast<std::chrono::steady_clock::duration>(
-        std::chrono::duration<double>(1.0 / publish_hz));
     auto s = snapshot();
     std::vector<float> q, hold_kp, hold_kd;
     hold_current_pose(s, q, hold_kp, hold_kd);
@@ -1138,13 +1356,31 @@ void GenericPolicyPlayer::control_loop_protomotions() {
 
     const auto start = std::chrono::steady_clock::now();
     auto next_policy = preview_committed ? start + policy_dt : start;
-    auto next_publish = start;
     const std::vector<float> startup_q = q;
-    int64_t publish_count = 0;
     int64_t inference_count = 0;
     int64_t policy_deadline_miss = 0;
-    int64_t publish_deadline_miss = 0;
     bool max_frames_reached = false;
+    AsyncCommandPublisher command_publisher(
+        publish_hz, 0.0,
+        JointCommand{q, preview_committed ? kp_ : hold_kp,
+                     preview_committed ? kd_ : hold_kd},
+        [this, start, startup_q, preview_committed](const JointCommand& command, bool active) {
+          std::vector<float> q_cmd = command.q;
+          if (active && !preview_committed && proto_startup_interp_sec_ > 1e-6 &&
+              startup_q.size() == q_cmd.size()) {
+            const double elapsed = std::chrono::duration<double>(
+                std::chrono::steady_clock::now() - start).count();
+            const float alpha = static_cast<float>(
+                std::clamp(elapsed / proto_startup_interp_sec_, 0.0, 1.0));
+            for (size_t i = 0; i < q_cmd.size(); ++i) {
+              q_cmd[i] = (1.f - alpha) * startup_q[i] + alpha * q_cmd[i];
+            }
+          }
+          const auto state = snapshot();
+          publish(q_cmd, command.kp, command.kd, state.mode_machine, false,
+                  active ? CommandPhase::kActive : CommandPhase::kHold);
+        },
+        preview_committed);
     std::cout << player_log_prefix() << " start motion_conditioned_tracking/protomotions model="
               << runtime_model_path_.string()
               << " motion=" << trajectory_path_.string()
@@ -1152,63 +1388,63 @@ void GenericPolicyPlayer::control_loop_protomotions() {
               << " hz=" << inference_hz_ << " publish_hz=" << publish_hz
               << " max_frames=" << max_frames_
               << " startup_interp_sec=" << proto_startup_interp_sec_ << "\n";
-    while (!g_stop_requested.load()) {
-      const auto now = std::chrono::steady_clock::now();
-      if (now >= next_policy) {
-        policy_deadline_miss += advance_deadline(next_policy, policy_dt, now);
-        s = snapshot();
-        q = protomotions_infer(s);
-        protomotions_advance();
-        ++inference_count;
-        if (max_frames_ > 0 && inference_count >= max_frames_) max_frames_reached = true;
-        if (stats_interval_ > 0 && inference_count % stats_interval_ == 0) {
-          const auto mm = std::minmax_element(q.begin(), q.end());
-          std::cout << player_log_prefix() << " protomotions frame=" << proto_frame_
-                    << "/" << (proto_motion_.num_frames - 1)
-                    << " target=[" << *mm.first << "," << *mm.second << "]\n";
-          event_log_.log("runtime_metrics",
-                         {event_string("player", player_label()),
-                          event_string("template", template_),
-                          event_string("variant", variant_),
-                          event_int("frame", proto_frame_),
-                          event_int("step", inference_count),
-                          event_int("policy_deadline_miss", policy_deadline_miss),
-                          event_int("publish_deadline_miss", publish_deadline_miss),
-                          event_number("target_min", *mm.first),
-                          event_number("target_max", *mm.second)});
+    std::exception_ptr inference_error;
+    try {
+      while (!g_stop_requested.load() && !command_publisher.failed()) {
+        const auto now = std::chrono::steady_clock::now();
+        if (now >= next_policy) {
+          policy_deadline_miss += advance_deadline(next_policy, policy_dt, now);
+          s = snapshot();
+          q = protomotions_infer(s);
+          protomotions_advance();
+          command_publisher.update({q, kp_, kd_});
+          ++inference_count;
+          if (max_frames_ > 0 && inference_count >= max_frames_) max_frames_reached = true;
+          if (stats_interval_ > 0 && inference_count % stats_interval_ == 0) {
+            const auto mm = std::minmax_element(q.begin(), q.end());
+            const auto metrics = command_publisher.metrics();
+            std::cout << player_log_prefix() << " protomotions frame=" << proto_frame_
+                      << "/" << (proto_motion_.num_frames - 1)
+                      << " target=[" << *mm.first << "," << *mm.second << "]\n";
+            event_log_.log("runtime_metrics",
+                           {event_string("player", player_label()),
+                            event_string("template", template_),
+                            event_string("variant", variant_),
+                            event_int("frame", proto_frame_),
+                            event_int("step", inference_count),
+                            event_int("publish_count", metrics.publish_count),
+                            event_int("policy_deadline_miss", policy_deadline_miss),
+                            event_int("publish_deadline_miss", metrics.deadline_miss),
+                            event_number("max_publish_interval_ms", metrics.max_publish_interval_ms),
+                            event_number("target_min", *mm.first),
+                            event_number("target_max", *mm.second)});
+          }
         }
+        if (max_frames_reached || protomotions_done()) break;
+        if (duration_sec_ > 0.0 && std::chrono::duration<double>(now - start).count() >= duration_sec_) break;
+        if (next_policy > std::chrono::steady_clock::now()) std::this_thread::sleep_until(next_policy);
       }
-
-      if (now >= next_publish) {
-        publish_deadline_miss += advance_deadline(next_publish, publish_dt, now);
-        std::vector<float> q_cmd = q;
-        if (!preview_committed && proto_startup_interp_sec_ > 1e-6 && startup_q.size() == q.size()) {
-          const double elapsed = std::chrono::duration<double>(now - start).count();
-          const float alpha = static_cast<float>(std::clamp(elapsed / proto_startup_interp_sec_, 0.0, 1.0));
-          for (size_t i = 0; i < q_cmd.size(); ++i) q_cmd[i] = (1.f - alpha) * startup_q[i] + alpha * q[i];
-        }
-        s = snapshot();
-        publish(q_cmd, kp_, kd_, s.mode_machine);
-        ++publish_count;
-      }
-      if (max_frames_reached || protomotions_done()) break;
-      if (duration_sec_ > 0.0 && std::chrono::duration<double>(now - start).count() >= duration_sec_) break;
-      const auto sleep_until = std::min(next_policy, next_publish);
-      if (sleep_until > std::chrono::steady_clock::now()) std::this_thread::sleep_until(sleep_until);
+    } catch (...) {
+      inference_error = std::current_exception();
     }
+    command_publisher.stop_and_join();
+    command_publisher.rethrow_if_failed();
+    if (inference_error) std::rethrow_exception(inference_error);
     if (g_stop_requested.load() && damping_on_stop_) publish_damping_for_stop();
+    const auto metrics = command_publisher.metrics();
     std::cout << player_log_prefix() << " protomotions stats inference=" << inference_count
-              << " publish=" << publish_count
+              << " publish=" << metrics.publish_count
               << " policy_deadline_miss=" << policy_deadline_miss
-              << " publish_deadline_miss=" << publish_deadline_miss << "\n";
+              << " publish_deadline_miss=" << metrics.deadline_miss << "\n";
     event_log_.log("runtime_metrics",
                    {event_string("player", player_label()),
                     event_string("template", template_),
                     event_string("variant", variant_),
                     event_int("step", inference_count),
-                    event_int("publish_count", publish_count),
+                    event_int("publish_count", metrics.publish_count),
                     event_int("policy_deadline_miss", policy_deadline_miss),
-                    event_int("publish_deadline_miss", publish_deadline_miss),
+                    event_int("publish_deadline_miss", metrics.deadline_miss),
+                    event_number("max_publish_interval_ms", metrics.max_publish_interval_ms),
                     event_string("phase", "final")});
     std::cout << player_log_prefix() << " completed protomotions\n";
   }
@@ -1400,9 +1636,6 @@ void GenericPolicyPlayer::control_loop_twist() {
     const int publish_hz = std::max(inference_hz_, publish_hz_);
     const auto policy_dt = std::chrono::duration_cast<std::chrono::steady_clock::duration>(
         std::chrono::duration<double>(1.0 / std::max(1, inference_hz_)));
-    const auto publish_dt = std::chrono::duration_cast<std::chrono::steady_clock::duration>(
-        std::chrono::duration<double>(1.0 / publish_hz));
-
     auto s = snapshot();
     std::vector<float> q, kp, kd;
     hold_current_pose(s, q, kp, kd);
@@ -1482,14 +1715,19 @@ void GenericPolicyPlayer::control_loop_twist() {
 
     const auto start = std::chrono::steady_clock::now();
     auto next_policy = preview_committed ? start + policy_dt : start;
-    auto next_publish = start;
-    int64_t publish_count = 0;
     int64_t policy_step = initial_policy_step;
     int64_t policy_deadline_miss = 0;
-    int64_t publish_deadline_miss = 0;
     bool finished = false;
     std::vector<float> raw_action = preview_committed
         ? preview_raw_action : std::vector<float>(twist_policy_actions_, 0.f);
+    AsyncCommandPublisher command_publisher(
+        publish_hz, 0.0, JointCommand{q, kp, kd},
+        [this](const JointCommand& command, bool active) {
+          const auto state = snapshot();
+          publish(command.q, command.kp, command.kd, state.mode_machine, false,
+                  active ? CommandPhase::kActive : CommandPhase::kHold);
+        },
+        preview_committed);
 
     std::cout << player_log_prefix() << " start motion_conditioned_tracking/twist model="
               << runtime_model_path_.string()
@@ -1500,61 +1738,66 @@ void GenericPolicyPlayer::control_loop_twist() {
               << " action_scale=" << twist_action_scale_
               << " stale_behavior=" << twist_stale_behavior_name()
               << " max_frames=" << max_frames_ << "\n";
-    while (!g_stop_requested.load()) {
-      const auto now = std::chrono::steady_clock::now();
-      if (now >= next_policy) {
-        policy_deadline_miss += advance_deadline(next_policy, policy_dt, now);
-        s = snapshot();
-        std::vector<float> next_q, next_kp, next_kd, next_action;
-        const auto status = build_twist_target(s, policy_step, next_q, next_kp, next_kd, next_action);
-        if (status == TwistTargetStatus::kStop) {
-          finished = true;
-        } else if (status == TwistTargetStatus::kCommand) {
-          q = std::move(next_q);
-          kp = std::move(next_kp);
-          kd = std::move(next_kd);
-          raw_action = std::move(next_action);
+    std::exception_ptr inference_error;
+    try {
+      while (!g_stop_requested.load() && !command_publisher.failed()) {
+        const auto now = std::chrono::steady_clock::now();
+        if (now >= next_policy) {
+          policy_deadline_miss += advance_deadline(next_policy, policy_dt, now);
+          s = snapshot();
+          std::vector<float> next_q, next_kp, next_kd, next_action;
+          const auto status = build_twist_target(s, policy_step, next_q, next_kp, next_kd, next_action);
+          if (status == TwistTargetStatus::kStop) {
+            finished = true;
+          } else if (status == TwistTargetStatus::kCommand) {
+            q = std::move(next_q);
+            kp = std::move(next_kp);
+            kd = std::move(next_kd);
+            raw_action = std::move(next_action);
+            command_publisher.update({q, kp, kd});
+          }
+          ++policy_step;
+          if (stats_interval_ > 0 && policy_step % stats_interval_ == 0) {
+            const auto mm = std::minmax_element(raw_action.begin(), raw_action.end());
+            const auto metrics = command_publisher.metrics();
+            std::cout << player_log_prefix() << " twist step=" << policy_step
+                      << " action=[" << *mm.first << "," << *mm.second << "]"
+                      << " stale_events=" << twist_stale_events_
+                      << " stale_holds=" << twist_stale_hold_ticks_
+                      << " stale_stops=" << twist_stale_stop_events_ << "\n";
+            event_log_.log("runtime_metrics",
+                           {event_string("player", player_label()),
+                            event_string("template", template_),
+                            event_string("variant", variant_),
+                            event_int("step", policy_step),
+                            event_int("publish_count", metrics.publish_count),
+                            event_int("policy_deadline_miss", policy_deadline_miss),
+                            event_int("publish_deadline_miss", metrics.deadline_miss),
+                            event_number("max_publish_interval_ms", metrics.max_publish_interval_ms),
+                            event_int("stale_events", twist_stale_events_),
+                            event_int("stale_holds", twist_stale_hold_ticks_),
+                            event_int("stale_stops", twist_stale_stop_events_),
+                            event_number("action_min", *mm.first),
+                            event_number("action_max", *mm.second)});
+          }
         }
-        ++policy_step;
-        if (stats_interval_ > 0 && policy_step % stats_interval_ == 0) {
-          const auto mm = std::minmax_element(raw_action.begin(), raw_action.end());
-          std::cout << player_log_prefix() << " twist step=" << policy_step
-                    << " action=[" << *mm.first << "," << *mm.second << "]"
-                    << " stale_events=" << twist_stale_events_
-                    << " stale_holds=" << twist_stale_hold_ticks_
-                    << " stale_stops=" << twist_stale_stop_events_ << "\n";
-          event_log_.log("runtime_metrics",
-                         {event_string("player", player_label()),
-                          event_string("template", template_),
-                          event_string("variant", variant_),
-                          event_int("step", policy_step),
-                          event_int("policy_deadline_miss", policy_deadline_miss),
-                          event_int("publish_deadline_miss", publish_deadline_miss),
-                          event_int("stale_events", twist_stale_events_),
-                          event_int("stale_holds", twist_stale_hold_ticks_),
-                          event_int("stale_stops", twist_stale_stop_events_),
-                          event_number("action_min", *mm.first),
-                          event_number("action_max", *mm.second)});
-        }
+        if (finished) break;
+        if (max_frames_ > 0 && policy_step >= max_frames_) break;
+        if (duration_sec_ > 0.0 && std::chrono::duration<double>(now - start).count() >= duration_sec_) break;
+        if (next_policy > std::chrono::steady_clock::now()) std::this_thread::sleep_until(next_policy);
       }
-
-      if (now >= next_publish) {
-        publish_deadline_miss += advance_deadline(next_publish, publish_dt, now);
-        s = snapshot();
-        publish(q, kp, kd, s.mode_machine);
-        ++publish_count;
-      }
-      if (finished) break;
-      if (max_frames_ > 0 && policy_step >= max_frames_) break;
-      if (duration_sec_ > 0.0 && std::chrono::duration<double>(now - start).count() >= duration_sec_) break;
-      const auto sleep_until = std::min(next_policy, next_publish);
-      if (sleep_until > std::chrono::steady_clock::now()) std::this_thread::sleep_until(sleep_until);
+    } catch (...) {
+      inference_error = std::current_exception();
     }
+    command_publisher.stop_and_join();
+    command_publisher.rethrow_if_failed();
+    if (inference_error) std::rethrow_exception(inference_error);
     if (g_stop_requested.load() && damping_on_stop_) publish_damping_for_stop();
+    const auto metrics = command_publisher.metrics();
     std::cout << player_log_prefix() << " twist stats policy_steps=" << policy_step
-              << " publish=" << publish_count
+              << " publish=" << metrics.publish_count
               << " policy_deadline_miss=" << policy_deadline_miss
-              << " publish_deadline_miss=" << publish_deadline_miss
+              << " publish_deadline_miss=" << metrics.deadline_miss
               << " stale_events=" << twist_stale_events_
               << " stale_holds=" << twist_stale_hold_ticks_
               << " stale_stops=" << twist_stale_stop_events_ << "\n";
@@ -1563,9 +1806,10 @@ void GenericPolicyPlayer::control_loop_twist() {
                     event_string("template", template_),
                     event_string("variant", variant_),
                     event_int("step", policy_step),
-                    event_int("publish_count", publish_count),
+                    event_int("publish_count", metrics.publish_count),
                     event_int("policy_deadline_miss", policy_deadline_miss),
-                    event_int("publish_deadline_miss", publish_deadline_miss),
+                    event_int("publish_deadline_miss", metrics.deadline_miss),
+                    event_number("max_publish_interval_ms", metrics.max_publish_interval_ms),
                     event_int("stale_events", twist_stale_events_),
                     event_int("stale_holds", twist_stale_hold_ticks_),
                     event_int("stale_stops", twist_stale_stop_events_),
@@ -1757,9 +2001,6 @@ void GenericPolicyPlayer::control_loop_humanoid_gpt() {
     const int publish_hz = std::max(inference_hz_, publish_hz_);
     const auto policy_dt = std::chrono::duration_cast<std::chrono::steady_clock::duration>(
         std::chrono::duration<double>(1.0 / std::max(1, inference_hz_)));
-    const auto publish_dt = std::chrono::duration_cast<std::chrono::steady_clock::duration>(
-        std::chrono::duration<double>(1.0 / publish_hz));
-
     auto s = snapshot();
     std::vector<float> q, kp, kd;
     hold_current_pose(s, q, kp, kd);
@@ -1775,13 +2016,17 @@ void GenericPolicyPlayer::control_loop_humanoid_gpt() {
 
     const auto start = std::chrono::steady_clock::now();
     auto next_policy = start;
-    auto next_publish = start;
-    int64_t publish_count = 0;
     int64_t policy_step = 0;
     int64_t policy_deadline_miss = 0;
-    int64_t publish_deadline_miss = 0;
     bool finished = false;
     std::vector<float> raw_action(motor_count_, 0.f);
+    AsyncCommandPublisher command_publisher(
+        publish_hz, 0.0, JointCommand{q, kp, kd},
+        [this](const JointCommand& command, bool active) {
+          const auto state = snapshot();
+          publish(command.q, command.kp, command.kd, state.mode_machine, false,
+                  active ? CommandPhase::kActive : CommandPhase::kHold);
+        });
 
     std::cout << player_log_prefix() << " start motion_conditioned_tracking/humanoid_gpt model="
               << runtime_model_path_.string()
@@ -1791,65 +2036,71 @@ void GenericPolicyPlayer::control_loop_humanoid_gpt() {
               << " publish_hz=" << publish_hz
               << " stale_behavior=" << humanoid_gpt_stale_behavior_name()
               << " max_frames=" << max_frames_ << "\n";
-    while (!g_stop_requested.load()) {
-      const auto now = std::chrono::steady_clock::now();
-      if (now >= next_policy) {
-        policy_deadline_miss += advance_deadline(next_policy, policy_dt, now);
-        s = snapshot();
-        std::vector<float> next_q, next_kp, next_kd, next_action;
-        const auto status = build_humanoid_gpt_target(s, policy_step, next_q, next_kp, next_kd, next_action);
-        if (status == HumanoidGptTargetStatus::kStop) {
-          finished = true;
-        } else if (status == HumanoidGptTargetStatus::kCommand) {
-          q = std::move(next_q);
-          kp = std::move(next_kp);
-          kd = std::move(next_kd);
-          raw_action = std::move(next_action);
+    std::exception_ptr inference_error;
+    try {
+      while (!g_stop_requested.load() && !command_publisher.failed()) {
+        const auto now = std::chrono::steady_clock::now();
+        if (now >= next_policy) {
+          policy_deadline_miss += advance_deadline(next_policy, policy_dt, now);
+          s = snapshot();
+          std::vector<float> next_q, next_kp, next_kd, next_action;
+          const auto status = build_humanoid_gpt_target(s, policy_step, next_q, next_kp, next_kd, next_action);
+          if (status == HumanoidGptTargetStatus::kStop) {
+            finished = true;
+          } else if (status == HumanoidGptTargetStatus::kCommand) {
+            q = std::move(next_q);
+            kp = std::move(next_kp);
+            kd = std::move(next_kd);
+            raw_action = std::move(next_action);
+            command_publisher.update({q, kp, kd});
+          }
+          ++policy_step;
+          if (stats_interval_ > 0 && policy_step % stats_interval_ == 0) {
+            const auto am = std::minmax_element(raw_action.begin(), raw_action.end());
+            const auto qm = std::minmax_element(q.begin(), q.end());
+            const auto metrics = command_publisher.metrics();
+            std::cout << player_log_prefix() << " humanoid_gpt step=" << policy_step
+                      << " action=[" << *am.first << "," << *am.second << "]"
+                      << " target_q=[" << *qm.first << "," << *qm.second << "]"
+                      << " stale_events=" << humanoid_gpt_stale_events_
+                      << " stale_holds=" << humanoid_gpt_stale_hold_ticks_
+                      << " stale_stops=" << humanoid_gpt_stale_stop_events_ << "\n";
+            event_log_.log("runtime_metrics",
+                           {event_string("player", player_label()),
+                            event_string("template", template_),
+                            event_string("variant", variant_),
+                            event_int("step", policy_step),
+                            event_int("publish_count", metrics.publish_count),
+                            event_int("policy_deadline_miss", policy_deadline_miss),
+                            event_int("publish_deadline_miss", metrics.deadline_miss),
+                            event_number("max_publish_interval_ms", metrics.max_publish_interval_ms),
+                            event_int("stale_events", humanoid_gpt_stale_events_),
+                            event_int("stale_holds", humanoid_gpt_stale_hold_ticks_),
+                            event_int("stale_stops", humanoid_gpt_stale_stop_events_),
+                            event_number("action_min", *am.first),
+                            event_number("action_max", *am.second),
+                            event_number("target_min", *qm.first),
+                            event_number("target_max", *qm.second)});
+          }
         }
-        ++policy_step;
-        if (stats_interval_ > 0 && policy_step % stats_interval_ == 0) {
-          const auto am = std::minmax_element(raw_action.begin(), raw_action.end());
-          const auto qm = std::minmax_element(q.begin(), q.end());
-          std::cout << player_log_prefix() << " humanoid_gpt step=" << policy_step
-                    << " action=[" << *am.first << "," << *am.second << "]"
-                    << " target_q=[" << *qm.first << "," << *qm.second << "]"
-                    << " stale_events=" << humanoid_gpt_stale_events_
-                    << " stale_holds=" << humanoid_gpt_stale_hold_ticks_
-                    << " stale_stops=" << humanoid_gpt_stale_stop_events_ << "\n";
-          event_log_.log("runtime_metrics",
-                         {event_string("player", player_label()),
-                          event_string("template", template_),
-                          event_string("variant", variant_),
-                          event_int("step", policy_step),
-                          event_int("policy_deadline_miss", policy_deadline_miss),
-                          event_int("publish_deadline_miss", publish_deadline_miss),
-                          event_int("stale_events", humanoid_gpt_stale_events_),
-                          event_int("stale_holds", humanoid_gpt_stale_hold_ticks_),
-                          event_int("stale_stops", humanoid_gpt_stale_stop_events_),
-                          event_number("action_min", *am.first),
-                          event_number("action_max", *am.second),
-                          event_number("target_min", *qm.first),
-                          event_number("target_max", *qm.second)});
-        }
+        if (finished) break;
+        if (max_frames_ > 0 && policy_step >= max_frames_) break;
+        if (duration_sec_ > 0.0 && std::chrono::duration<double>(now - start).count() >= duration_sec_) break;
+        if (humanoid_gpt_input_source_ == "offline-npz" && humanoid_gpt_offline_done()) break;
+        if (next_policy > std::chrono::steady_clock::now()) std::this_thread::sleep_until(next_policy);
       }
-      if (now >= next_publish) {
-        publish_deadline_miss += advance_deadline(next_publish, publish_dt, now);
-        s = snapshot();
-        publish(q, kp, kd, s.mode_machine);
-        ++publish_count;
-      }
-      if (finished) break;
-      if (max_frames_ > 0 && policy_step >= max_frames_) break;
-      if (duration_sec_ > 0.0 && std::chrono::duration<double>(now - start).count() >= duration_sec_) break;
-      if (humanoid_gpt_input_source_ == "offline-npz" && humanoid_gpt_offline_done()) break;
-      const auto sleep_until = std::min(next_policy, next_publish);
-      if (sleep_until > std::chrono::steady_clock::now()) std::this_thread::sleep_until(sleep_until);
+    } catch (...) {
+      inference_error = std::current_exception();
     }
+    command_publisher.stop_and_join();
+    command_publisher.rethrow_if_failed();
+    if (inference_error) std::rethrow_exception(inference_error);
     if (g_stop_requested.load() && damping_on_stop_) publish_damping_for_stop();
+    const auto metrics = command_publisher.metrics();
     std::cout << player_log_prefix() << " humanoid_gpt stats policy_steps=" << policy_step
-              << " publish=" << publish_count
+              << " publish=" << metrics.publish_count
               << " policy_deadline_miss=" << policy_deadline_miss
-              << " publish_deadline_miss=" << publish_deadline_miss
+              << " publish_deadline_miss=" << metrics.deadline_miss
               << " stale_events=" << humanoid_gpt_stale_events_
               << " stale_holds=" << humanoid_gpt_stale_hold_ticks_
               << " stale_stops=" << humanoid_gpt_stale_stop_events_ << "\n";
@@ -1858,9 +2109,10 @@ void GenericPolicyPlayer::control_loop_humanoid_gpt() {
                     event_string("template", template_),
                     event_string("variant", variant_),
                     event_int("step", policy_step),
-                    event_int("publish_count", publish_count),
+                    event_int("publish_count", metrics.publish_count),
                     event_int("policy_deadline_miss", policy_deadline_miss),
-                    event_int("publish_deadline_miss", publish_deadline_miss),
+                    event_int("publish_deadline_miss", metrics.deadline_miss),
+                    event_number("max_publish_interval_ms", metrics.max_publish_interval_ms),
                     event_int("stale_events", humanoid_gpt_stale_events_),
                     event_int("stale_holds", humanoid_gpt_stale_hold_ticks_),
                     event_int("stale_stops", humanoid_gpt_stale_stop_events_),

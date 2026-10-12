@@ -1,3 +1,5 @@
+#include "action_go/runtime/activation_blend.h"
+#include "action_go/runtime/async_command_publisher.h"
 #include "action_go/runtime/command_safety_filter.h"
 #include "action_go/runtime/input_freshness.h"
 #include "action_go/runtime/network_command.h"
@@ -7,6 +9,8 @@
 #include "action_go/runtime/policy_protocol.h"
 #include "action_go/runtime/prearm_command.h"
 #include "action_go/runtime/reference_endpoint.h"
+#include "action_go/runtime/recovery_arm_gate.h"
+#include "action_go/runtime/sonic_planner.h"
 #include "action_go/runtime/sonic_policy.h"
 
 #include <chrono>
@@ -17,8 +21,10 @@
 #include <iomanip>
 #include <iostream>
 #include <limits>
+#include <mutex>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <vector>
 #include <cstring>
 #include <sstream>
@@ -28,6 +34,141 @@
 #include <openssl/hmac.h>
 
 namespace {
+
+void expect_true(const std::string& name, bool ok);
+void expect_near(const std::string& name, float actual, float expected, float eps = 1e-6f);
+void expect_throw(const std::string& name, const std::function<void()>& fn);
+
+void test_activation_blend() {
+  using action_go::runtime::ActivationBlend;
+  using action_go::runtime::JointCommand;
+  const JointCommand hold{{0.f, 2.f}, {20.f, 30.f}, {1.f, 2.f}};
+  JointCommand active{{2.f, 4.f}, {40.f, 50.f}, {3.f, 4.f}};
+  ActivationBlend blend(0.10);
+  blend.observe_hold(hold);
+  const auto t0 = ActivationBlend::Clock::time_point(std::chrono::seconds(10));
+  auto out = blend.apply(active, t0);
+  expect_true("activation blend starts on first active command", out.started);
+  expect_near("activation blend q starts at hold", out.command.q[0], 0.f);
+  expect_near("activation blend kp starts at hold", out.command.kp[0], 20.f);
+  expect_near("activation blend kd starts at hold", out.command.kd[0], 1.f);
+
+  active = {{4.f, 6.f}, {60.f, 70.f}, {5.f, 6.f}};
+  out = blend.apply(active, t0 + std::chrono::milliseconds(50));
+  expect_near("activation blend follows latest q target", out.command.q[0], 2.f);
+  expect_near("activation blend follows latest kp target", out.command.kp[0], 40.f);
+  expect_near("activation blend follows latest kd target", out.command.kd[0], 3.f);
+  out = blend.apply(active, t0 + std::chrono::milliseconds(100));
+  expect_true("activation blend completes at duration", out.completed);
+  expect_near("activation blend reaches active q", out.command.q[0], 4.f);
+  expect_near("activation blend reaches active kp", out.command.kp[0], 60.f);
+  expect_near("activation blend reaches active kd", out.command.kd[0], 5.f);
+
+  ActivationBlend disabled(0.0);
+  disabled.observe_hold(hold);
+  out = disabled.apply(active, t0);
+  expect_near("zero activation blend reaches active immediately", out.command.q[0], 4.f);
+  expect_throw("activation blend rejects negative duration", [] { ActivationBlend invalid(-0.1); });
+  expect_throw("activation blend rejects excessive duration", [] { ActivationBlend invalid(5.1); });
+  expect_throw("activation blend rejects non-finite duration", [] {
+    ActivationBlend invalid(std::numeric_limits<double>::infinity());
+  });
+}
+
+void test_async_command_publisher() {
+  using action_go::runtime::AsyncCommandPublisher;
+  using action_go::runtime::JointCommand;
+
+  const JointCommand hold{{0.f}, {20.f}, {1.f}};
+  std::mutex samples_mutex;
+  std::vector<bool> active_samples;
+  std::vector<std::chrono::steady_clock::time_point> publish_times;
+  AsyncCommandPublisher publisher(
+      500, 0.0, hold,
+      [&](const JointCommand& command, bool active) {
+        std::lock_guard<std::mutex> lock(samples_mutex);
+        expect_near("async publisher callback command", command.q[0], active ? 1.f : 0.f);
+        active_samples.push_back(active);
+        publish_times.push_back(std::chrono::steady_clock::now());
+      });
+
+  std::this_thread::sleep_for(std::chrono::milliseconds(12));
+  size_t hold_count = 0;
+  {
+    std::lock_guard<std::mutex> lock(samples_mutex);
+    hold_count = active_samples.size();
+    expect_true("async publisher keeps hold alive during inference", hold_count >= 3);
+    expect_true("async publisher does not activate before first target",
+                std::none_of(active_samples.begin(), active_samples.end(),
+                             [](bool active) { return active; }));
+  }
+  publisher.update({{1.f}, {30.f}, {2.f}});
+  std::this_thread::sleep_for(std::chrono::milliseconds(12));
+  publisher.stop_and_join();
+  publisher.rethrow_if_failed();
+  const auto metrics = publisher.metrics();
+  expect_true("async publisher emits active command after update", [&] {
+    std::lock_guard<std::mutex> lock(samples_mutex);
+    return active_samples.size() > hold_count &&
+           std::any_of(active_samples.begin() + static_cast<std::ptrdiff_t>(hold_count),
+                       active_samples.end(), [](bool active) { return active; });
+  }());
+  expect_true("async publisher metrics count callbacks",
+              metrics.publish_count == static_cast<int64_t>(publish_times.size()));
+
+  AsyncCommandPublisher failing(
+      500, 0.0, hold,
+      [](const JointCommand&, bool) { throw std::runtime_error("injected publisher failure"); });
+  std::this_thread::sleep_for(std::chrono::milliseconds(5));
+  failing.stop_and_join();
+  expect_true("async publisher records callback failure", failing.failed());
+  expect_throw("async publisher propagates callback failure",
+               [&] { failing.rethrow_if_failed(); });
+}
+
+void test_recovery_arm_gate() {
+  using action_go::runtime::RecoveryArmGate;
+  using Clock = RecoveryArmGate::Clock;
+  RecoveryArmGate gate({57.3, std::chrono::milliseconds(60),
+                        std::chrono::milliseconds(500)});
+  const auto t0 = Clock::time_point(std::chrono::seconds(10));
+
+  gate.arm("bfm_zero_stand");
+  expect_true("recovery ARM selects primary backend",
+              gate.armed() && gate.recovery_backend() == "bfm_zero_stand");
+  expect_true("upright ARM does not trigger",
+              !gate.observe(true, 0.0, t0, t0));
+  expect_true("fall below debounce does not trigger",
+              !gate.observe(true, 60.0, t0, t0 + std::chrono::milliseconds(59)));
+  expect_true("fall debounce triggers at 60ms",
+              gate.observe(true, 60.0, t0, t0 + std::chrono::milliseconds(119)));
+  expect_true("fall debounce triggers only once",
+              !gate.observe(true, 60.0, t0, t0 + std::chrono::milliseconds(180)));
+
+  gate.arm("ufo_stand");
+  expect_true("recovery ARM preserves alternate backend",
+              gate.recovery_backend() == "ufo_stand");
+  expect_true("alternate ARM starts a fresh debounce",
+              !gate.observe(true, 60.0, t0, t0 + std::chrono::milliseconds(200)));
+  expect_true("tilt recovery resets debounce",
+              !gate.observe(true, 10.0, t0, t0 + std::chrono::milliseconds(240)));
+  expect_true("fall after tilt reset starts over",
+              !gate.observe(true, 60.0, t0, t0 + std::chrono::milliseconds(250)));
+  expect_true("invalid IMU resets debounce",
+              !gate.observe(false, 60.0, t0, t0 + std::chrono::milliseconds(300)));
+  expect_true("fall after invalid IMU starts over",
+              !gate.observe(true, 60.0, t0, t0 + std::chrono::milliseconds(310)));
+  expect_true("non-finite tilt resets debounce",
+              !gate.observe(true, std::numeric_limits<double>::quiet_NaN(), t0,
+                            t0 + std::chrono::milliseconds(320)));
+  expect_true("fall after non-finite tilt starts over",
+              !gate.observe(true, 60.0, t0, t0 + std::chrono::milliseconds(330)));
+  expect_true("stale IMU resets debounce",
+              !gate.observe(true, 60.0, t0, t0 + std::chrono::milliseconds(600)));
+  expect_true("fresh sample after stale IMU starts over",
+              !gate.observe(true, 60.0, t0 + std::chrono::milliseconds(601),
+                            t0 + std::chrono::milliseconds(601)));
+}
 
 int g_failures = 0;
 
@@ -40,7 +181,7 @@ void expect_true(const std::string& name, bool ok) {
   if (!ok) fail(name, "condition is false");
 }
 
-void expect_near(const std::string& name, float actual, float expected, float eps = 1e-6f) {
+void expect_near(const std::string& name, float actual, float expected, float eps) {
   if (std::abs(actual - expected) > eps) {
     fail(name, "actual=" + std::to_string(actual) + " expected=" + std::to_string(expected));
   }
@@ -82,6 +223,12 @@ void test_command_safety_filter() {
   expect_near("safety clamps kp low", out.kp[1], 0.f);
   expect_near("safety clamps kd high", out.kd[0], 10.f);
   expect_near("safety clamps kd low", out.kd[2], 0.f);
+  const auto hold = filter.filter(out.q, out.kp, out.kd, state, limits, 3);
+  for (size_t index = 0; index < out.q.size(); ++index) {
+    expect_near("handoff hold preserves filtered q", hold.q[index], out.q[index]);
+    expect_near("handoff hold preserves filtered kp", hold.kp[index], out.kp[index]);
+    expect_near("handoff hold preserves filtered kd", hold.kd[index], out.kd[index]);
+  }
 
   expect_throw("safety rejects q nan", [&] {
     filter.filter({std::numeric_limits<float>::quiet_NaN(), 0.f, 0.f}, {1.f, 1.f, 1.f}, {1.f, 1.f, 1.f},
@@ -111,6 +258,56 @@ void test_command_safety_filter() {
   const auto emergency = filter.filter({0.f, 0.f, 0.f}, {1.f, 1.f, 1.f}, {1.f, 1.f, 1.f},
                                        stale, limits, 3, true);
   expect_true("safety allows stale emergency publish", emergency.q.size() == 3);
+
+  CommandSafetyConfig parity_cfg;
+  parity_cfg.profile = "simulation_parity";
+  parity_cfg.joint_limit_enabled = false;
+  parity_cfg.max_position_step_enabled = false;
+  CommandSafetyFilter parity_filter(parity_cfg);
+  const auto parity = parity_filter.filter({2.f, -2.f, 0.25f}, {10.f, 10.f, 10.f},
+                                           {1.f, 1.f, 1.f}, state, limits, 3);
+  expect_near("simulation parity preserves q above physical limit", parity.q[0], 2.f);
+  expect_near("simulation parity preserves q below physical limit", parity.q[1], -2.f);
+}
+
+void test_pd_torque_filter() {
+  using namespace action_go::runtime;
+  CommandSafetyConfig config;
+  config.preserve_pd_torque = true;
+  CommandSafetyFilter filter(config);
+  CommandSafetyState state;
+  state.connected = true;
+  state.stamp = std::chrono::steady_clock::now();
+  state.q = {0.9f, -0.9f, 0.2f, 0.f};
+  state.dq = {0.5f, -0.5f, 0.2f, 3.f};
+  CommandSafetyLimits limits;
+  limits.lower = {-1.f, -1.f, -1.f, -1.f};
+  limits.upper = {1.f, 1.f, 1.f, 1.f};
+  limits.torque = {10.f, 10.f, 10.f, 2.f};
+  const std::vector<float> requested{4.f, -4.f, 0.25f, 0.f};
+  const auto output = filter.filter(requested, {20.f, 20.f, 20.f, 0.f}, {1.f, 1.f, 1.f, 1.f}, state, limits, 4);
+  for (size_t joint = 0; joint < requested.size(); ++joint) {
+    expect_true("PD compensation keeps physical target limits", output.q[joint] >= limits.lower[joint] && output.q[joint] <= limits.upper[joint]);
+    const float actual = output.kp[joint] * (output.q[joint] - state.q[joint]) - output.kd[joint] * state.dq[joint] + output.tau[joint];
+    const float expected = std::clamp(output.kp[joint] * (requested[joint] - state.q[joint]) - output.kd[joint] * state.dq[joint], -limits.torque[joint], limits.torque[joint]);
+    expect_near("final LowCmd preserves saturated PD torque", actual, expected);
+  }
+  expect_true("out-of-range climbing target uses feedforward", output.tau[0] > 0.f && output.tau[1] < 0.f);
+  expect_near("ordinary target requires no feedforward", output.tau[2], 0.f);
+  auto fast = state;
+  fast.dq[0] = 100.f;
+  const auto saturated = filter.filter({10.f, -4.f, 0.25f, 0.f}, {20.f, 20.f, 20.f, 0.f}, {1.f, 1.f, 1.f, 1.f}, fast, limits, 4);
+  expect_near("bounded feedforward when PD representation is impossible", saturated.tau[0], 10.f);
+  expect_near("unrepresentable PD disables proportional term", saturated.kp[0], 0.f);
+  expect_near("unrepresentable PD disables damping term", saturated.kd[0], 0.f);
+  expect_throw("PD compensation rejects nonfinite velocity", [&] {
+    auto invalid = state;
+    invalid.dq[0] = std::numeric_limits<float>::quiet_NaN();
+    filter.filter(requested, {20.f, 20.f, 20.f, 0.f}, {1.f, 1.f, 1.f, 1.f}, invalid, limits, 4);
+  });
+  expect_throw("PD compensation requires torque limits", [&] {
+    filter.filter(requested, {20.f, 20.f, 20.f, 0.f}, {1.f, 1.f, 1.f, 1.f}, state, {}, 4);
+  });
 }
 
 void test_prearm_command() {
@@ -426,7 +623,7 @@ void test_policy_protocol_constraints() {
   const std::vector<std::string> variants{
       "bfm_zero", "unitree_rl_mjlab", "beyondmimic", "holosoma",
       "protomotions", "twist", "humanoid_gpt", "instinct_parkour",
-      "sonic", "instinct", "steadytray", "omnixtreme"};
+      "sonic", "instinct", "php", "steadytray", "omnixtreme"};
   for (const std::string& variant : variants) {
     const auto* contract = variant_contract(variant);
     const auto* protocol = protocol_constraint_for_variant(variant);
@@ -461,7 +658,7 @@ void test_policy_protocol_constraints() {
   if (sonic) {
     expect_true("sonic token dim", sonic->latent_dim == kSonicTokenDim);
     expect_true("sonic decoder obs dim", sonic->obs_dim == kSonicDecoderObsDim);
-    expect_true("sonic has two sessions", sonic->sessions.size() == 2);
+    expect_true("sonic has three sessions", sonic->sessions.size() == 3);
   }
 }
 
@@ -518,6 +715,21 @@ void test_sonic_policy_helpers() {
   const std::array<float, 6> expected_rot6{0.f, -1.f, 1.f, 0.f, 0.f, 0.f};
   for (size_t i = 0; i < expected_rot6.size(); ++i) {
     expect_near("sonic row-major rotation6d " + std::to_string(i), rotated_obs[601 + i], expected_rot6[i], 1e-5f);
+  }
+
+  SonicObservationBuilder v11_builder;
+  v11_builder.set_layout(SonicObservationLayout::kV11);
+  v11_builder.reset(robot, reference_frame);
+  SonicRobotFrame pitched_robot = robot;
+  pitched_robot.base_quat_wxyz = {0.96592583f, 0.f, 0.25881905f, 0.f};
+  v11_builder.push_robot_frame(pitched_robot);
+  const auto v11_obs = v11_builder.build_encoder_observation(
+      reference, 0, kSonicReferenceFrames, kSonicReferenceStep);
+  expect_true("sonic v1.1 encoder obs size", v11_obs.size() == kSonicV11EncoderObsDim);
+  const std::array<float, 6> identity_rot6{1.f, 0.f, 0.f, 1.f, 0.f, 0.f};
+  for (size_t i = 0; i < identity_rot6.size(); ++i) {
+    expect_near("sonic v1.1 heading-only orientation " + std::to_string(i),
+                v11_obs[584 + i], identity_rot6[i], 1e-5f);
   }
 
   SonicObservationBuilder history_builder;
@@ -664,15 +876,129 @@ void test_sonic_policy_helpers() {
   expect_near("sonic pico encoder mode slot", pico_encoder_obs[0], 2.f);
   expect_near("sonic pico smpl slot", pico_encoder_obs[922 + 17], 0.25f);
   expect_near("sonic pico wrist slot", pico_encoder_obs[1702], 0.4f);
+
+  SonicObservationBuilder pico_v11_builder;
+  pico_v11_builder.set_layout(SonicObservationLayout::kV11);
+  pico_v11_builder.reset(robot, pico_parsed.front());
+  pico_v11_builder.push_robot_frame(robot);
+  const auto pico_v11_obs = pico_v11_builder.build_encoder_observation(
+      pico_cache, 0, kSonicReferenceFrames, kSonicReferenceStep);
+  expect_true("sonic v1.1 pico obs size", pico_v11_obs.size() == kSonicV11EncoderObsDim);
+  expect_near("sonic v1.1 pico smpl slot", pico_v11_obs[911 + 17], 0.25f);
+  expect_near("sonic v1.1 pico wrist slot", pico_v11_obs[1691], 0.4f);
+}
+
+void test_sonic_planner_helpers() {
+  using namespace action_go::runtime;
+
+  auto append_bytes = [](std::vector<uint8_t>& packet, const void* data, size_t bytes) {
+    const auto* begin = static_cast<const uint8_t*>(data);
+    packet.insert(packet.end(), begin, begin + bytes);
+  };
+  auto make_packet = [&](const std::string& topic, const nlohmann::json& fields,
+                         const std::function<void(std::vector<uint8_t>&)>& append_payload) {
+    const std::string header = nlohmann::json{
+        {"v", 1}, {"endian", "le"}, {"count", 1}, {"fields", fields}}.dump();
+    std::vector<uint8_t> packet(topic.begin(), topic.end());
+    packet.resize(topic.size() + kSonicZmqHeaderSize, 0);
+    std::memcpy(packet.data() + topic.size(), header.data(), header.size());
+    append_payload(packet);
+    return packet;
+  };
+
+  const nlohmann::json planner_fields = nlohmann::json::array({
+      {{"name", "mode"}, {"dtype", "i32"}, {"shape", {1}}},
+      {{"name", "movement"}, {"dtype", "f32"}, {"shape", {3}}},
+      {{"name", "facing"}, {"dtype", "f32"}, {"shape", {3}}},
+      {{"name", "speed"}, {"dtype", "f32"}, {"shape", {1}}},
+      {{"name", "height"}, {"dtype", "f32"}, {"shape", {1}}}});
+  const int32_t mode = 8;
+  const std::array<float, 3> movement{0.5f, -0.25f, 0.f};
+  const std::array<float, 3> facing{0.f, 1.f, 0.f};
+  const float speed = 0.7f;
+  const float height = -1.f;
+  const auto planner_packet = make_packet("planner", planner_fields, [&](std::vector<uint8_t>& packet) {
+    append_bytes(packet, &mode, sizeof(mode));
+    append_bytes(packet, movement.data(), sizeof(movement));
+    append_bytes(packet, facing.data(), sizeof(facing));
+    append_bytes(packet, &speed, sizeof(speed));
+    append_bytes(packet, &height, sizeof(height));
+  });
+  const auto planner_command = parse_sonic_planner_packet(planner_packet);
+  expect_true("sonic planner mode parsed", planner_command.mode == 8);
+  expect_near("sonic planner movement parsed", planner_command.movement[1], -0.25f);
+  expect_true("sonic crawling cadence", sonic_planner_replan_period_sec(8) == 0.2);
+  expect_true("sonic squat is static", sonic_planner_mode_is_static(4));
+  expect_true("sonic walk is dynamic", !sonic_planner_mode_is_static(2));
+  expect_true("sonic V2 mode name", std::string(sonic_planner_mode_name(26)) == "scare_walk");
+
+  expect_throw("sonic planner rejects mode 27", [&] {
+    auto bad = planner_packet;
+    const int32_t invalid = 27;
+    std::memcpy(bad.data() + 7 + kSonicZmqHeaderSize, &invalid, sizeof(invalid));
+    (void)parse_sonic_planner_packet(bad);
+  });
+
+  const nlohmann::json command_fields = nlohmann::json::array({
+      {{"name", "start"}, {"dtype", "u8"}, {"shape", {1}}},
+      {{"name", "stop"}, {"dtype", "u8"}, {"shape", {1}}},
+      {{"name", "planner"}, {"dtype", "u8"}, {"shape", {1}}}});
+  const auto command_packet = make_packet("command", command_fields, [&](std::vector<uint8_t>& packet) {
+    const std::array<uint8_t, 3> values{1, 0, 1};
+    append_bytes(packet, values.data(), values.size());
+  });
+  const auto control = parse_sonic_command_packet(command_packet);
+  expect_true("sonic planner control parsed", control.start && !control.stop && control.planner);
+
+  SonicPlanner planner;
+  std::vector<float> hardware_q(kSonicMotorCount);
+  for (int i = 0; i < kSonicMotorCount; ++i) hardware_q[i] = static_cast<float>(i) * 0.01f;
+  const auto initial = planner.initial_context(hardware_q);
+  expect_near("sonic planner initial height", initial[2], 0.788740f);
+  expect_near("sonic planner initial hardware order", initial[7 + 17], hardware_q[17]);
+
+  std::vector<float> qpos(kSonicPlannerMaxFrames * kSonicPlannerQposDim, 0.f);
+  for (int frame = 0; frame < kSonicPlannerMaxFrames; ++frame) {
+    qpos[frame * kSonicPlannerQposDim + 2] = 0.8f;
+    qpos[frame * kSonicPlannerQposDim + 3] = 1.f;
+    for (int hardware = 0; hardware < kSonicMotorCount; ++hardware) {
+      qpos[frame * kSonicPlannerQposDim + 7 + hardware] =
+          static_cast<float>(frame) + static_cast<float>(hardware) * 0.01f;
+    }
+  }
+  const auto resampled = planner.resample_output(qpos, 24);
+  expect_true("sonic planner 30 to 50 frame count", resampled.size() == 40);
+  expect_near("sonic planner output remap", resampled[0].joint_pos[7],
+              static_cast<float>(sonic_policy_to_hardware()[7]) * 0.01f);
+  expect_near("sonic planner resampled velocity", resampled[3].joint_vel[0], 30.f, 1e-4f);
+  expect_throw("sonic planner rejects short prediction", [&] {
+    (void)planner.resample_output(qpos, 23);
+  });
+
+  auto old_motion = resampled;
+  auto new_motion = resampled;
+  for (auto& frame : new_motion) {
+    for (float& q : frame.joint_pos) q += 1.f;
+  }
+  planner.merge_generated(old_motion, 0);
+  planner.merge_generated(new_motion, 2);
+  expect_near("sonic planner blend starts from old motion", planner.motion()[2].joint_pos[0],
+              old_motion[2].joint_pos[0]);
+  expect_near("sonic planner blend reaches aligned new motion",
+              planner.motion()[12].joint_pos[0], new_motion[10].joint_pos[0]);
 }
 
 }  // namespace
 
 int main() {
   try {
+    test_activation_blend();
+    test_async_command_publisher();
+    test_recovery_arm_gate();
     test_policy_contract();
     test_policy_protocol_constraints();
     test_command_safety_filter();
+    test_pd_torque_filter();
     test_prearm_command();
     test_npy_reader();
     test_network_command_authentication();
@@ -680,6 +1006,7 @@ int main() {
     test_onnx_runner();
     test_realtime_input_stale_gate();
     test_sonic_policy_helpers();
+    test_sonic_planner_helpers();
   } catch (const std::exception& e) {
     fail("uncaught exception", e.what());
   }

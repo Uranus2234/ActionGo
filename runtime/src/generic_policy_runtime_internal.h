@@ -1,6 +1,8 @@
 #pragma once
 
 #include "action_go/runtime/generic_policy_runtime.h"
+#include "action_go/runtime/activation_blend.h"
+#include "action_go/runtime/async_command_publisher.h"
 #include "action_go/runtime/command_safety_filter.h"
 #include "action_go/runtime/event_logger.h"
 #include "action_go/runtime/input_freshness.h"
@@ -9,6 +11,7 @@
 #include "action_go/runtime/policy_contract.h"
 #include "action_go/runtime/policy_protocol.h"
 #include "action_go/runtime/reference_endpoint.h"
+#include "action_go/runtime/sonic_planner.h"
 #include "action_go/runtime/sonic_policy.h"
 #include "action_go/runtime/yaml_contract.h"
 
@@ -76,6 +79,8 @@ using action_go::runtime::CommandSafetyFilter;
 using action_go::runtime::CommandSafetyLimits;
 using action_go::runtime::CommandSafetyState;
 using action_go::runtime::FilteredCommand;
+using action_go::runtime::ActivationBlend;
+using action_go::runtime::JointCommand;
 using action_go::runtime::GenericPlayerKind;
 using action_go::runtime::GenericPolicyRuntimeScope;
 using action_go::runtime::OnnxRunner;
@@ -85,6 +90,7 @@ using action_go::runtime::RealtimeInputStaleGate;
 using action_go::runtime::RuntimeEventLogger;
 using action_go::runtime::SampleFreshness;
 using action_go::runtime::SonicObservationBuilder;
+using action_go::runtime::SonicObservationLayout;
 using action_go::runtime::SonicReferenceCache;
 using action_go::runtime::SonicReferenceFrame;
 using action_go::runtime::SonicRobotFrame;
@@ -164,6 +170,20 @@ struct HumanoidGptQposSample {
 struct SonicReferenceSample {
   SampleFreshness freshness{SampleFreshness::kMissing};
   std::vector<SonicReferenceFrame> frames;
+  uint64_t sequence{0};
+  double age_sec{std::numeric_limits<double>::infinity()};
+};
+
+struct SonicPlannerSample {
+  SampleFreshness freshness{SampleFreshness::kMissing};
+  SonicPlannerCommand command;
+  uint64_t sequence{0};
+  double age_sec{std::numeric_limits<double>::infinity()};
+};
+
+struct SonicControlSample {
+  bool present{false};
+  SonicControlCommand command;
   uint64_t sequence{0};
   double age_sec{std::numeric_limits<double>::infinity()};
 };
@@ -1010,6 +1030,8 @@ struct Args {
   std::string trt_cache_dir_override;
   std::string ready_file;
   std::string start_file;
+  std::string handoff_complete_file;
+  std::string handoff_release_file;
   std::string preview_file;
   std::string commit_file;
   std::string discard_file;
@@ -1017,6 +1039,7 @@ struct Args {
   std::string state_topic;
   int inference_hz{0};
   int publish_hz{0};
+  int sim_lowstate_decimation{0};
   int onnx_threads{0};
   int max_frames{-1};
   int udp_port{0};
@@ -1028,6 +1051,7 @@ struct Args {
   double input_timeout_sec{-1.0};
   double stale_sec{-1.0};
   double lowstate_timeout_sec{-1.0};
+  double activation_blend_sec{std::numeric_limits<double>::quiet_NaN()};
   uint64_t trt_workspace_size{0};
   float action_scale_override{std::numeric_limits<float>::quiet_NaN()};
   bool rebuild_motion_cache{false};
@@ -1084,6 +1108,7 @@ inline Args parse_args(int argc, char** argv) {
     else if (k == "--input-timeout-sec") a.input_timeout_sec = std::stod(need_arg(i, argc, argv, k));
     else if (k == "--stale-sec") a.stale_sec = std::stod(need_arg(i, argc, argv, k));
     else if (k == "--lowstate-timeout-sec") a.lowstate_timeout_sec = std::stod(need_arg(i, argc, argv, k));
+    else if (k == "--activation-blend-sec") a.activation_blend_sec = std::stod(need_arg(i, argc, argv, k));
     else if (k == "--stale-behavior") a.stale_behavior_override = lower(need_arg(i, argc, argv, k));
     else if (k == "--event-log") a.event_log = need_arg(i, argc, argv, k);
     else if (k == "--ep" || k == "--execution-provider") a.execution_provider_override = lower(need_arg(i, argc, argv, k));
@@ -1096,6 +1121,8 @@ inline Args parse_args(int argc, char** argv) {
     else if (k == "--action-scale") a.action_scale_override = std::stof(need_arg(i, argc, argv, k));
     else if (k == "--ready-file") a.ready_file = need_arg(i, argc, argv, k);
     else if (k == "--start-file") a.start_file = need_arg(i, argc, argv, k);
+    else if (k == "--handoff-complete-file") a.handoff_complete_file = need_arg(i, argc, argv, k);
+    else if (k == "--handoff-release-file") a.handoff_release_file = need_arg(i, argc, argv, k);
     else if (k == "--preview-file") a.preview_file = need_arg(i, argc, argv, k);
     else if (k == "--commit-file") a.commit_file = need_arg(i, argc, argv, k);
     else if (k == "--discard-file") a.discard_file = need_arg(i, argc, argv, k);
@@ -1104,6 +1131,7 @@ inline Args parse_args(int argc, char** argv) {
     else if (k == "--state-topic") a.state_topic = need_arg(i, argc, argv, k);
     else if (k == "--hz") a.inference_hz = std::stoi(need_arg(i, argc, argv, k));
     else if (k == "--publish-hz") a.publish_hz = std::stoi(need_arg(i, argc, argv, k));
+    else if (k == "--sim-lowstate-decimation") a.sim_lowstate_decimation = std::stoi(need_arg(i, argc, argv, k));
     else if (k == "--onnx-threads") a.onnx_threads = std::stoi(need_arg(i, argc, argv, k));
     else if (k == "--max-frames" || k == "--max-time-step" || k == "--motion-end-step") a.max_frames = std::stoi(need_arg(i, argc, argv, k));
     else if (k == "--duration-sec") a.duration_sec = std::stod(need_arg(i, argc, argv, k));
@@ -1126,6 +1154,8 @@ inline Args parse_args(int argc, char** argv) {
                 << "  --check-only loads spec/params/ONNX and runs a zero-input IO check without DDS.\n"
                 << "  --dry-run subscribes LowState and runs inference, but does not publish LowCmd.\n"
                 << "  --lowstate-timeout-sec SEC overrides the spec safety timeout.\n"
+                << "  --activation-blend-sec SEC blends q/kp/kd from the final hold command.\n"
+                << "  --sim-lowstate-decimation N advances embedded mimic after N fresh simulation states.\n"
                 << "  --event-log PATH writes JSONL runtime evidence events.\n"
                 << "  --candidate-topic TOPIC publishes private candidate commands.\n"
                 << "  --preview-file PATH --commit-file PATH [--discard-file PATH]\n"
@@ -1893,17 +1923,17 @@ class SonicZmqReceiver {
       throw std::runtime_error("SONIC ZMQ reference endpoint must be local until an authenticated reference transport is configured");
     }
     close_socket();
-    topic_ = topic;
+    pose_topic_ = topic;
     ctx_ = zmq_ctx_new();
     if (!ctx_) throw std::runtime_error("SONIC ZMQ context creation failed");
     sock_ = zmq_socket(ctx_, ZMQ_SUB);
     if (!sock_) throw std::runtime_error("SONIC ZMQ SUB socket creation failed");
     int linger = 0;
-    int conflate = 1;
     zmq_setsockopt(sock_, ZMQ_LINGER, &linger, sizeof(linger));
-    zmq_setsockopt(sock_, ZMQ_CONFLATE, &conflate, sizeof(conflate));
-    if (zmq_setsockopt(sock_, ZMQ_SUBSCRIBE, topic.data(), topic.size()) != 0) {
-      throw std::runtime_error("SONIC ZMQ subscribe failed");
+    for (const std::string& subscribed : {pose_topic_, std::string("planner"), std::string("command")}) {
+      if (zmq_setsockopt(sock_, ZMQ_SUBSCRIBE, subscribed.data(), subscribed.size()) != 0) {
+        throw std::runtime_error("SONIC ZMQ subscribe failed for topic=" + subscribed);
+      }
     }
     const int rc = bind_socket ? zmq_bind(sock_, endpoint.c_str()) : zmq_connect(sock_, endpoint.c_str());
     if (rc != 0) {
@@ -1911,7 +1941,7 @@ class SonicZmqReceiver {
                                " failed endpoint=" + endpoint + " errno=" + std::to_string(errno));
     }
     std::cout << player_log_prefix() << " SONIC ZMQ SUB " << (bind_socket ? "bind" : "connect")
-              << " endpoint=" << endpoint << " topic='" << topic << "'\n";
+              << " endpoint=" << endpoint << " topics='" << pose_topic_ << ",planner,command'\n";
 #else
     (void)endpoint; (void)topic; (void)bind_socket;
     throw std::runtime_error(std::string(player_label()) + " was built without libzmq");
@@ -1937,32 +1967,35 @@ class SonicZmqReceiver {
       }
       packet.resize(static_cast<size_t>(size));
       try {
-        std::string layout_signature;
-        auto frames = action_go::runtime::parse_sonic_zmq_packet(packet, topic_, &layout_signature);
-        if (has_layout_ && layout_signature != layout_signature_) {
-          throw std::runtime_error("field order, dtype, shape, or endian changed during the active stream");
+        if (packet.size() >= pose_topic_.size() &&
+            std::memcmp(packet.data(), pose_topic_.data(), pose_topic_.size()) == 0) {
+          accept_pose(packet);
+          got_any = true;
+        } else if (packet.size() >= 7 && std::memcmp(packet.data(), "planner", 7) == 0) {
+          std::string signature;
+          auto command = action_go::runtime::parse_sonic_planner_packet(packet, "planner", &signature);
+          if (has_planner_layout_ && signature != planner_layout_) {
+            throw std::runtime_error("planner field order, dtype, shape, or endian changed");
+          }
+          planner_layout_ = std::move(signature);
+          has_planner_layout_ = true;
+          planner_command_ = command;
+          planner_time_ = std::chrono::steady_clock::now();
+          ++planner_sequence_;
+          has_planner_ = true;
+          got_any = true;
+        } else if (packet.size() >= 7 && std::memcmp(packet.data(), "command", 7) == 0) {
+          std::string signature;
+          auto command = action_go::runtime::parse_sonic_command_packet(packet, "command", &signature);
+          // delta_heading is optional, so command layouts may legitimately switch between two known forms.
+          control_command_ = command;
+          control_time_ = std::chrono::steady_clock::now();
+          ++control_sequence_;
+          has_control_ = true;
+          got_any = true;
+        } else {
+          throw std::runtime_error("unknown SONIC ZMQ topic");
         }
-        const bool explicit_index = !frames.empty() && frames.front().has_explicit_frame_index;
-        if (has_index_mode_ && explicit_index != explicit_index_mode_) {
-          throw std::runtime_error("frame_index presence changed during the active stream");
-        }
-        if (!explicit_index) {
-          const int64_t first = has_last_ ? last_frame_index_ + 1 : 0;
-          for (size_t i = 0; i < frames.size(); ++i) frames[i].frame_index = first + static_cast<int64_t>(i);
-        }
-        if (has_last_ && !frames.empty() && frames.back().frame_index == last_frame_index_) {
-          continue;
-        }
-        explicit_index_mode_ = explicit_index;
-        has_index_mode_ = true;
-        layout_signature_ = std::move(layout_signature);
-        has_layout_ = true;
-        last_frame_index_ = frames.back().frame_index;
-        last_frames_ = std::move(frames);
-        last_time_ = std::chrono::steady_clock::now();
-        ++sequence_;
-        has_last_ = true;
-        got_any = true;
       } catch (const std::exception& e) {
         ++bad_packets_;
         if (bad_packets_ <= 5 || bad_packets_ % 100 == 0) {
@@ -1996,7 +2029,59 @@ class SonicZmqReceiver {
     return sample;
   }
 
+  SonicPlannerSample current_planner_sample(double stale_sec) {
+    poll();
+    SonicPlannerSample sample;
+    if (!has_planner_) return sample;
+    sample.command = planner_command_;
+    sample.sequence = planner_sequence_;
+    sample.age_sec = std::chrono::duration<double>(std::chrono::steady_clock::now() - planner_time_).count();
+    sample.freshness = sample.age_sec > stale_sec ? SampleFreshness::kStale : SampleFreshness::kFresh;
+    return sample;
+  }
+
+  SonicControlSample current_control_sample() {
+    poll();
+    SonicControlSample sample;
+    if (!has_control_) return sample;
+    sample.present = true;
+    sample.command = control_command_;
+    sample.sequence = control_sequence_;
+    sample.age_sec = std::chrono::duration<double>(std::chrono::steady_clock::now() - control_time_).count();
+    return sample;
+  }
+
+  bool has_pose() const { return has_last_; }
+  bool has_planner() const { return has_planner_; }
+  bool has_control() const { return has_control_; }
+
  private:
+  void accept_pose(const std::vector<uint8_t>& packet) {
+    std::string layout_signature;
+    auto frames = action_go::runtime::parse_sonic_zmq_packet(packet, pose_topic_, &layout_signature);
+    if (has_layout_ && layout_signature != layout_signature_) {
+      throw std::runtime_error("pose field order, dtype, shape, or endian changed during the active stream");
+    }
+    const bool explicit_index = !frames.empty() && frames.front().has_explicit_frame_index;
+    if (has_index_mode_ && explicit_index != explicit_index_mode_) {
+      throw std::runtime_error("frame_index presence changed during the active stream");
+    }
+    if (!explicit_index) {
+      const int64_t first = has_last_ ? last_frame_index_ + 1 : 0;
+      for (size_t i = 0; i < frames.size(); ++i) frames[i].frame_index = first + static_cast<int64_t>(i);
+    }
+    if (has_last_ && !frames.empty() && frames.back().frame_index == last_frame_index_) return;
+    explicit_index_mode_ = explicit_index;
+    has_index_mode_ = true;
+    layout_signature_ = std::move(layout_signature);
+    has_layout_ = true;
+    last_frame_index_ = frames.back().frame_index;
+    last_frames_ = std::move(frames);
+    last_time_ = std::chrono::steady_clock::now();
+    ++sequence_;
+    has_last_ = true;
+  }
+
   void close_socket() {
 #ifdef ACTION_GO_HAS_ZMQ
     if (sock_) { zmq_close(sock_); sock_ = nullptr; }
@@ -2008,7 +2093,7 @@ class SonicZmqReceiver {
   void* ctx_{nullptr};
   void* sock_{nullptr};
 #endif
-  std::string topic_;
+  std::string pose_topic_;
   bool has_last_{false};
   bool has_index_mode_{false}, explicit_index_mode_{false};
   bool has_layout_{false};
@@ -2017,6 +2102,13 @@ class SonicZmqReceiver {
   std::chrono::steady_clock::time_point last_time_{std::chrono::steady_clock::now()};
   uint64_t sequence_{0};
   int64_t last_frame_index_{-1};
+  bool has_planner_{false}, has_control_{false}, has_planner_layout_{false};
+  SonicPlannerCommand planner_command_{};
+  SonicControlCommand control_command_{};
+  std::string planner_layout_;
+  std::chrono::steady_clock::time_point planner_time_{std::chrono::steady_clock::now()};
+  std::chrono::steady_clock::time_point control_time_{std::chrono::steady_clock::now()};
+  uint64_t planner_sequence_{0}, control_sequence_{0};
   size_t bad_packets_{0};
 };
 
@@ -2229,6 +2321,7 @@ class GenericPolicyPlayer {
     std::vector<float> dq;
     std::chrono::steady_clock::time_point stamp{};
     uint64_t seq{0};
+    uint32_t source_tick_ms{0};
     int mode_machine{0};
     bool connected{false};
   };
@@ -2423,7 +2516,7 @@ class GenericPolicyPlayer {
   void wait_start_file(std::vector<float>& hold_q, const std::vector<float>& hold_kp,
                        const std::vector<float>& hold_kd, int publish_hz,
                        const std::function<void()>& standby_health_check = {},
-                       bool follow_current_pose = false);
+                       bool follow_current_pose = true);
 
   std::vector<float> bfm_infer(const std::vector<float>& obs);
 
@@ -2549,8 +2642,9 @@ class GenericPolicyPlayer {
 
   SonicRobotFrame sonic_robot_frame(const RobotState& state) const;
 
-  bool update_sonic_reference(int64_t policy_step);
+  bool update_sonic_reference(const RobotState& state, int64_t policy_step);
   void require_sonic_realtime_fresh(const char* phase, bool revoke_ready);
+  bool prepare_sonic_pico_source(const RobotState& state, bool require_started);
 
   bool build_sonic_target(const RobotState& state, int64_t policy_step,
                           std::vector<float>& target, std::vector<float>& raw_action);
@@ -2564,12 +2658,15 @@ class GenericPolicyPlayer {
   fs::path spec_path_, model_path_, runtime_model_path_, params_path_, trajectory_path_;
   std::string name_, template_, variant_, latent_file_, bfm_latent_sequence_file_;
   std::string net_{"enP8p1s0"}, cmd_topic_{"rt/user_lowcmd"}, state_topic_{"rt/lowstate"}, ready_file_, start_file_;
+  std::string handoff_complete_file_, handoff_release_file_;
   std::string preview_file_, commit_file_, discard_file_;
   std::vector<std::string> expected_input_names_, expected_output_names_;
   std::string obs_input_name_, time_input_name_{"time_step"}, action_output_name_;
   int inference_hz_{50}, publish_hz_{500}, onnx_threads_{2}, mode_machine_{5}, stats_interval_{100};
+  int sim_lowstate_decimation_{0};
   int max_frames_{0};
-  double duration_sec_{0.0}, target_interp_sec_{0.02}, preview_timeout_sec_{5.0};
+  double duration_sec_{0.0}, target_interp_sec_{0.02}, startup_interp_sec_{0.0}, preview_timeout_sec_{5.0};
+  double activation_blend_sec_{0.10};
   bool damping_on_stop_{false};
 
   int motor_count_{0};
@@ -2577,6 +2674,7 @@ class GenericPolicyPlayer {
   int configured_action_dim_{0};
   int num_actions_{0}, num_obs_{0};
   std::vector<float> default_q_, action_scale_, kp_, kd_, lower_limits_, upper_limits_, torque_limits_, last_action_;
+  std::vector<float> last_published_q_, last_published_kp_, last_published_kd_;
   std::vector<int> joint_index_;
   std::vector<std::string> joint_order_;
   int64_t policy_counter_{0};
@@ -2613,6 +2711,13 @@ class GenericPolicyPlayer {
   int beyond_ref_body_count_{0};
   int beyond_ref_anchor_idx_{0};
   int beyond_warmup_steps_{2};
+  int beyond_initial_reference_step_{0};
+  bool beyond_align_initial_yaw_{true};
+  bool beyond_use_lowstate_tick_{false};
+  bool beyond_sim_lockstep_sequence_{false};
+  uint32_t beyond_policy_tick_ms_{20};
+  int64_t beyond_motion_step_{0};
+  std::array<int, 3> beyond_waist_joint_idx_{-1, -1, -1};
   std::array<float, 9> beyond_init_to_world_{1.f, 0.f, 0.f, 0.f, 1.f, 0.f, 0.f, 0.f, 1.f};
 
   int holosoma_motion_start_step_{0}, holosoma_motion_end_step_{0}, holosoma_current_timestep_{0};
@@ -2700,17 +2805,20 @@ class GenericPolicyPlayer {
 
   int sonic_encoder_obs_dim_{0}, sonic_decoder_obs_dim_{0}, sonic_token_dim_{0};
   int sonic_history_len_{0}, sonic_future_frames_{0}, sonic_future_step_{0}, sonic_zmq_header_size_{0};
+  std::string sonic_checkpoint_{"default"};
   std::string sonic_input_source_{"offline-csv"};
   std::string sonic_zmq_endpoint_{"tcp://127.0.0.1:5556"}, sonic_zmq_topic_{"pose"};
   bool sonic_zmq_bind_{false}, sonic_require_realtime_{false}, sonic_loop_reference_{false};
+  bool sonic_pico_control_{false}, sonic_use_planner_{false}, sonic_remote_stop_{false};
   double sonic_input_timeout_sec_{3.0}, sonic_stale_sec_{0.1}, sonic_stale_stop_sec_{0.5};
   double sonic_startup_ramp_sec_{3.0};
   std::string sonic_execution_provider_{"cpu"};
   int sonic_gpu_device_id_{0}, sonic_warmup_iters_{1};
-  fs::path sonic_encoder_path_, sonic_decoder_path_, sonic_trt_cache_dir_;
+  fs::path sonic_encoder_path_, sonic_decoder_path_, sonic_planner_path_, sonic_trt_cache_dir_;
   size_t sonic_trt_workspace_size_{1ULL << 30};
   bool sonic_trt_fp16_{false};
   uint64_t sonic_last_realtime_sequence_{0};
+  uint64_t sonic_last_planner_sequence_{0}, sonic_last_control_sequence_{0};
   int64_t sonic_realtime_base_frame_{0};
   int64_t sonic_realtime_frame_step_{1};
   bool sonic_realtime_heading_reset_{false};
@@ -2718,20 +2826,26 @@ class GenericPolicyPlayer {
   bool sonic_hold_last_target_{false};
   SonicReferenceCache sonic_reference_cache_;
   SonicObservationBuilder sonic_observation_builder_;
+  SonicPlannerConfig sonic_planner_config_;
+  SonicPlanner sonic_planner_;
   SonicZmqReceiver sonic_zmq_;
   RealtimeInputStaleGate sonic_stale_gate_;
-  OnnxRunner sonic_encoder_, sonic_decoder_;
+  OnnxRunner sonic_encoder_, sonic_decoder_, sonic_planner_runner_;
 
   CommandSafetyConfig command_safety_config_;
   CommandSafetyFilter safety_filter_;
   CommandSafetyLimits safety_limits_;
   RuntimeEventLogger event_log_;
+  ActivationBlend activation_blend_;
   OnnxRunner onnx_;
   unitree::robot::ChannelPublisherPtr<LowCmd> publisher_;
   std::shared_ptr<unitree::robot::ChannelSubscriber<LowState>> subscriber_;
   mutable std::mutex state_mtx_;
   RobotState state_;
   std::atomic<bool> connected_{false};
+  std::atomic<int64_t> active_publish_count_{0};
+  std::atomic<int64_t> last_active_publish_ns_{0};
+  std::atomic<double> max_active_publish_interval_ms_{0.0};
   bool first_command_logged_{false};
   bool first_hold_logged_{false};
   bool first_active_command_logged_{false};
@@ -2739,7 +2853,8 @@ class GenericPolicyPlayer {
   bool start_file_seen_logged_{false};
   bool first_preview_candidate_logged_{false};
   bool preview_active_consistency_logged_{false};
-  std::vector<float> preview_candidate_q_;
+  bool activation_blend_bypass_logged_{false};
+  std::vector<float> preview_candidate_q_, preview_candidate_kp_, preview_candidate_kd_;
 };
 
 }  // namespace action_go::runtime::generic_policy_runtime

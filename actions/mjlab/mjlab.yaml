@@ -1,0 +1,41 @@
+# MJLab-exported policy actions.
+actions:
+  generic_policy:
+    dance1_subject2_mjlab:
+      safety_enable: false
+      params: config/generic_dance1_subject2.yaml
+      model: model/dance1_subject2_29999.onnx
+      max_frames: 6574
+      prestart_before_userctrl: true
+      prestart_ready_timeout_sec: 5.0
+      postrun_handoff_hold: true
+      switch_back_overlap_sec: 0.30
+      switch_back: true
+      switch_back_mode: walkrun
+      command: "{action_go_root}/build/generic_policy_player --net {net} --cmd-topic rt/user_lowcmd --state-topic rt/lowstate --spec {params} --model {model} --max-frames {max_frames} --ready-file {ready_file} --start-file {start_file} --handoff-complete-file {handoff_complete_file} --handoff-release-file {handoff_release_file} --no-damping-on-stop {event_log_arg}"
+
+    reverse_vault_flat_mjlab:
+      safety_enable: false
+      params: config/generic_reverse_vault.yaml
+      model: model/reverse_vault_flat_28000.onnx
+      max_frames: 368
+      prestart_before_userctrl: true
+      prestart_ready_timeout_sec: 5.0
+      postrun_handoff_hold: true
+      switch_back_overlap_sec: 0.30
+      switch_back: true
+      switch_back_mode: walkrun
+      command: "{action_go_root}/build/generic_policy_player --net {net} --cmd-topic rt/user_lowcmd --state-topic rt/lowstate --spec {params} --model {model} --max-frames {max_frames} --ready-file {ready_file} --start-file {start_file} --handoff-complete-file {handoff_complete_file} --handoff-release-file {handoff_release_file} --no-damping-on-stop {event_log_arg}"
+
+    reverse_vault_terrain_mjlab:
+      safety_enable: false
+      params: config/generic_reverse_vault_terrain.yaml
+      model: model/reverse_vault_terrain_20000.onnx
+      max_frames: 368
+      prestart_before_userctrl: true
+      prestart_ready_timeout_sec: 5.0
+      postrun_handoff_hold: true
+      switch_back_overlap_sec: 0.30
+      switch_back: true
+      switch_back_mode: walkrun
+      command: "{action_go_root}/build/generic_policy_player --net {net} --cmd-topic rt/user_lowcmd --state-topic rt/lowstate --spec {params} --model {model} --max-frames {max_frames} --ready-file {ready_file} --start-file {start_file} --handoff-complete-file {handoff_complete_file} --handoff-release-file {handoff_release_file} --no-damping-on-stop {event_log_arg}"

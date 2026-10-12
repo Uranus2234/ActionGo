@@ -58,6 +58,7 @@ SIM_PUBLISH_HZ_CAPABLE_ACTION_TYPES = {
     "beyondmimic",
     "bfm_zero",
     "instinct_parkour",
+    "php",
     "holosoma_wbt",
     "protomotions_tracker",
     "omnixtreme",
@@ -204,9 +205,9 @@ class SafetyConfig:
 @dataclass
 class RemoteConfig:
     bindings: list[Binding] = field(default_factory=list)
-    emergency_combo: int = bit(BUTTONS["R2"]) | bit(BUTTONS["B"])
-    walkrun_exit_combo: int = bit(BUTTONS["R2"]) | bit(BUTTONS["Start"])
-    damping_exit_combo: int = bit(BUTTONS["R2"]) | bit(BUTTONS["X"])
+    emergency_combo: int = 0
+    walkrun_exit_combo: int = 0
+    damping_exit_combo: int = 0
     shell_start_combo: int = bit(BUTTONS["Start"])
     shell_start_alt_combo: int = bit(BUTTONS["Left"]) | bit(BUTTONS["B"])
     shell_start_action: str = "bfm_zero_stand"
@@ -288,6 +289,8 @@ class ActionConfig:
     prestart_ready_timeout_sec: float = 3.0
     ready_file: str = ""
     start_file: str = ""
+    handoff_complete_file: str = ""
+    handoff_release_file: str = ""
 
 
 def apply_action_fields(action: ActionConfig, fields: dict[str, Any]):
@@ -324,6 +327,10 @@ def apply_action_fields(action: ActionConfig, fields: dict[str, Any]):
             action.ready_file = str(value)
         elif key == "start_file":
             action.start_file = str(value)
+        elif key == "handoff_complete_file":
+            action.handoff_complete_file = str(value)
+        elif key == "handoff_release_file":
+            action.handoff_release_file = str(value)
 
 
 def merge_action(name: str, typ: str, base_dir: Path, global_defaults: dict[str, Any], type_defaults: dict[str, Any], fields: dict[str, Any]) -> ActionConfig:
@@ -419,6 +426,8 @@ def load_action_registry(config_path: Path, net: str) -> dict[str, ActionConfig]
         if action.prestart_before_userctrl:
             action.ready_file = action.ready_file or f"/tmp/action_go_sim_{action.name}_ready"
             action.start_file = action.start_file or f"/tmp/action_go_sim_{action.name}_start"
+            action.handoff_complete_file = action.handoff_complete_file or f"/tmp/action_go_sim_{action.name}_complete"
+            action.handoff_release_file = action.handoff_release_file or f"/tmp/action_go_sim_{action.name}_release"
     return actions
 
 
@@ -452,6 +461,8 @@ def expand_command(action: ActionConfig) -> str:
         "{motion_end_step}": str(action.max_frames),
         "{ready_file}": action.ready_file,
         "{start_file}": action.start_file,
+        "{handoff_complete_file}": action.handoff_complete_file,
+        "{handoff_release_file}": action.handoff_release_file,
         "{event_log_arg}": "",
     }
     return replace_all(cmd, values)
@@ -503,7 +514,6 @@ def adapt_command_for_sim(
     command: str,
     action_type: str = "",
     publish_hz: int = 0,
-    lowstate_timeout_sec: float = 0.0,
     normalize_publish_hz: bool = False,
     map_user_lowcmd: bool = True,
 ) -> str:
@@ -526,12 +536,6 @@ def adapt_command_for_sim(
                 f"type={action_type}: {e}",
                 flush=True,
             )
-    if lowstate_timeout_sec > 0.0 and action_type in SIM_PUBLISH_HZ_CAPABLE_ACTION_TYPES:
-        tokens = shlex.split(command)
-        found = _set_cli_option(tokens, "--lowstate-timeout-sec", str(float(lowstate_timeout_sec)))
-        if not found:
-            tokens += ["--lowstate-timeout-sec", str(float(lowstate_timeout_sec))]
-        command = _shell_join(tokens)
     return " ".join(command.split())
 
 
@@ -599,7 +603,7 @@ class NativeActionGoBridge:
     step, avoiding an extra wall-time lowstate thread racing with mj_step().
     """
 
-    def __init__(self, model, data, joystick_type: str = "xbox", joystick_device: int = 0):
+    def __init__(self, model, data, joystick_type: str = "xbox", joystick_device: int = 0, action_lockstep_decimation: int = 0):
         from unitree_sdk2py.core.channel import ChannelPublisher, ChannelSubscriber
         from unitree_sdk2py.idl.default import unitree_go_msg_dds__WirelessController_
         from unitree_sdk2py.idl.default import unitree_hg_msg_dds__LowState_ as LowState_default
@@ -611,15 +615,66 @@ class NativeActionGoBridge:
         self.num_motor = int(model.nu)
         if self.num_motor < 29:
             raise RuntimeError(f"native bridge expects at least 29 actuators, got {self.num_motor}")
-        self.dim_motor_sensor = 3 * self.num_motor
-        self.have_imu_sensor = False
-        self.have_frame_sensor = False
-        for i in range(self.dim_motor_sensor, self.model.nsensor):
-            name = mujoco.mj_id2name(self.model, mujoco.mjtObj.mjOBJ_SENSOR, i)
-            if name == "imu_quat":
-                self.have_imu_sensor = True
-            if name == "frame_pos":
-                self.have_frame_sensor = True
+        canonical_motor_names = (
+            "left_hip_pitch_joint", "left_hip_roll_joint", "left_hip_yaw_joint", "left_knee_joint",
+            "left_ankle_pitch_joint", "left_ankle_roll_joint", "right_hip_pitch_joint", "right_hip_roll_joint",
+            "right_hip_yaw_joint", "right_knee_joint", "right_ankle_pitch_joint", "right_ankle_roll_joint",
+            "waist_yaw_joint", "waist_roll_joint", "waist_pitch_joint", "left_shoulder_pitch_joint",
+            "left_shoulder_roll_joint", "left_shoulder_yaw_joint", "left_elbow_joint", "left_wrist_roll_joint",
+            "left_wrist_pitch_joint", "left_wrist_yaw_joint", "right_shoulder_pitch_joint", "right_shoulder_roll_joint",
+            "right_shoulder_yaw_joint", "right_elbow_joint", "right_wrist_roll_joint", "right_wrist_pitch_joint",
+            "right_wrist_yaw_joint",
+        )
+        self.motor_actuator_ids = np.arange(self.num_motor, dtype=np.int32)
+        if self.num_motor == len(canonical_motor_names):
+            actuator_by_joint: dict[int, int] = {}
+            for actuator_id in range(self.num_motor):
+                actuator_by_joint[int(self.model.actuator_trnid[actuator_id, 0])] = actuator_id
+            mapped: list[int] = []
+            for joint_name in canonical_motor_names:
+                joint_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, joint_name)
+                if joint_id < 0:
+                    for candidate in range(self.model.njnt):
+                        full_name = mujoco.mj_id2name(self.model, mujoco.mjtObj.mjOBJ_JOINT, candidate) or ""
+                        if full_name.endswith("/" + joint_name) or full_name == "robot_" + joint_name:
+                            joint_id = candidate
+                            break
+                if joint_id < 0 or joint_id not in actuator_by_joint:
+                    mapped = []
+                    break
+                mapped.append(actuator_by_joint[joint_id])
+            if mapped:
+                self.motor_actuator_ids = np.asarray(mapped, dtype=np.int32)
+        self.joint_ids = np.asarray(self.model.actuator_trnid[self.motor_actuator_ids, 0], dtype=np.int32)
+        if np.any(self.joint_ids < 0):
+            raise RuntimeError("native bridge requires joint-transmission actuators")
+        joint_types = np.asarray(self.model.jnt_type[self.joint_ids], dtype=np.int32)
+        scalar_joint_types = (joint_types == int(mujoco.mjtJoint.mjJNT_HINGE)) | (
+            joint_types == int(mujoco.mjtJoint.mjJNT_SLIDE)
+        )
+        if not np.all(scalar_joint_types):
+            raise RuntimeError("native bridge requires one-DoF motor joints")
+        self.qpos_adr = np.asarray(self.model.jnt_qposadr[self.joint_ids], dtype=np.int32)
+        self.dof_adr = np.asarray(self.model.jnt_dofadr[self.joint_ids], dtype=np.int32)
+        self.position_servo = (
+            np.asarray(self.model.actuator_biastype[self.motor_actuator_ids], dtype=np.int32)
+            == int(mujoco.mjtBias.mjBIAS_AFFINE)
+        ) & (np.abs(self.model.actuator_biasprm[self.motor_actuator_ids, 1]) > 1e-9)
+
+        def sensor_address(*names: str) -> int | None:
+            for name in names:
+                sensor_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_SENSOR, name)
+                if sensor_id >= 0:
+                    return int(self.model.sensor_adr[sensor_id])
+            for sensor_id in range(self.model.nsensor):
+                sensor_name = mujoco.mj_id2name(self.model, mujoco.mjtObj.mjOBJ_SENSOR, sensor_id) or ""
+                if any(sensor_name.endswith("/" + name) or sensor_name == "robot_" + name for name in names):
+                    return int(self.model.sensor_adr[sensor_id])
+            return None
+
+        self.imu_quat_adr = sensor_address("imu_quat")
+        self.imu_gyro_adr = sensor_address("imu_gyro", "imu_ang_vel", "pelvis_gyro")
+        self.imu_accel_adr = sensor_address("imu_accelerometer", "imu_lin_acc", "pelvis_acceleration")
 
         self.low_state = LowState_default()
         self.lock = threading.Lock()
@@ -627,6 +682,12 @@ class NativeActionGoBridge:
         self.lowcmd: SimLowCommand | None = None
         self.usercmd: SimLowCommand | None = None
         self.seq = 0
+        self.command_barrier_seq = -1
+        self.command_barrier_until = 0.0
+        self.command_barrier_q: np.ndarray | None = None
+        self.action_lockstep_decimation = max(0, int(action_lockstep_decimation))
+        self.lockstep_q: np.ndarray | None = None
+        self.lockstep_steps_remaining = 0
         self.joystick = None
         self.axis_id: dict[str, int] = {}
         self.button_id: dict[str, int] = {}
@@ -646,9 +707,9 @@ class NativeActionGoBridge:
         self.wireless_controller_puber = ChannelPublisher("rt/wirelesscontroller", WirelessController_)
         self.wireless_controller_puber.Init()
 
-        self.actuator_limited = np.asarray(self.model.actuator_ctrllimited[: self.num_motor], dtype=bool)
-        self.ctrl_low = np.asarray(self.model.actuator_ctrlrange[: self.num_motor, 0], dtype=np.float64)
-        self.ctrl_high = np.asarray(self.model.actuator_ctrlrange[: self.num_motor, 1], dtype=np.float64)
+        self.actuator_limited = np.asarray(self.model.actuator_ctrllimited[self.motor_actuator_ids], dtype=bool)
+        self.ctrl_low = np.asarray(self.model.actuator_ctrlrange[self.motor_actuator_ids, 0], dtype=np.float64)
+        self.ctrl_high = np.asarray(self.model.actuator_ctrlrange[self.motor_actuator_ids, 1], dtype=np.float64)
 
     def SetupJoystick(self, device_id=0, js_type="xbox"):
         import pygame
@@ -685,6 +746,23 @@ class NativeActionGoBridge:
             if self.mode != m:
                 print(f"[action_go_sim][bridge] command gate: {self.mode} -> {m}", flush=True)
             self.mode = m
+            if m != "user":
+                self.lockstep_q = None
+                self.lockstep_steps_remaining = 0
+
+    def arm_user_command_barrier(self, duration_sec: float):
+        deadline = time.monotonic() + max(0.0, float(duration_sec))
+        while time.monotonic() < deadline:
+            with self.lock:
+                if self.usercmd is not None:
+                    break
+            time.sleep(0.001)
+        with self.lock:
+            self.command_barrier_seq = self.usercmd.seq if self.usercmd is not None else self.seq
+            self.command_barrier_until = deadline
+            self.command_barrier_q = self.usercmd.q.copy() if self.usercmd is not None else None
+            if self.command_barrier_q is None:
+                print("[action_go_sim][bridge] WARNING: no prestart user command before barrier", flush=True)
 
     def _extract_cmd(self, msg) -> SimLowCommand:
         n = self.num_motor
@@ -773,22 +851,36 @@ class NativeActionGoBridge:
     def publish_lowstate(self):
         if self.data is None:
             return
+        self.low_state.tick = int(round(float(self.data.time) * 1000))
         n = min(self.num_motor, len(self.low_state.motor_state))
         for i in range(n):
-            self.low_state.motor_state[i].q = float(self.data.sensordata[i])
-            self.low_state.motor_state[i].dq = float(self.data.sensordata[i + self.num_motor])
-            self.low_state.motor_state[i].tau_est = float(self.data.sensordata[i + 2 * self.num_motor])
-        if self.have_imu_sensor and self.data.sensordata.size >= self.dim_motor_sensor + 10:
+            self.low_state.motor_state[i].q = float(self.data.qpos[self.qpos_adr[i]])
+            self.low_state.motor_state[i].dq = float(self.data.qvel[self.dof_adr[i]])
+            self.low_state.motor_state[i].tau_est = float(self.data.actuator_force[self.motor_actuator_ids[i]])
+        if self.imu_quat_adr is not None:
             for i in range(4):
-                self.low_state.imu_state.quaternion[i] = float(self.data.sensordata[self.dim_motor_sensor + i])
-            for i in range(3):
-                self.low_state.imu_state.gyroscope[i] = float(self.data.sensordata[self.dim_motor_sensor + 4 + i])
-                self.low_state.imu_state.accelerometer[i] = float(self.data.sensordata[self.dim_motor_sensor + 7 + i])
+                self.low_state.imu_state.quaternion[i] = float(self.data.sensordata[self.imu_quat_adr + i])
         else:
             for i in range(4):
                 self.low_state.imu_state.quaternion[i] = float(self.data.qpos[3 + i])
+        if self.imu_gyro_adr is not None:
             for i in range(3):
-                self.low_state.imu_state.gyroscope[i] = float(self.data.qvel[3 + i])
+                self.low_state.imu_state.gyroscope[i] = float(self.data.sensordata[self.imu_gyro_adr + i])
+        else:
+            root_velocity = np.zeros(6, dtype=np.float64)
+            mujoco.mj_objectVelocity(
+                self.model,
+                self.data,
+                mujoco.mjtObj.mjOBJ_BODY,
+                1,
+                root_velocity,
+                1,
+            )
+            for i in range(3):
+                self.low_state.imu_state.gyroscope[i] = float(root_velocity[i])
+        if self.imu_accel_adr is not None:
+            for i in range(3):
+                self.low_state.imu_state.accelerometer[i] = float(self.data.sensordata[self.imu_accel_adr + i])
         self._fill_remote()
         self.low_state_puber.Write(self.low_state)
         self.wireless_controller_puber.Write(self.wireless_controller)
@@ -796,16 +888,42 @@ class NativeActionGoBridge:
     def apply_command(self):
         with self.lock:
             cmd = self.usercmd if self.mode == "user" else self.lowcmd if self.mode == "lowcmd" else None
+            barrier_active = self.mode == "user" and self.command_barrier_seq >= 0
+            if barrier_active and cmd is not None:
+                command_changed = self.command_barrier_q is not None and np.max(np.abs(cmd.q - self.command_barrier_q)) > 1e-5
+                barrier_active = not command_changed and time.monotonic() < self.command_barrier_until
+            if not barrier_active and self.mode == "user":
+                self.command_barrier_seq = -1
+                self.command_barrier_until = 0.0
+                self.command_barrier_q = None
+        if barrier_active:
+            self.data.ctrl[: self.num_motor] = 0.0
+            return False
         if cmd is None:
             self.data.ctrl[: self.num_motor] = 0.0
-            return
-        q_now = np.asarray(self.data.sensordata[: self.num_motor], dtype=np.float64)
-        dq_now = np.asarray(self.data.sensordata[self.num_motor : 2 * self.num_motor], dtype=np.float64)
+            return True
+        if self.mode == "user" and self.action_lockstep_decimation > 0:
+            command_changed = self.lockstep_q is None or np.max(np.abs(cmd.q - self.lockstep_q)) > 1e-6
+            if command_changed:
+                self.lockstep_q = cmd.q.copy()
+                self.lockstep_steps_remaining = self.action_lockstep_decimation
+            elif self.lockstep_steps_remaining <= 0:
+                return False
+        q_now = np.asarray(self.data.qpos[self.qpos_adr], dtype=np.float64)
+        dq_now = np.asarray(self.data.qvel[self.dof_adr], dtype=np.float64)
         ctrl = cmd.tau + cmd.kp * (cmd.q - q_now) + cmd.kd * (cmd.dq - dq_now)
+        if np.any(self.position_servo):
+            servo = self.position_servo
+            ctrl[servo] = cmd.q[servo]
         if self.actuator_limited.size:
             limited = self.actuator_limited
-            ctrl[limited] = np.clip(ctrl[limited], self.ctrl_low[limited], self.ctrl_high[limited])
-        self.data.ctrl[: self.num_motor] = ctrl
+            non_position = limited & ~self.position_servo
+            ctrl[non_position] = np.clip(ctrl[non_position], self.ctrl_low[non_position], self.ctrl_high[non_position])
+        self.data.ctrl[: self.num_motor] = 0.0
+        self.data.ctrl[self.motor_actuator_ids] = ctrl
+        if self.mode == "user" and self.action_lockstep_decimation > 0:
+            self.lockstep_steps_remaining -= 1
+        return True
 
 
 class RemoteMonitor:
@@ -918,14 +1036,16 @@ class SimActionManager:
             data.ctrl[:n] = -float(self.args.passive_kd) * data.qvel[6:6 + n]
 
     def _prepare_prestart_files(self, action: ActionConfig):
-        if action.ready_file:
+        for raw_path in (
+            action.ready_file,
+            action.start_file,
+            action.handoff_complete_file,
+            action.handoff_release_file,
+        ):
+            if not raw_path:
+                continue
             try:
-                Path(action.ready_file).unlink(missing_ok=True)
-            except Exception:
-                pass
-        if action.start_file:
-            try:
-                Path(action.start_file).unlink(missing_ok=True)
+                Path(raw_path).unlink(missing_ok=True)
             except Exception:
                 pass
 
@@ -972,7 +1092,6 @@ class SimActionManager:
             expand_command(action),
             action_type=action.type,
             publish_hz=int(self.sim_publish_hz),
-            lowstate_timeout_sec=float(self.args.sim_lowstate_timeout_sec),
             normalize_publish_hz=not bool(getattr(self.args, "no_normalize_action_publish_hz", False)),
             map_user_lowcmd=not self.native_bridge,
         )
@@ -996,6 +1115,8 @@ class SimActionManager:
             self.set_bridge_mode("user")
             self.stop_walkrun()
             self.passive = False
+            if hasattr(self.bridge, "arm_user_command_barrier"):
+                self.bridge.arm_user_command_barrier(self.args.action_start_barrier_sec)
             self._signal_action_start(action)
         else:
             self.stop_walkrun()
@@ -1025,6 +1146,12 @@ class SimActionManager:
         if self.active_proc is None:
             return None
         code = self.active_proc.poll()
+        if code is None and self.active_action:
+            action = self.actions[self.active_action]
+            if action.handoff_complete_file and Path(action.handoff_complete_file).exists():
+                if action.handoff_release_file:
+                    Path(action.handoff_release_file).write_text("release\n", encoding="utf-8")
+                return None
         if code is None:
             return None
         name = self.active_action
@@ -1065,10 +1192,19 @@ def parse_args(argv=None) -> argparse.Namespace:
     unitree_sdk2py = os.environ.get("UNITREE_SDK2PY_ROOT", str(ACTION_GO_ROOT.parent / "unitree_sdk2_python"))
     p = argparse.ArgumentParser(description="action_go unified remote interface for unitree_mujoco")
     p.add_argument("--config", default=str(ACTION_GO_ROOT / "config/motion_actions.yaml"))
+    p.add_argument("--risk-model", default="", help="MLP risk ONNX; terminal/viewer 1 requests BFM handoff")
+    p.add_argument("--training-env", default="", help="align auto-action to saved training env.yaml")
+    p.add_argument("--safety-disable", action="store_true", help="disable automatic excessive-tilt recovery")
+    p.add_argument("--risk-auto-request-sec", type=float, default=-1.0)
     p.add_argument("--remote-map", default=str(ACTION_GO_ROOT / "config/remote_actions.yaml"))
     p.add_argument("--unitree-mujoco-root", default=unitree_mujoco)
     p.add_argument("--unitree-sdk2py-root", default=unitree_sdk2py)
     p.add_argument("--xml", default="", help="default: <unitree_mujoco_root>/unitree_robots/g1/scene_29dof.xml")
+    p.add_argument("--position-actuator-params", default="", help="add MJLab-style position actuators from an ActionGo robot params YAML")
+    p.add_argument("--hfield-file", default="", help="optional MuJoCo heightfield asset added to the scene")
+    p.add_argument("--hfield-size", type=float, nargs=4, default=(1.0, 1.0, 0.2, 0.1))
+    p.add_argument("--hfield-pos", type=float, nargs=3, default=(0.0, 0.0, 0.0))
+    p.add_argument("--hfield-solref", type=float, nargs=2, default=(0.02, 1.0))
     p.add_argument("--interface", default="lo")
     p.add_argument("--domain-id", type=int, default=0, help="use 0 for compatibility with all action_go C++ players")
     p.add_argument("--sim-dt", type=float, default=0.002, help="default matches a 500 Hz low-level robot/sim control loop")
@@ -1086,7 +1222,8 @@ def parse_args(argv=None) -> argparse.Namespace:
     p.add_argument("--walkrun-hz", type=int, default=50)
     p.add_argument("--walkrun-publish-hz", type=int, default=0, help="0 means match 1/--sim-dt lowstate/control cadence")
     p.add_argument("--sim-action-publish-hz", type=int, default=0, help="0 means rewrite action player --publish-hz to 1/--sim-dt")
-    p.add_argument("--sim-lowstate-timeout-sec", type=float, default=0.2, help="LowState safety timeout passed only to simulated action players")
+    p.add_argument("--action-start-barrier-sec", type=float, default=0.1, help="freeze simulation after UserCtrl handoff until the first post-start policy command arrives")
+    p.add_argument("--action-lockstep-decimation", type=int, default=0, help="advance this many physics steps per distinct UserCtrl target; 0 keeps wall-clock async simulation")
     p.add_argument("--no-normalize-action-publish-hz", action="store_true", help="keep action YAML/player --publish-hz values instead of matching --sim-dt")
     p.add_argument("--walkrun-startup-sec", type=float, default=0.2)
     p.add_argument("--walkrun-target-interp-sec", type=float, default=0.02)
@@ -1095,9 +1232,12 @@ def parse_args(argv=None) -> argparse.Namespace:
     p.add_argument("--passive-kd", type=float, default=3.0)
     p.add_argument("--remote-period-sec", type=float, default=0.02)
     p.add_argument("--auto-action", default="", help="start this action automatically after lowstate connects; useful for headless demos")
+    p.add_argument("--reset-auto-action-to-reference", action="store_true", help="reset MuJoCo root/joints to embedded ONNX reference frame 0 before auto-action/V")
+    p.add_argument("--reference-origin", type=float, nargs=3, default=(0.0, 0.0, 0.0), help="world offset added to embedded reference root position")
     p.add_argument("--auto-arm-sec", type=float, default=-1.0, help="arm the shell after this many seconds; useful for headless safety tests")
     p.add_argument("--auto-arm-alt-sec", type=float, default=-1.0, help="arm with the alternate recovery backend after this many seconds")
     p.add_argument("--auto-exit-sec", type=float, default=0.0, help="exit automatically after this many seconds; 0 disables")
+    p.add_argument("--state-log-period-sec", type=float, default=0.0, help="periodically print root pose/tilt/contact telemetry; 0 disables")
     p.add_argument("--record-video", default="", help="write an mp4 from the MuJoCo camera using ffmpeg")
     p.add_argument("--record-fps", type=float, default=30.0)
     p.add_argument("--record-width", type=int, default=1280)
@@ -1138,8 +1278,79 @@ def setup_unitree_mujoco(args: argparse.Namespace):
             f"Current Python is {sys.executable}; try /usr/bin/python3 or set --unitree-sdk2py-root."
         ) from e
 
-    model = mujoco.MjModel.from_xml_path(cfg.ROBOT_SCENE)
+    if args.hfield_file or args.position_actuator_params:
+        spec = mujoco.MjSpec.from_file(cfg.ROBOT_SCENE)
+    else:
+        spec = None
+
+    if args.position_actuator_params:
+        params_path = Path(args.position_actuator_params).expanduser().resolve()
+        with params_path.open("r", encoding="utf-8") as stream:
+            params = yaml.safe_load(stream) or {}
+        robot = params.get("robot", {})
+        joint_order = list(robot.get("policy_joint_order", []))
+        stiffness = list(robot.get("kp", []))
+        damping = list(robot.get("kd", []))
+        effort_limits = list(robot.get("torque_limits", []))
+        armature = list(robot.get("armature", []))
+        expected = len(joint_order)
+        if expected != 29 or any(len(values) != expected for values in (stiffness, damping, effort_limits, armature)):
+            raise RuntimeError(
+                "--position-actuator-params requires 29 policy_joint_order/kp/kd/torque_limits/armature values"
+            )
+        assert spec is not None
+        for index, joint_name in enumerate(joint_order):
+            actuator = spec.add_actuator(
+                name=joint_name,
+                trntype=mujoco.mjtTrn.mjTRN_JOINT,
+                target=joint_name,
+                armature=float(armature[index]),
+                forcelimited=1,
+                forcerange=(-float(effort_limits[index]), float(effort_limits[index])),
+            )
+            actuator.set_to_position(float(stiffness[index]), float(damping[index]))
+
+    if args.hfield_file:
+        hfield_path = Path(args.hfield_file).expanduser().resolve()
+        if not hfield_path.is_file():
+            raise FileNotFoundError(f"heightfield not found: {hfield_path}")
+        assert spec is not None
+        hfield = spec.add_hfield(
+            name="action_go_hfield",
+            file=str(hfield_path),
+            size=tuple(float(value) for value in args.hfield_size),
+        )
+        spec.worldbody.add_geom(
+            name="action_go_hfield",
+            type=mujoco.mjtGeom.mjGEOM_HFIELD,
+            hfieldname=hfield.name,
+            pos=tuple(float(value) for value in args.hfield_pos),
+            contype=1,
+            conaffinity=1,
+            condim=3,
+            friction=(1.0, 0.1, 0.1),
+            solimp=(0.99, 0.99, 0.01, 0.5, 2.0),
+            solref=tuple(float(value) for value in args.hfield_solref),
+            rgba=(0.35, 0.65, 0.55, 0.75),
+        )
+
+    if spec is not None:
+        model = spec.compile()
+    elif Path(cfg.ROBOT_SCENE).suffix.lower() == ".mjb":
+        model = mujoco.MjModel.from_binary_path(cfg.ROBOT_SCENE)
+    else:
+        model = mujoco.MjModel.from_xml_path(cfg.ROBOT_SCENE)
     model.opt.timestep = float(args.sim_dt)
+    if args.position_actuator_params:
+        model.opt.iterations = 10
+        model.opt.ls_iterations = 20
+        model.opt.ccd_iterations = 80
+        for geom_id in range(model.ngeom):
+            geom_name = mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_GEOM, geom_id) or ""
+            if geom_name.startswith(("left_foot", "right_foot")) and geom_name.endswith("_collision"):
+                model.geom_friction[geom_id, 0] = 0.6
+                model.geom_condim[geom_id] = 3
+                model.geom_priority[geom_id] = 1
     data = mujoco.MjData(model)
     mujoco.mj_forward(model, data)
 
@@ -1147,7 +1358,13 @@ def setup_unitree_mujoco(args: argparse.Namespace):
     if args.bridge == "unitree":
         bridge = UnitreeSdk2Bridge(model, data)
     else:
-        bridge = NativeActionGoBridge(model, data, joystick_type=args.joystick_type, joystick_device=int(args.joystick_device))
+        bridge = NativeActionGoBridge(
+            model,
+            data,
+            joystick_type=args.joystick_type,
+            joystick_device=int(args.joystick_device),
+            action_lockstep_decimation=int(args.action_lockstep_decimation),
+        )
     joystick_ok = False
     if args.use_joystick:
         try:
@@ -1164,15 +1381,76 @@ def setup_unitree_mujoco(args: argparse.Namespace):
     return model, data, bridge, joystick_ok, cfg.ROBOT_SCENE
 
 
+def reset_to_embedded_reference(model, data, model_path: str, origin) -> None:
+    import onnxruntime as ort
+
+    session = ort.InferenceSession(str(Path(model_path).expanduser().resolve()), providers=["CPUExecutionProvider"])
+    input_dims = {value.name: value.shape for value in session.get_inputs()}
+    if "obs" not in input_dims or "time_step" not in input_dims:
+        raise RuntimeError("embedded reference reset requires ONNX inputs obs and time_step")
+    obs_dim = int(input_dims["obs"][-1])
+    outputs = session.run(
+        ["joint_pos", "joint_vel", "body_pos_w", "body_quat_w", "body_lin_vel_w", "body_ang_vel_w"],
+        {"obs": np.zeros((1, obs_dim), dtype=np.float32), "time_step": np.zeros((1, 1), dtype=np.float32)},
+    )
+    joint_pos, joint_vel, body_pos, body_quat, body_lin_vel, body_ang_vel = [value[0] for value in outputs]
+    if joint_pos.shape != (29,) or joint_vel.shape != (29,) or body_pos.shape[0] < 1:
+        raise RuntimeError("embedded reference frame has incompatible G1 dimensions")
+    if model.nq < 36 or model.nv < 35:
+        raise RuntimeError(f"embedded G1 reset requires nq>=36 and nv>=35, got nq={model.nq} nv={model.nv}")
+
+    root_quat = np.asarray(body_quat[0], dtype=np.float64)
+    root_quat /= max(np.linalg.norm(root_quat), 1e-12)
+    root_ang_vel_b = np.empty(3, dtype=np.float64)
+    root_quat_inv = root_quat.copy()
+    root_quat_inv[1:] *= -1.0
+    mujoco.mju_rotVecQuat(root_ang_vel_b, np.asarray(body_ang_vel[0], dtype=np.float64), root_quat_inv)
+
+    data.qpos[:3] = np.asarray(body_pos[0], dtype=np.float64) + np.asarray(origin, dtype=np.float64)
+    data.qpos[3:7] = root_quat
+    joint_names = session.get_modelmeta().custom_metadata_map["joint_names"].split(",")
+    joint_ids = [mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, name) for name in joint_names]
+    if len(joint_ids) != 29 or min(joint_ids) < 0:
+        raise RuntimeError("embedded reference joint names do not match simulation")
+    data.qpos[model.jnt_qposadr[joint_ids]] = np.asarray(joint_pos, dtype=np.float64)
+    data.qvel[:3] = np.asarray(body_lin_vel[0], dtype=np.float64)
+    data.qvel[3:6] = root_ang_vel_b
+    data.qvel[model.jnt_dofadr[joint_ids]] = np.asarray(joint_vel, dtype=np.float64)
+    data.ctrl[:] = 0.0
+    mujoco.mj_forward(model, data)
+    print(
+        f"[action_go_sim][reference] reset frame=0 model={model_path} "
+        f"root_pos={data.qpos[:3].tolist()}",
+        flush=True,
+    )
+
+
 def main(argv=None) -> int:
     args = parse_args(argv)
     try:
         sim_lowlevel_hz = sim_cadence_hz(args.sim_dt)
         model, data, _bridge, joystick_ok, xml_path = setup_unitree_mujoco(args)
         actions = load_action_registry(Path(args.config), args.interface)
+        if args.training_env:
+            from training_alignment import align_source
+            align_source(model, actions[args.auto_action], args.training_env)
+            _bridge.ctrl_low = model.actuator_ctrlrange[_bridge.motor_actuator_ids, 0].copy()
+            _bridge.ctrl_high = model.actuator_ctrlrange[_bridge.motor_actuator_ids, 1].copy()
+            _bridge.actuator_limited = model.actuator_ctrllimited[_bridge.motor_actuator_ids].astype(bool)
         remote_cfg = load_remote_config(Path(args.remote_map) if args.remote_map else None)
+        if args.safety_disable:
+            remote_cfg.safety.enable = False
+            print("[action_go_sim] automatic excessive-tilt recovery DISABLED", flush=True)
         remote = RemoteMonitor("rt/lowstate")
         manager = SimActionManager(args, actions, _bridge)
+
+        def prepare_auto_action_reference() -> None:
+            if not args.reset_auto_action_to_reference:
+                return
+            action = actions.get(args.auto_action)
+            if action is None or not action.model:
+                raise RuntimeError("--reset-auto-action-to-reference requires a registered --auto-action with model")
+            reset_to_embedded_reference(model, data, action.model, args.reference_origin)
         disabled_bindings: list[Binding] = []
         enabled_bindings: list[Binding] = []
         for binding in remote_cfg.bindings:
@@ -1254,9 +1532,13 @@ def main(argv=None) -> int:
             print("[action_go_sim] WARNING: no rt/lowstate seen yet", flush=True)
 
         run_started_at = time.monotonic()
-        pending_auto_action = bool(args.auto_action)
+        auto_action_pending = bool(args.auto_action)
 
         paused = bool(args.paused)
+        from handoffguard_preview import RiskSwitch, TerminalKeys
+        risk_switch = RiskSwitch(args.risk_model) if args.risk_model else None
+        next_risk_tick = float(data.time)
+        risk_auto_requested = False
         keyboard_events: list[str] = []
         keyboard_lock = threading.Lock()
 
@@ -1269,6 +1551,9 @@ def main(argv=None) -> int:
             if keycode == ord(" "):
                 paused = not paused
                 print(f"[action_go_sim] paused={paused}", flush=True)
+            elif c == "1":
+                with keyboard_lock:
+                    keyboard_events.append("risk_switch")
             elif c == "r":
                 with keyboard_lock:
                     keyboard_events.append("reset")
@@ -1290,10 +1575,14 @@ def main(argv=None) -> int:
             elif c == "g":
                 with keyboard_lock:
                     keyboard_events.append("ufo_stand")
+            elif c == "v":
+                with keyboard_lock:
+                    keyboard_events.append("auto_action")
 
         prev_mask = remote.mask()
         shell_armed = False
         lie_action_active = False
+        next_state_log = run_started_at
         selected_safety_action = remote_cfg.safety.action
         safety_state = SafetyState.NORMAL
         fall_timer_active = False
@@ -1407,19 +1696,27 @@ def main(argv=None) -> int:
 
         def remote_tick():
             nonlocal prev_mask, shell_armed, lie_action_active, safety_state
+            nonlocal next_risk_tick
             with keyboard_lock:
                 events = list(keyboard_events)
                 keyboard_events.clear()
             for ev in events:
-                if ev == "reset":
+                if ev == "risk_switch":
+                    if risk_switch is not None:
+                        risk_switch.request(float(data.time))
+                elif ev == "reset":
+                    if risk_switch is not None:
+                        risk_switch.reset()
                     print("[action_go_sim] reset requested", flush=True)
                     shell_armed = False
                     lie_action_active = False
                     reset_safety_state()
-                    manager.shutdown(passive=True)
+                    manager.shutdown(passive=False)
                     mujoco.mj_resetData(model, data)
                     mujoco.mj_forward(model, data)
-                    manager.enter_passive()
+                    next_risk_tick = float(data.time)
+                    manager.start_walkrun()
+                    print("[action_go_sim][shell] keyboard R -> reset + WALKRUN shell", flush=True)
                 elif ev == "start":
                     arm_shell("keyboard S", remote_cfg.shell_start_action)
                 elif ev == "start_alt":
@@ -1435,6 +1732,20 @@ def main(argv=None) -> int:
                     reset_safety_state()
                     manager.enter_passive()
                     print("[action_go_sim][shell] keyboard P -> PASSIVE shell", flush=True)
+                elif ev == "auto_action":
+                    if risk_switch is not None:
+                        risk_switch.reset()
+                    if not args.auto_action:
+                        print("[action_go_sim][keyboard] V requires --auto-action", flush=True)
+                        continue
+                    shell_armed = False
+                    lie_action_active = False
+                    reset_safety_state()
+                    manager.stop_active(switch_mode="none")
+                    manager.stop_walkrun()
+                    prepare_auto_action_reference()
+                    next_risk_tick = float(data.time)
+                    start_action(args.auto_action, "keyboard V")
                 elif ev in {"ufo_tracking", "ufo_stand"}:
                     action_name = "ufo_tracking_zs7" if ev == "ufo_tracking" else "ufo_stand"
                     if not shell_armed:
@@ -1491,11 +1802,13 @@ def main(argv=None) -> int:
                 manager.stop_walkrun()
                 start_action(remote_cfg.lie_action, "remote lie-down")
             elif combo_rising(now_mask, prev_mask, remote_cfg.emergency_combo):
-                print("[action_go_sim] emergency stop requested", flush=True)
-                manager.stop_active(switch_mode="walkrun")
+                print("[action_go_sim] damping stop requested", flush=True)
+                shell_armed = False
                 lie_action_active = False
+                reset_safety_state()
+                manager.enter_passive()
 
-            if shell_armed:
+            if shell_armed and (risk_switch is None or risk_switch.state != "BFM"):
                 safety_tick()
                 if not manager.action_running():
                     for binding in remote_cfg.bindings:
@@ -1580,17 +1893,10 @@ def main(argv=None) -> int:
                     pass
 
         def run_loop(viewer=None):
-            nonlocal next_remote_tick, next_viewer_sync, pending_auto_action
+            nonlocal next_remote_tick, next_viewer_sync, auto_action_pending, next_state_log
+            nonlocal next_risk_tick, risk_auto_requested
             auto_arm_done = False
             auto_arm_alt_done = False
-            # Releasing a prestarted action before the viewer/main loop is ready
-            # leaves LowState unpublished during viewer initialization.  Start it
-            # here so _wait_ready() hands directly back to the simulation loop.
-            if pending_auto_action and not STOP.is_set():
-                pending_auto_action = False
-                if not manager.start_action(args.auto_action, source="auto"):
-                    print(f"[action_go_sim][auto] failed to start action: {args.auto_action}", flush=True)
-                    STOP.set()
             while not STOP.is_set():
                 elapsed = time.monotonic() - run_started_at
                 if args.auto_arm_sec >= 0.0 and not auto_arm_done and elapsed >= float(args.auto_arm_sec):
@@ -1608,17 +1914,65 @@ def main(argv=None) -> int:
                     break
                 step_start = time.perf_counter()
                 now = time.monotonic()
+                terminal_key = terminal_keys.poll()
+                if terminal_key in {"1", "v", "V"}:
+                    with keyboard_lock:
+                        keyboard_events.append("risk_switch" if terminal_key == "1" else "auto_action")
                 if hasattr(_bridge, "publish_lowstate"):
                     _bridge.publish_lowstate()
+                if auto_action_pending:
+                    auto_action_pending = False
+                    prepare_auto_action_reference()
+                    if not manager.start_action(args.auto_action, source="auto"):
+                        print(f"[action_go_sim][auto] failed to start action: {args.auto_action}", flush=True)
+                        STOP.set()
+                        break
+                if args.state_log_period_sec > 0.0 and now >= next_state_log:
+                    next_state_log = now + float(args.state_log_period_sec)
+                    root_quat = np.asarray(data.qpos[3:7], dtype=np.float32)
+                    print(
+                        f"[action_go_sim][state] sim_t={float(data.time):.3f} "
+                        f"root_pos={np.asarray(data.qpos[:3]).round(4).tolist()} "
+                        f"tilt={tilt_deg_from_quat_wxyz(root_quat):.2f}deg "
+                        f"ncon={int(data.ncon)} action={manager.active_action or '-'}",
+                        flush=True,
+                    )
                 if now >= next_remote_tick:
                     next_remote_tick = now + max(0.005, float(args.remote_period_sec))
                     remote_tick()
+                if risk_switch is not None and not paused and data.time + 1e-9 >= next_risk_tick:
+                    next_risk_tick = float(data.time) + 0.02
+                    if args.risk_auto_request_sec >= 0 and not risk_auto_requested and data.time >= args.risk_auto_request_sec:
+                        risk_auto_requested = True
+                        risk_switch.request(float(data.time))
+                    root_quat = np.asarray(data.qpos[3:7], dtype=np.float32)
+                    gravity = projected_gravity_from_quat_wxyz(root_quat)
+                    with _bridge.lock:
+                        active_cmd = _bridge.usercmd if _bridge.mode == "user" else _bridge.lowcmd
+                        target = (np.asarray(data.qpos[_bridge.qpos_adr]).copy()
+                                  if active_cmd is None else active_cmd.q.copy())
+                    joint_order = np.argsort(_bridge.qpos_adr)
+                    frame = np.concatenate((data.qpos[7:36], data.qvel[6:35], data.qvel[3:6],
+                                            gravity, target[joint_order])).astype(np.float32)
+                    stand_ready = (manager.active_action == "bfm_zero_stand" and manager.action_running()
+                                   and np.arccos(np.clip(-gravity[2], -1, 1)) < 0.20
+                                   and np.linalg.norm(data.qvel[3:6]) < 0.30)
+                    transition = risk_switch.tick(frame, float(data.time), stand_ready)
+                    if transition == "bfm":
+                        manager.stop_active(switch_mode="none")
+                        if not manager.start_action("bfm_zero_stand", source="risk_gate"):
+                            raise RuntimeError("BFM failed to start")
+                    elif transition == "walkrun":
+                        manager.stop_active(switch_mode="none")
+                        manager.start_walkrun()
                 if not paused:
+                    should_step = True
                     if manager.passive:
                         manager.apply_passive(data)
                     elif hasattr(_bridge, "apply_command"):
-                        _bridge.apply_command()
-                    mujoco.mj_step(model, data)
+                        should_step = bool(_bridge.apply_command())
+                    if should_step:
+                        mujoco.mj_step(model, data)
                 record_frame_if_needed(now)
                 if viewer is not None and now >= next_viewer_sync:
                     next_viewer_sync = now + 1.0 / max(1.0, float(args.viewer_hz))
@@ -1630,22 +1984,24 @@ def main(argv=None) -> int:
 
         print(
             "[action_go_sim] viewer keys: SPACE pause, R reset, S ARM, "
-            "B alternate ARM, T UFO tracking, G UFO stand, W WALKRUN, P PASSIVE",
+            "B alternate ARM, T UFO tracking, G UFO stand, V replay auto-action, "
+            "W WALKRUN, P PASSIVE",
             flush=True,
         )
         try:
-            if args.headless:
-                run_loop(None)
-            else:
-                if mujoco_viewer is None:
-                    raise RuntimeError("mujoco.viewer is unavailable; use --headless")
-                with mujoco_viewer.launch_passive(model, data, key_callback=key_callback) as viewer:
-                    viewer.cam.distance = 3.0
-                    viewer.cam.elevation = -10.0
-                    viewer.cam.azimuth = 180.0
-                    viewer.cam.trackbodyid = 1
-                    viewer.cam.type = mujoco.mjtCamera.mjCAMERA_TRACKING
-                    run_loop(viewer)
+            with TerminalKeys() as terminal_keys:
+                if args.headless:
+                    run_loop(None)
+                else:
+                    if mujoco_viewer is None:
+                        raise RuntimeError("mujoco.viewer is unavailable; use --headless")
+                    with mujoco_viewer.launch_passive(model, data, key_callback=key_callback) as viewer:
+                        viewer.cam.distance = 3.0
+                        viewer.cam.elevation = -10.0
+                        viewer.cam.azimuth = 180.0
+                        viewer.cam.trackbodyid = 1
+                        viewer.cam.type = mujoco.mjtCamera.mjCAMERA_TRACKING
+                        run_loop(viewer)
         finally:
             close_recorder()
             manager.shutdown(passive=True)

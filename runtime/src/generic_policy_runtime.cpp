@@ -88,7 +88,10 @@ void GenericPolicyPlayer::log_process_exit(bool ok, const std::string& reason) n
                       event_string("template", template_),
                       event_string("variant", variant_),
                       event_bool("ok", ok),
-                      event_string("reason", reason)});
+                      event_string("reason", reason),
+                      event_int("publish_count", active_publish_count_.load()),
+                      event_number("max_publish_interval_ms",
+                                   max_active_publish_interval_ms_.load())});
     } catch (...) {
     }
   }
@@ -303,6 +306,7 @@ void GenericPolicyPlayer::load_spec() {
       const YAML::Node sessions = yamlc::required_node(y, "model.sessions");
       sonic_encoder_path_ = resolve_relative(spec_path_, yamlc::required_scalar<std::string>(sessions, "encoder.path"));
       sonic_decoder_path_ = resolve_relative(spec_path_, yamlc::required_scalar<std::string>(sessions, "decoder.path"));
+      sonic_planner_path_ = resolve_relative(spec_path_, yamlc::required_scalar<std::string>(sessions, "planner.path"));
       model_path_ = sonic_decoder_path_;
     } else {
       std::string raw_model = yamlc::required_scalar<std::string>(y, "model.path");
@@ -326,13 +330,28 @@ void GenericPolicyPlayer::load_spec() {
     state_topic_ = args_.state_topic.empty() ? yamlc::required_scalar<std::string>(y, "handoff.state_topic") : args_.state_topic;
     inference_hz_ = args_.inference_hz > 0 ? args_.inference_hz : yamlc::required_scalar<int>(y, "runtime.inference_hz");
     publish_hz_ = args_.publish_hz > 0 ? args_.publish_hz : yamlc::required_scalar<int>(y, "runtime.publish_hz");
+    sim_lowstate_decimation_ = args_.sim_lowstate_decimation;
+    if (sim_lowstate_decimation_ < 0) {
+      throw std::runtime_error("--sim-lowstate-decimation must be non-negative");
+    }
     onnx_threads_ = args_.onnx_threads > 0 ? args_.onnx_threads : yamlc::required_scalar<int>(y, "runtime.onnx_threads");
     duration_sec_ = args_.duration_sec >= 0.0 ? args_.duration_sec : scalar_or<double>(runtime, "duration_sec", 0.0);
     if (args_.dry_run && duration_sec_ <= 0.0) duration_sec_ = scalar_or<double>(runtime, "dry_run_duration_sec", 1.0);
     target_interp_sec_ = scalar_or<double>(runtime, "target_interp_sec", scalar_or<double>(action, "target_interp_sec", 0.02));
+    activation_blend_sec_ = std::isfinite(args_.activation_blend_sec)
+        ? args_.activation_blend_sec
+        : scalar_or<double>(handoff, "activation_blend_sec", 0.10);
+    activation_blend_.set_duration(activation_blend_sec_);
+    startup_interp_sec_ = scalar_or<double>(runtime, "startup_interp_sec", scalar_or<double>(action, "startup_interp_sec", 0.0));
     mode_machine_ = yamlc::required_scalar<int>(y, "handoff.mode_machine");
     ready_file_ = args_.ready_file.empty() ? scalar_or<std::string>(handoff, "ready_file", "") : args_.ready_file;
     start_file_ = args_.start_file.empty() ? scalar_or<std::string>(handoff, "start_file", "") : args_.start_file;
+    handoff_complete_file_ = args_.handoff_complete_file;
+    handoff_release_file_ = args_.handoff_release_file;
+    if (handoff_complete_file_.empty() != handoff_release_file_.empty()) {
+      throw std::runtime_error(
+          "--handoff-complete-file and --handoff-release-file must be provided together");
+    }
     preview_file_ = args_.preview_file;
     commit_file_ = args_.commit_file;
     discard_file_ = args_.discard_file;
@@ -375,9 +394,16 @@ void GenericPolicyPlayer::load_spec() {
     }
     damping_on_stop_ = args_.damping_on_stop && yamlc::required_scalar<bool>(y, "handoff.damping_on_stop");
     stats_interval_ = scalar_or<int>(runtime, "stats_interval", 100);
+    command_safety_config_.profile = lower(scalar_or<std::string>(safety, "profile", "hardware"));
+    if (command_safety_config_.profile != "hardware" &&
+        command_safety_config_.profile != "simulation_parity") {
+      throw std::runtime_error("safety.profile must be hardware or simulation_parity");
+    }
+    const bool simulation_parity = command_safety_config_.profile == "simulation_parity";
     command_safety_config_.enabled = scalar_or<bool>(safety, "enabled", true);
     command_safety_config_.finite_check = scalar_or<bool>(safety, "finite_check", true);
-    command_safety_config_.joint_limit_enabled = scalar_or<bool>(safety, "joint_limit_enabled", true);
+    command_safety_config_.joint_limit_enabled =
+        scalar_or<bool>(safety, "joint_limit_enabled", !simulation_parity);
     command_safety_config_.lowstate_timeout_enabled = scalar_or<bool>(safety, "lowstate_timeout_enabled", true);
     command_safety_config_.lowstate_timeout_sec = args_.lowstate_timeout_sec > 0.0
         ? args_.lowstate_timeout_sec : scalar_or<double>(safety, "lowstate_timeout_sec", 0.2);
@@ -404,7 +430,12 @@ void GenericPolicyPlayer::load_spec() {
         command_safety_config_.kd_max < 0.f || command_safety_config_.kd_max > 100.f ||
         command_safety_config_.max_position_step_rad < 0.f ||
         command_safety_config_.max_position_step_rad > 10.f) {
-      throw std::runtime_error("safety numeric value is outside deployment bounds");
+        throw std::runtime_error("safety numeric value is outside deployment bounds");
+    }
+    if (simulation_parity &&
+        (command_safety_config_.joint_limit_enabled || command_safety_config_.max_position_step_enabled)) {
+      throw std::runtime_error(
+          "simulation_parity safety forbids joint-limit and max-position-step target clamps");
     }
     safety_filter_.set_config(command_safety_config_);
     safety_limits_.lower.clear();
@@ -519,8 +550,25 @@ void GenericPolicyPlayer::on_low_state(const void* message) {
     s.stamp = std::chrono::steady_clock::now();
     s.connected = true;
     s.mode_machine = static_cast<int>(low.mode_machine());
+    s.source_tick_ms = low.tick();
     s.quat = low.imu_state().quaternion();
     s.gyro = low.imu_state().gyroscope();
+    float quat_norm_sq = 0.f;
+    bool imu_valid = true;
+    for (float value : s.quat) {
+      imu_valid = imu_valid && std::isfinite(value);
+      quat_norm_sq += value * value;
+    }
+    for (float value : s.gyro) imu_valid = imu_valid && std::isfinite(value);
+    if (!imu_valid || quat_norm_sq < 1e-8f) {
+      static std::atomic<bool> warned{false};
+      if (!warned.exchange(true)) {
+        std::cerr << player_log_prefix()
+                  << " rejected LowState with invalid IMU quaternion/gyroscope\n";
+      }
+      connected_.store(false);
+      return;
+    }
     s.q.assign(motor_count_, 0.f);
     s.dq.assign(motor_count_, 0.f);
     for (size_t i = 0; i < motor_count_; ++i) {
@@ -561,7 +609,8 @@ void GenericPolicyPlayer::wait_for_state() {
     }
     if (!connected_.load()) throw std::runtime_error("timeout waiting for lowstate");
     std::cout << player_log_prefix() << " lowstate connected variant=" << variant_
-              << " dry_run=" << (args_.dry_run ? "true" : "false") << "\n";
+              << " dry_run=" << (args_.dry_run ? "true" : "false");
+    std::cout << "\n";
   }
 
 void GenericPolicyPlayer::touch_file(const std::string& path) {
@@ -667,9 +716,37 @@ void GenericPolicyPlayer::publish(const std::vector<float>& q,
       return;
     }
     const auto safety_state = command_safety_state(snapshot());
+    const bool preview_commit_bypass =
+        phase == CommandPhase::kActive && !preview_candidate_q_.empty();
+    JointCommand command{q, kp, kd};
+    ActivationBlendResult blend_result;
+    if (phase == CommandPhase::kActive) {
+      blend_result = activation_blend_.apply(command, ActivationBlend::Clock::now(),
+                                             preview_commit_bypass);
+      command = std::move(blend_result.command);
+      if (blend_result.started) {
+        event_log_.log("activation_blend_started",
+                       {event_string("player", player_label()),
+                        event_string("template", template_),
+                        event_string("variant", variant_),
+                        event_number("duration_sec", activation_blend_sec_),
+                        event_number("max_q_delta", blend_result.max_q_delta),
+                        event_number("max_kp_delta", blend_result.max_kp_delta),
+                        event_number("max_kd_delta", blend_result.max_kd_delta)});
+      }
+      if (preview_commit_bypass && !activation_blend_bypass_logged_) {
+        activation_blend_bypass_logged_ = true;
+        event_log_.log("activation_blend_bypassed",
+                       {event_string("player", player_label()),
+                        event_string("template", template_),
+                        event_string("variant", variant_),
+                        event_string("reason", "preview_commit")});
+      }
+    }
     FilteredCommand filtered;
     try {
-      filtered = safety_filter_.filter(q, kp, kd, safety_state, safety_limits_,
+      filtered = safety_filter_.filter(command.q, command.kp, command.kd,
+                                       safety_state, safety_limits_,
                                        motor_count_, allow_stale_state);
     } catch (const std::exception& e) {
       event_log_.log("safety_stop",
@@ -691,8 +768,41 @@ void GenericPolicyPlayer::publish(const std::vector<float>& q,
       cmd.motor_cmd()[i].kp() = filtered.kp[i];
       cmd.motor_cmd()[i].kd() = filtered.kd[i];
     }
+    if (beyond_sim_lockstep_sequence_) {
+      constexpr uint32_t kActionGoLockstepMagic = 0x41474c53u;
+      cmd.reserve()[0] = static_cast<uint32_t>(policy_counter_);
+      cmd.reserve()[1] = phase == CommandPhase::kActive
+          ? kActionGoLockstepMagic : 0u;
+    }
     cmd.crc() = crc32_core((uint32_t*)&cmd, (sizeof(cmd) >> 2) - 1);
     publisher_->Write(cmd);
+    if (phase == CommandPhase::kActive) {
+      const int64_t now_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+          std::chrono::steady_clock::now().time_since_epoch()).count();
+      const int64_t previous_ns = last_active_publish_ns_.exchange(now_ns);
+      active_publish_count_.fetch_add(1);
+      if (previous_ns > 0) {
+        const double interval_ms = static_cast<double>(now_ns - previous_ns) / 1e6;
+        double observed = max_active_publish_interval_ms_.load();
+        while (interval_ms > observed &&
+               !max_active_publish_interval_ms_.compare_exchange_weak(observed, interval_ms)) {
+        }
+      }
+    }
+    last_published_q_ = filtered.q;
+    last_published_kp_ = filtered.kp;
+    last_published_kd_ = filtered.kd;
+    if (phase == CommandPhase::kHold) {
+      activation_blend_.observe_hold({filtered.q, filtered.kp, filtered.kd});
+    }
+    if (phase == CommandPhase::kActive && blend_result.completed &&
+        !blend_result.bypassed && activation_blend_sec_ > 0.0) {
+      event_log_.log("activation_blend_completed",
+                     {event_string("player", player_label()),
+                      event_string("template", template_),
+                      event_string("variant", variant_),
+                      event_number("duration_sec", activation_blend_sec_)});
+    }
     const char* phase_name = phase == CommandPhase::kHold
         ? "hold"
         : (phase == CommandPhase::kPreview
@@ -720,6 +830,8 @@ void GenericPolicyPlayer::publish(const std::vector<float>& q,
     if (phase == CommandPhase::kPreview && !first_preview_candidate_logged_) {
       first_preview_candidate_logged_ = true;
       preview_candidate_q_ = q;
+      preview_candidate_kp_ = kp;
+      preview_candidate_kd_ = kd;
       event_log_.log("first_preview_candidate",
                      {event_string("player", player_label()),
                       event_string("template", template_),
@@ -737,20 +849,33 @@ void GenericPolicyPlayer::publish(const std::vector<float>& q,
                       event_int("mode_machine", mode_machine)});
       if (!preview_candidate_q_.empty() && !preview_active_consistency_logged_) {
         preview_active_consistency_logged_ = true;
-        double max_abs_diff = 0.0;
-        const size_t count = std::min(preview_candidate_q_.size(), q.size());
-        for (size_t index = 0; index < count; ++index) {
-          max_abs_diff = std::max(
-              max_abs_diff,
-              std::abs(static_cast<double>(preview_candidate_q_[index]) - q[index]));
-        }
+        const auto max_abs_diff = [](const std::vector<float>& candidate,
+                                     const std::vector<float>& active) {
+          double result = 0.0;
+          const size_t count = std::min(candidate.size(), active.size());
+          for (size_t index = 0; index < count; ++index) {
+            result = std::max(
+                result,
+                std::abs(static_cast<double>(candidate[index]) - active[index]));
+          }
+          return result;
+        };
+        const double max_q_diff = max_abs_diff(preview_candidate_q_, q);
+        const double max_kp_diff = max_abs_diff(preview_candidate_kp_, kp);
+        const double max_kd_diff = max_abs_diff(preview_candidate_kd_, kd);
+        const bool dimensions_match = preview_candidate_q_.size() == q.size() &&
+            preview_candidate_kp_.size() == kp.size() &&
+            preview_candidate_kd_.size() == kd.size();
         event_log_.log("preview_active_first_consistency",
                        {event_string("player", player_label()),
                         event_string("template", template_),
                         event_string("variant", variant_),
-                        event_bool("match", preview_candidate_q_.size() == q.size() &&
-                                                max_abs_diff <= 1e-6),
-                        event_number("max_abs_diff", max_abs_diff)});
+                        event_bool("match", dimensions_match && max_q_diff <= 1e-6 &&
+                                                max_kp_diff <= 1e-6 && max_kd_diff <= 1e-6),
+                        event_number("max_abs_diff", std::max({max_q_diff, max_kp_diff, max_kd_diff})),
+                        event_number("max_q_diff", max_q_diff),
+                        event_number("max_kp_diff", max_kp_diff),
+                        event_number("max_kd_diff", max_kd_diff)});
       }
     }
   }

@@ -6,6 +6,13 @@ find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
 option(ACTION_GO_BUILD_OMNIXTREME "Build generic_composite_policy_player; TensorRT remains a runtime provider option" ON)
 option(ACTION_GO_CODE_ONLY "Do not register tests that require private/BYOW assets" OFF)
+option(ACTION_GO_REQUIRE_REALSENSE
+  "Fail configuration when librealsense2 is unavailable (recommended for real-robot Instinct builds)"
+  OFF
+)
+set(ACTION_GO_REALSENSE_ROOT "" CACHE PATH
+  "librealsense install prefix containing lib/cmake/realsense2/realsense2Config.cmake"
+)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -22,12 +29,61 @@ find_package(yaml-cpp REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(ZLIB REQUIRED)
 find_package(OpenSSL REQUIRED)
+find_package(nlohmann_json 3.10 QUIET CONFIG)
+if(TARGET nlohmann_json::nlohmann_json)
+  set(ACTION_GO_NLOHMANN_JSON_TARGET nlohmann_json::nlohmann_json)
+else()
+  find_path(ACTION_GO_NLOHMANN_JSON_INCLUDE_DIR
+    NAMES nlohmann/json.hpp
+    DOC "Directory containing nlohmann/json.hpp"
+  )
+  if(NOT ACTION_GO_NLOHMANN_JSON_INCLUDE_DIR)
+    message(FATAL_ERROR
+      "nlohmann/json.hpp is required. Install nlohmann-json3-dev "
+      "(for example: sudo apt install nlohmann-json3-dev), or set "
+      "ACTION_GO_NLOHMANN_JSON_INCLUDE_DIR to its include directory."
+    )
+  endif()
+  add_library(action_go_nlohmann_json INTERFACE)
+  target_include_directories(action_go_nlohmann_json SYSTEM INTERFACE
+    ${ACTION_GO_NLOHMANN_JSON_INCLUDE_DIR}
+  )
+  set(ACTION_GO_NLOHMANN_JSON_TARGET action_go_nlohmann_json)
+endif()
 find_package(PkgConfig QUIET)
 if(PkgConfig_FOUND)
   pkg_check_modules(LIBZMQ QUIET libzmq)
   pkg_check_modules(APRILTAG QUIET apriltag)
 endif()
 find_package(OpenCV QUIET COMPONENTS core imgproc photo)
+
+# A source-built librealsense commonly lives under ~/librealsense/install.
+# Discover that install tree, not ~/librealsense/build: an uninstalled build
+# config can contain source-machine-relative paths such as /home/include and
+# then fail after the repository is moved or rebuilt.
+if(NOT realsense2_DIR)
+  set(_action_go_realsense_roots)
+  if(ACTION_GO_REALSENSE_ROOT)
+    list(APPEND _action_go_realsense_roots "${ACTION_GO_REALSENSE_ROOT}")
+  endif()
+  if(DEFINED ENV{HOME} AND NOT "$ENV{HOME}" STREQUAL "")
+    list(APPEND _action_go_realsense_roots "$ENV{HOME}/librealsense/install")
+  endif()
+  foreach(_action_go_realsense_root IN LISTS _action_go_realsense_roots)
+    set(_action_go_realsense_config_dir
+      "${_action_go_realsense_root}/lib/cmake/realsense2")
+    if(EXISTS "${_action_go_realsense_config_dir}/realsense2Config.cmake")
+      set(realsense2_DIR "${_action_go_realsense_config_dir}" CACHE PATH
+        "Directory containing realsense2Config.cmake" FORCE)
+      message(STATUS
+        "Auto-detected librealsense2 install: ${_action_go_realsense_root}")
+      break()
+    endif()
+  endforeach()
+  unset(_action_go_realsense_roots)
+  unset(_action_go_realsense_root)
+  unset(_action_go_realsense_config_dir)
+endif()
 find_package(realsense2 QUIET)
 if(NOT realsense2_FOUND)
   if(PkgConfig_FOUND)
@@ -45,6 +101,8 @@ find_library(APRILTAG_LIBRARY
 )
 
 add_library(action_go STATIC
+  runtime/src/activation_blend.cpp
+  runtime/src/async_command_publisher.cpp
   runtime/src/motion_action_controller.cpp
   runtime/src/event_logger.cpp
   runtime/src/supervisor_platform.cpp
@@ -65,6 +123,7 @@ target_link_libraries(action_go
     rt
     pthread
     OpenSSL::Crypto
+    ${ACTION_GO_NLOHMANN_JSON_TARGET}
 )
 
 
@@ -83,7 +142,21 @@ target_include_directories(action_go_remote_test PRIVATE
 target_link_libraries(action_go_remote_test
   action_go
 )
+
 if(BUILD_TESTING)
+  add_executable(depth_monitor_publisher_test runtime/tests/depth_monitor_publisher_test.cpp)
+  target_include_directories(depth_monitor_publisher_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/runtime/include)
+  target_compile_options(depth_monitor_publisher_test PRIVATE -UNDEBUG)
+  target_link_libraries(depth_monitor_publisher_test PRIVATE pthread)
+  add_test(NAME depth_monitor_publisher_test COMMAND depth_monitor_publisher_test)
+  add_executable(async_trace_writer_test runtime/tests/async_trace_writer_test.cpp)
+  target_include_directories(async_trace_writer_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/runtime/include)
+  target_compile_options(async_trace_writer_test PRIVATE -UNDEBUG)
+  target_link_libraries(async_trace_writer_test PRIVATE pthread)
+  add_test(NAME async_trace_writer_test COMMAND async_trace_writer_test)
+  add_executable(bridge_gate_test runtime/tests/bridge_gate_test.cpp)
+  target_include_directories(bridge_gate_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/runtime/include)
+  add_test(NAME bridge_gate_test COMMAND bridge_gate_test)
   add_test(
     NAME remote_udp_nonloopback_requires_key
     COMMAND action_go_remote_test --udp-listen --udp-bind 0.0.0.0
@@ -205,6 +278,35 @@ if(DEFINED ACTION_GO_MOTION_ONNXRUNTIME_DIR)
   endif()
 endif()
 
+# Composite policies such as OmniXtreme may use a TensorRT-enabled ORT build
+# without changing the regular and motion-policy executables in this build
+# tree.  Keeping this as a separate imported library also prevents a later
+# rebuild of generic_composite_policy_player from silently reverting it to the
+# bundled CPU-only ORT.
+if(NOT DEFINED ACTION_GO_COMPOSITE_ONNXRUNTIME_DIR AND DEFINED ACTION_GO_ONNXRUNTIME_DIR)
+  set(ACTION_GO_COMPOSITE_ONNXRUNTIME_DIR "${ACTION_GO_ONNXRUNTIME_DIR}")
+endif()
+if(DEFINED ACTION_GO_COMPOSITE_ONNXRUNTIME_DIR AND EXISTS "${ACTION_GO_COMPOSITE_ONNXRUNTIME_DIR}/lib/libonnxruntime.so")
+  set(ACTION_GO_COMPOSITE_ONNXRUNTIME_LIB "${ACTION_GO_COMPOSITE_ONNXRUNTIME_DIR}/lib/libonnxruntime.so")
+elseif(DEFINED ACTION_GO_COMPOSITE_ONNXRUNTIME_DIR)
+  file(GLOB ACTION_GO_COMPOSITE_ONNXRUNTIME_LIB_CANDIDATES
+    LIST_DIRECTORIES false
+    "${ACTION_GO_COMPOSITE_ONNXRUNTIME_DIR}/lib/libonnxruntime.so*"
+  )
+  list(FILTER ACTION_GO_COMPOSITE_ONNXRUNTIME_LIB_CANDIDATES EXCLUDE REGEX "libonnxruntime_providers_.*\\.so$")
+  if(ACTION_GO_COMPOSITE_ONNXRUNTIME_LIB_CANDIDATES)
+    list(SORT ACTION_GO_COMPOSITE_ONNXRUNTIME_LIB_CANDIDATES COMPARE NATURAL ORDER DESCENDING)
+    list(GET ACTION_GO_COMPOSITE_ONNXRUNTIME_LIB_CANDIDATES 0 ACTION_GO_COMPOSITE_ONNXRUNTIME_LIB)
+  endif()
+endif()
+if(DEFINED ACTION_GO_COMPOSITE_ONNXRUNTIME_DIR)
+  if(EXISTS "${ACTION_GO_COMPOSITE_ONNXRUNTIME_DIR}/include/onnxruntime_cxx_api.h")
+    set(ACTION_GO_COMPOSITE_ONNXRUNTIME_INCLUDE_DIR "${ACTION_GO_COMPOSITE_ONNXRUNTIME_DIR}/include")
+  elseif(EXISTS "${ACTION_GO_COMPOSITE_ONNXRUNTIME_DIR}/include/onnxruntime/core/session/onnxruntime_cxx_api.h")
+    set(ACTION_GO_COMPOSITE_ONNXRUNTIME_INCLUDE_DIR "${ACTION_GO_COMPOSITE_ONNXRUNTIME_DIR}/include/onnxruntime/core/session")
+  endif()
+endif()
+
 set(ACTION_GO_MUJOCO_FOUND OFF)
 set(ACTION_GO_MUJOCO_INCLUDE_DIR "")
 set(ACTION_GO_MUJOCO_LIB "")
@@ -262,6 +364,24 @@ if(DEFINED ACTION_GO_ONNXRUNTIME_LIB AND DEFINED ACTION_GO_ONNXRUNTIME_INCLUDE_D
     INTERFACE_INCLUDE_DIRECTORIES "${ACTION_GO_MOTION_ONNXRUNTIME_INCLUDE_DIR}"
   )
   message(STATUS "ACTION_GO_MOTION_ONNXRUNTIME_DIR=${ACTION_GO_MOTION_ONNXRUNTIME_DIR}")
+  if(NOT DEFINED ACTION_GO_COMPOSITE_ONNXRUNTIME_LIB OR NOT DEFINED ACTION_GO_COMPOSITE_ONNXRUNTIME_INCLUDE_DIR)
+    message(FATAL_ERROR "ACTION_GO_COMPOSITE_ONNXRUNTIME_DIR does not contain a usable ONNX Runtime")
+  endif()
+  add_library(action_go_composite_onnxruntime SHARED IMPORTED GLOBAL)
+  set_target_properties(action_go_composite_onnxruntime PROPERTIES
+    IMPORTED_LOCATION "${ACTION_GO_COMPOSITE_ONNXRUNTIME_LIB}"
+    INTERFACE_INCLUDE_DIRECTORIES "${ACTION_GO_COMPOSITE_ONNXRUNTIME_INCLUDE_DIR}"
+  )
+  message(STATUS "ACTION_GO_COMPOSITE_ONNXRUNTIME_DIR=${ACTION_GO_COMPOSITE_ONNXRUNTIME_DIR}")
+
+  target_sources(action_go_remote_test PRIVATE runtime/src/onnx_runner.cpp)
+  target_sources(action_go_remote_test PRIVATE runtime/src/bridge_risk_monitor.cpp)
+  target_include_directories(action_go_remote_test PRIVATE ${ACTION_GO_ONNXRUNTIME_INCLUDE_DIR})
+  target_compile_definitions(action_go_remote_test PRIVATE ACTION_GO_HAS_ONNX=1)
+  target_link_libraries(action_go_remote_test motion_action_onnxruntime)
+  set_target_properties(action_go_remote_test PROPERTIES
+    BUILD_RPATH "${ACTION_GO_ONNXRUNTIME_DIR}/lib"
+    INSTALL_RPATH "$ORIGIN;$ORIGIN/../lib;${ACTION_GO_ONNXRUNTIME_DIR}/lib")
 
   target_compile_definitions(action_go_command_arbiter PRIVATE ACTION_GO_HAS_ONNX=1)
   target_include_directories(action_go_command_arbiter PRIVATE
@@ -284,10 +404,13 @@ if(DEFINED ACTION_GO_ONNXRUNTIME_LIB AND DEFINED ACTION_GO_ONNXRUNTIME_INCLUDE_D
     runtime/src/policy_protocol.cpp
     runtime/src/event_logger.cpp
     runtime/src/command_safety_filter.cpp
+    runtime/src/activation_blend.cpp
+    runtime/src/async_command_publisher.cpp
     runtime/src/input_freshness.cpp
     runtime/src/onnx_runner.cpp
     runtime/src/reference_endpoint.cpp
     runtime/src/sonic_policy.cpp
+    runtime/src/sonic_planner.cpp
   )
   target_include_directories(generic_policy_player PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/runtime/include
@@ -302,6 +425,7 @@ if(DEFINED ACTION_GO_ONNXRUNTIME_LIB AND DEFINED ACTION_GO_ONNXRUNTIME_INCLUDE_D
     yaml-cpp
     ZLIB::ZLIB
     motion_action_onnxruntime
+    ${ACTION_GO_NLOHMANN_JSON_TARGET}
   )
   set_target_properties(generic_policy_player PROPERTIES
     BUILD_RPATH "${ACTION_GO_ONNXRUNTIME_DIR}/lib"
@@ -320,10 +444,13 @@ if(DEFINED ACTION_GO_ONNXRUNTIME_LIB AND DEFINED ACTION_GO_ONNXRUNTIME_INCLUDE_D
     runtime/src/policy_protocol.cpp
     runtime/src/event_logger.cpp
     runtime/src/command_safety_filter.cpp
+    runtime/src/activation_blend.cpp
+    runtime/src/async_command_publisher.cpp
     runtime/src/input_freshness.cpp
     runtime/src/onnx_runner.cpp
     runtime/src/reference_endpoint.cpp
     runtime/src/sonic_policy.cpp
+    runtime/src/sonic_planner.cpp
   )
   target_include_directories(generic_motion_tracking_player PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/runtime/include
@@ -338,6 +465,7 @@ if(DEFINED ACTION_GO_ONNXRUNTIME_LIB AND DEFINED ACTION_GO_ONNXRUNTIME_INCLUDE_D
     yaml-cpp
     ZLIB::ZLIB
     action_go_motion_onnxruntime
+    ${ACTION_GO_NLOHMANN_JSON_TARGET}
   )
   if(LIBZMQ_FOUND)
     target_compile_definitions(generic_motion_tracking_player PRIVATE ACTION_GO_HAS_ZMQ=1)
@@ -361,12 +489,15 @@ if(DEFINED ACTION_GO_ONNXRUNTIME_LIB AND DEFINED ACTION_GO_ONNXRUNTIME_INCLUDE_D
 
   add_executable(runtime_hardening_test
     runtime/tests/runtime_hardening_test.cpp
+    runtime/src/activation_blend.cpp
+    runtime/src/async_command_publisher.cpp
     runtime/src/policy_contract.cpp
     runtime/src/policy_protocol.cpp
     runtime/src/command_safety_filter.cpp
     runtime/src/input_freshness.cpp
     runtime/src/onnx_runner.cpp
     runtime/src/sonic_policy.cpp
+    runtime/src/sonic_planner.cpp
     runtime/src/network_command.cpp
     runtime/src/reference_endpoint.cpp
   )
@@ -392,6 +523,7 @@ if(DEFINED ACTION_GO_ONNXRUNTIME_LIB AND DEFINED ACTION_GO_ONNXRUNTIME_INCLUDE_D
     pthread
     OpenSSL::Crypto
     motion_action_onnxruntime
+    ${ACTION_GO_NLOHMANN_JSON_TARGET}
   )
   set_target_properties(runtime_hardening_test PROPERTIES
     BUILD_RPATH "${ACTION_GO_ONNXRUNTIME_DIR}/lib"
@@ -491,10 +623,12 @@ if(DEFINED ACTION_GO_ONNXRUNTIME_LIB AND DEFINED ACTION_GO_ONNXRUNTIME_INCLUDE_D
     runtime/src/event_logger.cpp
     runtime/src/omnixtreme_runtime.cpp
     runtime/src/command_safety_filter.cpp
+    runtime/src/activation_blend.cpp
+    runtime/src/async_command_publisher.cpp
   )
   target_include_directories(generic_composite_policy_player PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/runtime/include
-    ${ACTION_GO_ONNXRUNTIME_INCLUDE_DIR}
+    ${ACTION_GO_COMPOSITE_ONNXRUNTIME_INCLUDE_DIR}
   )
   target_link_libraries(generic_composite_policy_player
     unitree_sdk2
@@ -504,28 +638,39 @@ if(DEFINED ACTION_GO_ONNXRUNTIME_LIB AND DEFINED ACTION_GO_ONNXRUNTIME_INCLUDE_D
     pthread
     yaml-cpp
     ZLIB::ZLIB
-    motion_action_onnxruntime
+    action_go_composite_onnxruntime
   )
   set_target_properties(generic_composite_policy_player PROPERTIES
-    BUILD_RPATH "${ACTION_GO_ONNXRUNTIME_DIR}/lib"
-    INSTALL_RPATH "$ORIGIN;$ORIGIN/../lib;${ACTION_GO_ONNXRUNTIME_DIR}/lib"
+    BUILD_RPATH "${ACTION_GO_COMPOSITE_ONNXRUNTIME_DIR}/lib"
+    INSTALL_RPATH "$ORIGIN;$ORIGIN/../lib;${ACTION_GO_COMPOSITE_ONNXRUNTIME_DIR}/lib"
   )
   list(APPEND ACTION_GO_ONNX_TARGETS generic_composite_policy_player)
 
+  add_executable(depth_image_preprocess runtime/tools/depth_image_preprocess.cpp runtime/src/depth_image_preprocessor.cpp)
+  target_include_directories(depth_image_preprocess PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/runtime/include)
+
   if(OpenCV_FOUND)
-    add_executable(generic_sensor_policy_player
+    if(NOT LIBZMQ_FOUND)
+      message(FATAL_ERROR "generic_sensor_policy_player requires libzmq (install libzmq3-dev and pkg-config)")
+    endif()
+  add_executable(generic_sensor_policy_player
       runtime/players/generic_sensor_policy_player.cpp
       runtime/src/policy_contract.cpp
       runtime/src/policy_protocol.cpp
       runtime/src/event_logger.cpp
       runtime/src/instinct_parkour_runtime.cpp
+      runtime/src/shared_memory_depth_stream.cpp
+      runtime/src/depth_image_preprocessor.cpp
       runtime/src/steadytray_runtime.cpp
-      runtime/src/command_safety_filter.cpp
+    runtime/src/command_safety_filter.cpp
+    runtime/src/activation_blend.cpp
+    runtime/src/async_command_publisher.cpp
     )
     target_include_directories(generic_sensor_policy_player PRIVATE
       ${CMAKE_CURRENT_SOURCE_DIR}/runtime/include
       ${ACTION_GO_ONNXRUNTIME_INCLUDE_DIR}
       ${OpenCV_INCLUDE_DIRS}
+      ${LIBZMQ_INCLUDE_DIRS}
     )
     target_link_libraries(generic_sensor_policy_player
       unitree_sdk2
@@ -536,6 +681,7 @@ if(DEFINED ACTION_GO_ONNXRUNTIME_LIB AND DEFINED ACTION_GO_ONNXRUNTIME_INCLUDE_D
       yaml-cpp
       motion_action_onnxruntime
       ${OpenCV_LIBS}
+      ${LIBZMQ_LIBRARIES}
     )
     if(realsense2_FOUND)
       target_compile_definitions(generic_sensor_policy_player PRIVATE ACTION_GO_WITH_REALSENSE)
@@ -552,7 +698,15 @@ if(DEFINED ACTION_GO_ONNXRUNTIME_LIB AND DEFINED ACTION_GO_ONNXRUNTIME_INCLUDE_D
       target_link_libraries(generic_sensor_policy_player ${REALSENSE2_LDFLAGS})
       message(STATUS "generic_sensor_policy_player: librealsense2 enabled via pkg-config")
     else()
-      message(WARNING "librealsense2 not found; generic_sensor_policy_player builds, but RealSense modes will fail until librealsense2-dev is installed")
+      if(ACTION_GO_REQUIRE_REALSENSE)
+        message(FATAL_ERROR
+          "librealsense2 is required for this build but was not found. "
+          "Install it under $ENV{HOME}/librealsense/install, or pass "
+          "-DACTION_GO_REALSENSE_ROOT=/absolute/install/prefix (preferred) "
+          "or -Drealsense2_DIR=/absolute/install/lib/cmake/realsense2.")
+      else()
+        message(WARNING "librealsense2 not found; generic_sensor_policy_player builds, but RealSense modes will fail until librealsense2-dev is installed. For a real-robot Instinct build, reconfigure with -DACTION_GO_REQUIRE_REALSENSE=ON so this cannot fail silently")
+      endif()
     endif()
     if(APRILTAG_LIBRARY AND (APRILTAG_INCLUDE_DIR OR APRILTAG_INCLUDE_DIRS))
       target_compile_definitions(generic_sensor_policy_player PRIVATE ACTION_GO_WITH_APRILTAG)

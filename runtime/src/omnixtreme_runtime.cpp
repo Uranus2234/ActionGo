@@ -1,3 +1,4 @@
+#include "action_go/runtime/activation_blend.h"
 #include "action_go/runtime/command_safety_filter.h"
 #include "action_go/runtime/event_logger.h"
 #include "action_go/runtime/npy_reader.h"
@@ -47,6 +48,8 @@ std::atomic<bool> g_stop_requested{false};
 void signal_handler(int) { g_stop_requested.store(true); }
 
 using action_go::runtime::CommandSafetyConfig;
+using action_go::runtime::ActivationBlend;
+using action_go::runtime::JointCommand;
 using action_go::runtime::CommandSafetyFilter;
 using action_go::runtime::CommandSafetyLimits;
 using action_go::runtime::CommandSafetyState;
@@ -381,6 +384,7 @@ struct Args {
   double prepare_hold_sec{0.0};
   double startup_interp_sec{0.0};
   double target_interp_sec{0.0};
+  double activation_blend_sec{0.10};
   double preview_timeout_sec{5.0};
   double residual_gain{1.0};
   double initial_noise_scale{1.0};
@@ -389,6 +393,7 @@ struct Args {
   bool trt_fp16{true};
   bool clip_envelope{true};
   bool joint_limit_clamp{false};
+  bool safety_joint_limit_enabled{true};
   bool friction_feedforward{true};
   bool sync_lowstate{false};
   bool check_only{false};
@@ -435,6 +440,7 @@ Args parse_args(int argc, char** argv) {
     else if (k == "--duration-sec") a.duration_sec = std::stod(need("--duration-sec"));
     else if (k == "--startup-interp-sec") a.startup_interp_sec = std::stod(need("--startup-interp-sec"));
     else if (k == "--target-interp-sec") a.target_interp_sec = std::stod(need("--target-interp-sec"));
+    else if (k == "--activation-blend-sec") a.activation_blend_sec = std::stod(need("--activation-blend-sec"));
     else if (k == "--preview-timeout-sec") a.preview_timeout_sec = std::stod(need("--preview-timeout-sec"));
     else if (k == "--residual-gain") a.residual_gain = std::stod(need("--residual-gain"));
     else if (k == "--initial-noise-scale") a.initial_noise_scale = std::stod(need("--initial-noise-scale"));
@@ -449,6 +455,8 @@ Args parse_args(int argc, char** argv) {
     else if (k == "--no-clip-envelope") a.clip_envelope = false;
     else if (k == "--joint-limit-clamp") a.joint_limit_clamp = true;
     else if (k == "--no-joint-limit-clamp") a.joint_limit_clamp = false;
+    else if (k == "--safety-joint-limit") a.safety_joint_limit_enabled = true;
+    else if (k == "--no-safety-joint-limit") a.safety_joint_limit_enabled = false;
     else if (k == "--friction-feedforward") a.friction_feedforward = true;
     else if (k == "--no-friction-feedforward") a.friction_feedforward = false;
     else if (k == "--sync-lowstate") a.sync_lowstate = true;
@@ -472,6 +480,7 @@ Args parse_args(int argc, char** argv) {
                 << "  --deterministic                 feed zero initial_noise to base policy\n"
                 << "  --friction-feedforward          publish deploy_mujoco.py friction compensation tau (default)\n"
                 << "  --joint-limit-clamp             clamp q targets to YAML joint limits (off by default; deploy_mujoco.py does not do this)\n"
+                << "  --no-safety-joint-limit         disable shared LowCmd mechanical q-target clamp\n"
                 << "  --no-friction-feedforward       disable feedforward tau\n"
                 << "  --sync-lowstate                 simulation mode: one publish tick per received LowState\n"
                 << "  --dry-run                       run DDS/ONNX but do not publish LowCmd\n"
@@ -1004,12 +1013,14 @@ public:
       : args_(args),
         friction_va_(std::move(friction_va)),
         friction_fs_(std::move(friction_fs)),
-        friction_fd_(std::move(friction_fd)) {
+        friction_fd_(std::move(friction_fd)),
+        activation_blend_(args.activation_blend_sec) {
     event_log_.open_append(args_.event_log);
     yamlc::require_size("safety.friction.va", kNumJoints, friction_va_.size());
     yamlc::require_size("safety.friction.fs", kNumJoints, friction_fs_.size());
     yamlc::require_size("safety.friction.fd", kNumJoints, friction_fd_.size());
     CommandSafetyConfig safety_cfg;
+    safety_cfg.joint_limit_enabled = args_.safety_joint_limit_enabled;
     safety_cfg.lowstate_timeout_sec = 0.2;
     safety_filter_.set_config(safety_cfg);
     safety_limits_.lower = lower_limits;
@@ -1038,7 +1049,8 @@ public:
   uint64_t sequence() const { return sequence_.load(); }
 
   void publish(const std::vector<float>& q, const std::vector<float>& kp, const std::vector<float>& kd,
-               bool allow_stale_state = false, bool active_command = true) {
+               bool allow_stale_state = false, bool active_command = true,
+               bool bypass_activation = false) {
     if (args_.dry_run) return;
     if (!active_command && args_.experimental_no_prestart_hold) {
       if (!prestart_hold_suppressed_logged_) {
@@ -1056,9 +1068,34 @@ public:
     safety_state.stamp = s.recv_stamp;
     safety_state.seq = sequence_.load(std::memory_order_relaxed);
     safety_state.q = s.q;
+    JointCommand command{q, kp, kd};
+    action_go::runtime::ActivationBlendResult blend_result;
+    if (active_command) {
+      blend_result = activation_blend_.apply(command, ActivationBlend::Clock::now(),
+                                             bypass_activation);
+      command = std::move(blend_result.command);
+      if (blend_result.started) {
+        event_log_.log("activation_blend_started",
+                       {event_string("player", "generic_composite_policy_player"),
+                        event_string("variant", "omnixtreme"),
+                        event_number("duration_sec", args_.activation_blend_sec),
+                        event_number("max_q_delta", blend_result.max_q_delta),
+                        event_number("max_kp_delta", blend_result.max_kp_delta),
+                        event_number("max_kd_delta", blend_result.max_kd_delta)});
+      }
+      if (bypass_activation && !activation_blend_bypass_logged_) {
+        activation_blend_bypass_logged_ = true;
+        event_log_.log("activation_blend_bypassed",
+                       {event_string("player", "generic_composite_policy_player"),
+                        event_string("variant", "omnixtreme"),
+                        event_string("reason", "preview_commit")});
+      }
+    }
     action_go::runtime::FilteredCommand filtered;
     try {
-      filtered = safety_filter_.filter(q, kp, kd, safety_state, safety_limits_, kNumJoints, allow_stale_state);
+      filtered = safety_filter_.filter(command.q, command.kp, command.kd,
+                                       safety_state, safety_limits_, kNumJoints,
+                                       allow_stale_state);
     } catch (const std::exception& e) {
       safety_failed_.store(true);
       event_log_.log("safety_stop",
@@ -1093,6 +1130,15 @@ public:
     }
     cmd.crc() = crc32_core(reinterpret_cast<uint32_t*>(&cmd), (sizeof(cmd) >> 2) - 1);
     publisher_->Write(cmd);
+    if (!active_command) {
+      activation_blend_.observe_hold({filtered.q, filtered.kp, filtered.kd});
+    } else if (blend_result.completed && !blend_result.bypassed &&
+               args_.activation_blend_sec > 0.0) {
+      event_log_.log("activation_blend_completed",
+                     {event_string("player", "generic_composite_policy_player"),
+                      event_string("variant", "omnixtreme"),
+                      event_number("duration_sec", args_.activation_blend_sec)});
+    }
     if (!first_command_logged_) {
       first_command_logged_ = true;
       event_log_.log("first_command_published",
@@ -1172,10 +1218,12 @@ private:
   CommandSafetyFilter safety_filter_;
   CommandSafetyLimits safety_limits_;
   RuntimeEventLogger event_log_;
+  ActivationBlend activation_blend_;
   bool first_command_logged_{false};
   bool first_hold_logged_{false};
   bool first_active_command_logged_{false};
   bool prestart_hold_suppressed_logged_{false};
+  bool activation_blend_bypass_logged_{false};
   std::atomic<bool> safety_failed_{false};
   std::atomic<bool> connected_{false};
   std::atomic<uint64_t> sequence_{0};
@@ -1250,7 +1298,7 @@ int run_omnixtreme_runtime(int argc, char** argv) {
           args.preview_file, args.commit_file, args.discard_file,
           args.preview_timeout_sec, publish_hz,
           []() { return g_stop_requested.load(); },
-          [&]() { dds.publish(preview_candidate, kp, kd); });
+          [&]() { dds.publish(preview_candidate, kp, kd, false, true, true); });
       if (decision != action_go::runtime::PreviewLifecycleDecision::kCommit) {
         policy.restore_state(saved_state);
         event_log.log("preview_state_restored",
@@ -1391,7 +1439,7 @@ int run_omnixtreme_runtime(int argc, char** argv) {
           const double a = elapsed / args.startup_interp_sec;
           q_cmd = lerp_vec(startup_q, q_cmd, a);
         }
-        dds.publish(q_cmd, kp, kd);
+        dds.publish(q_cmd, kp, kd, false, true, preview_committed);
         committed_candidate_pending = false;
 
         if (max_frames_reached) break;
@@ -1412,6 +1460,8 @@ int run_omnixtreme_runtime(int argc, char** argv) {
       std::atomic<bool> publish_stop{false};
       double publish_late_max_ms = 0.0;
       int publish_late_count = 0;
+      int64_t publish_count = 0;
+      double max_publish_interval_ms = 0.0;
       double e2e_ms_sum = 0.0;
       double e2e_ms_max = 0.0;
       double e2e_ms_last = 0.0;
@@ -1435,6 +1485,7 @@ int run_omnixtreme_runtime(int argc, char** argv) {
 
       std::thread publisher([&]() {
         auto pub_next = std::chrono::steady_clock::now();
+        auto previous_publish = std::chrono::steady_clock::time_point{};
         uint64_t last_published_target_seq = std::numeric_limits<uint64_t>::max();
         while (!publish_stop.load() && !g_stop_requested.load()) {
           const auto now = std::chrono::steady_clock::now();
@@ -1446,8 +1497,19 @@ int run_omnixtreme_runtime(int argc, char** argv) {
             local_target_seq = target_seq;
             local_source_stamp = target_source_stamp;
           }
-          dds.publish(q_cmd, kp, kd);
+          dds.publish(q_cmd, kp, kd, false, true, preview_committed);
           const auto after_publish = std::chrono::steady_clock::now();
+          {
+            std::lock_guard<std::mutex> stats_lock(stats_mtx);
+            if (previous_publish.time_since_epoch().count() != 0) {
+              max_publish_interval_ms = std::max(
+                  max_publish_interval_ms,
+                  std::chrono::duration<double, std::milli>(
+                      after_publish - previous_publish).count());
+            }
+            previous_publish = after_publish;
+            ++publish_count;
+          }
           if (local_target_seq != last_published_target_seq && local_source_stamp.time_since_epoch().count() != 0) {
             last_published_target_seq = local_target_seq;
             const double e2e_ms = std::chrono::duration<double, std::milli>(after_publish - local_source_stamp).count();
@@ -1509,7 +1571,9 @@ int run_omnixtreme_runtime(int argc, char** argv) {
             const auto [mn, mx] = std::minmax_element(q_to.begin(), q_to.end());
             const double infer_avg = infer_ms_sum / std::max(1, infer_count);
             double e2e_last_copy = 0.0, e2e_avg_copy = 0.0, e2e_max_copy = 0.0, pub_late_max_copy = 0.0;
+            double max_publish_interval_copy = 0.0;
             int e2e_count_copy = 0, pub_late_count_copy = 0;
+            int64_t publish_count_copy = 0;
             {
               std::lock_guard<std::mutex> stats_lock(stats_mtx);
               e2e_last_copy = e2e_ms_last;
@@ -1518,6 +1582,8 @@ int run_omnixtreme_runtime(int argc, char** argv) {
               e2e_count_copy = e2e_count;
               pub_late_count_copy = publish_late_count;
               pub_late_max_copy = publish_late_max_ms;
+              publish_count_copy = publish_count;
+              max_publish_interval_copy = max_publish_interval_ms;
             }
             std::cout << "[generic_composite_policy_player][omnixtreme] frame=" << policy.frame() << "/" << policy.total_frames()-1
                       << " target=[" << *mn << "," << *mx << "]"
@@ -1542,7 +1608,9 @@ int run_omnixtreme_runtime(int argc, char** argv) {
                            event_number("e2e_ms_max", e2e_max_copy),
                            event_int("e2e_count", e2e_count_copy),
                            event_int("policy_deadline_miss", infer_late_count),
+                           event_int("publish_count", publish_count_copy),
                            event_int("publish_deadline_miss", pub_late_count_copy),
+                           event_number("max_publish_interval_ms", max_publish_interval_copy),
                            event_number("pub_late_max_ms", pub_late_max_copy)});
           }
 
@@ -1569,6 +1637,20 @@ int run_omnixtreme_runtime(int argc, char** argv) {
 
       publish_stop.store(true);
       if (publisher.joinable()) publisher.join();
+      {
+        std::lock_guard<std::mutex> stats_lock(stats_mtx);
+        event_log.log("runtime_metrics",
+                      {event_string("player", "generic_composite_policy_player"),
+                       event_string("template", "composite_motion_policy"),
+                       event_string("variant", "omnixtreme"),
+                       event_string("phase", "final"),
+                       event_int("step", infer_count),
+                       event_int("publish_count", publish_count),
+                       event_int("policy_deadline_miss", infer_late_count),
+                       event_int("publish_deadline_miss", publish_late_count),
+                       event_number("max_publish_interval_ms", max_publish_interval_ms),
+                       event_number("pub_late_max_ms", publish_late_max_ms)});
+      }
     }
     if (g_stop_requested.load()) dds.publish_damping_for_stop();
     if (dds.safety_failed()) throw std::runtime_error("CommandSafetyFilter stopped OmniXtreme publishing");

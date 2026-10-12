@@ -58,5 +58,6 @@ handoff:
   cmd_topic: rt/user_lowcmd
   state_topic: rt/lowstate
   mode_machine: 5
+  activation_blend_sec: 0.10
   damping_on_stop: false
 safety: {}

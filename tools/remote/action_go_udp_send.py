@@ -205,7 +205,7 @@ def print_interactive_help(default_delay_ms: int) -> None:
   action kick_right delay_ms=500     延迟 500ms 执行动作
   action kick_right now              立即执行动作
   action kick_right start_ms=1730000000000
-  emergency                          一级急停，机器人程序继续运行
+  emergency / stop                   停止动作，进入阻尼和 SHELL_IDLE，机器人程序继续运行
   normal_exit / walkrun / exit        切回 walkrun 并退出机器人 action_go_remote_test
   damping_exit / passive             进入 passive 阻尼并退出机器人 action_go_remote_test
   raw ACTION kick_right delay_ms=500  发送原始 UDP 字符串

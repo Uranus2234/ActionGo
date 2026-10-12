@@ -8,3 +8,6 @@ paper/build/
 # Private research drafts and imported literature stay outside code-only releases.
 docs/actiongo_*
 docs/papers/
+
+# Local-only MuJoCo player and imported AMP locomotion package.
+/local_tasks/amp_locomotion_mujoco/

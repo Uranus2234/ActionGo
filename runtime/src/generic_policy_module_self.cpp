@@ -316,19 +316,87 @@ void GenericPolicyPlayer::control_loop_single_bfm() {
 
     auto start = std::chrono::steady_clock::now();
     auto next_policy = preview_committed ? start + policy_dt : start;
-    auto next_publish = start;
-    std::vector<float> target_begin = q, target_goal = q, filtered_target = q;
-    auto target_update_time = start;
+    struct CommandMailbox {
+      std::mutex mutex;
+      std::vector<float> begin_q;
+      std::vector<float> goal_q;
+      std::vector<float> kp;
+      std::vector<float> kd;
+      std::chrono::steady_clock::time_point update_time{};
+      bool active{false};
+    } mailbox;
+    mailbox.begin_q = q;
+    mailbox.goal_q = q;
+    mailbox.kp = kp;
+    mailbox.kd = kd;
+    mailbox.update_time = start;
+    mailbox.active = preview_committed;
+    std::atomic<bool> publisher_stop{false};
+    std::atomic<int64_t> publish_count{0};
+    std::atomic<int64_t> publish_deadline_miss{0};
+    std::atomic<double> max_publish_interval_ms{0.0};
+    std::mutex publisher_error_mutex;
+    std::exception_ptr publisher_error;
+    std::thread publisher_thread([&]() {
+      try {
+        auto next_publish = std::chrono::steady_clock::now();
+        auto previous_publish = std::chrono::steady_clock::time_point{};
+        while (!publisher_stop.load() && !g_stop_requested.load()) {
+          const auto now = std::chrono::steady_clock::now();
+          std::vector<float> publish_q, publish_kp, publish_kd;
+          bool active = false;
+          {
+            std::lock_guard<std::mutex> lock(mailbox.mutex);
+            const double alpha = target_interp_sec_ > 1e-6
+                ? std::chrono::duration<double>(now - mailbox.update_time).count() /
+                      target_interp_sec_
+                : 1.0;
+            publish_q = lerp_vec(mailbox.begin_q, mailbox.goal_q, alpha);
+            publish_kp = mailbox.kp;
+            publish_kd = mailbox.kd;
+            active = mailbox.active;
+          }
+          const auto state = snapshot();
+          publish(publish_q, publish_kp, publish_kd, state.mode_machine, false,
+                  active ? CommandPhase::kActive : CommandPhase::kHold);
+          const auto published_at = std::chrono::steady_clock::now();
+          if (previous_publish.time_since_epoch().count() != 0) {
+            const double interval_ms =
+                std::chrono::duration<double, std::milli>(published_at - previous_publish).count();
+            double observed = max_publish_interval_ms.load();
+            while (interval_ms > observed &&
+                   !max_publish_interval_ms.compare_exchange_weak(observed, interval_ms)) {
+            }
+          }
+          previous_publish = published_at;
+          publish_count.fetch_add(1);
+          publish_deadline_miss.fetch_add(advance_deadline(next_publish, publish_dt, published_at));
+          if (next_publish > std::chrono::steady_clock::now()) {
+            std::this_thread::sleep_until(next_publish);
+          }
+        }
+      } catch (...) {
+        {
+          std::lock_guard<std::mutex> lock(publisher_error_mutex);
+          publisher_error = std::current_exception();
+        }
+        publisher_stop.store(true);
+      }
+    });
     int64_t steps = 0;
+    int64_t policy_deadline_miss = 0;
     double avg_ms = 0.0, max_ms = 0.0;
     std::cout << player_log_prefix() << " start single_actor_state/bfm_zero model=" << runtime_model_path_.string()
               << " hz=" << inference_hz_ << " publish_hz=" << publish_hz
               << " target_interp_sec=" << target_interp_sec_ << "\n";
-    while (!g_stop_requested.load()) {
+    std::exception_ptr inference_error;
+    try {
+      while (!g_stop_requested.load()) {
       const auto now = std::chrono::steady_clock::now();
       if (duration_sec_ > 0.0 && std::chrono::duration<double>(now - start).count() >= duration_sec_) break;
+      if (publisher_stop.load()) break;
       if (now >= next_policy) {
-        while (next_policy <= now) next_policy += policy_dt;
+        policy_deadline_miss += advance_deadline(next_policy, policy_dt, now);
         s = snapshot();
         std::vector<float> new_goal, new_kp, new_kd;
         const auto t0 = std::chrono::steady_clock::now();
@@ -338,11 +406,19 @@ void GenericPolicyPlayer::control_loop_single_bfm() {
         ++steps;
         avg_ms += (ms - avg_ms) / static_cast<double>(steps);
         max_ms = std::max(max_ms, ms);
-        target_begin = filtered_target;
-        target_goal = std::move(new_goal);
-        kp = std::move(new_kp);
-        kd = std::move(new_kd);
-        target_update_time = now;
+        if (policy_counter_ > bfm_warmup_steps_) {
+          std::lock_guard<std::mutex> lock(mailbox.mutex);
+          const double alpha = target_interp_sec_ > 1e-6
+              ? std::chrono::duration<double>(now - mailbox.update_time).count() /
+                    target_interp_sec_
+              : 1.0;
+          mailbox.begin_q = lerp_vec(mailbox.begin_q, mailbox.goal_q, alpha);
+          mailbox.goal_q = std::move(new_goal);
+          mailbox.kp = std::move(new_kp);
+          mailbox.kd = std::move(new_kd);
+          mailbox.update_time = now;
+          mailbox.active = true;
+        }
         if (stats_interval_ > 0 && steps % stats_interval_ == 0) {
           float action_abs_max = 0.f;
           for (float v : last_action) action_abs_max = std::max(action_abs_max, std::abs(v));
@@ -360,24 +436,40 @@ void GenericPolicyPlayer::control_loop_single_bfm() {
                           event_int("step", steps),
                           event_number("infer_ms_avg", avg_ms),
                           event_number("infer_ms_max", max_ms),
-                          event_number("action_abs_max", action_abs_max)});
+                          event_number("action_abs_max", action_abs_max),
+                          event_int("publish_count", publish_count.load()),
+                          event_int("policy_deadline_miss", policy_deadline_miss),
+                          event_int("publish_deadline_miss", publish_deadline_miss.load()),
+                          event_number("max_publish_interval_ms",
+                                       max_publish_interval_ms.load())});
           max_ms = 0.0;
         }
       }
-      if (now >= next_publish) {
-        while (next_publish <= now) next_publish += publish_dt;
-        if (target_interp_sec_ > 1e-6 && target_begin.size() == target_goal.size()) {
-          filtered_target = lerp_vec(target_begin, target_goal,
-                                     std::chrono::duration<double>(now - target_update_time).count() / target_interp_sec_);
-        } else {
-          filtered_target = target_goal;
+        if (next_policy > std::chrono::steady_clock::now()) {
+          std::this_thread::sleep_until(next_policy);
         }
-        s = snapshot();
-        publish(filtered_target, kp, kd, s.mode_machine);
       }
-      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    } catch (...) {
+      inference_error = std::current_exception();
     }
+    publisher_stop.store(true);
+    if (publisher_thread.joinable()) publisher_thread.join();
+    {
+      std::lock_guard<std::mutex> lock(publisher_error_mutex);
+      if (publisher_error) std::rethrow_exception(publisher_error);
+    }
+    if (inference_error) std::rethrow_exception(inference_error);
     if (g_stop_requested.load() && damping_on_stop_) publish_damping_for_stop();
+    event_log_.log("runtime_metrics",
+                   {event_string("player", player_label()),
+                    event_string("template", template_),
+                    event_string("variant", variant_),
+                    event_string("phase", "final"),
+                    event_int("step", steps),
+                    event_int("publish_count", publish_count.load()),
+                    event_int("policy_deadline_miss", policy_deadline_miss),
+                    event_int("publish_deadline_miss", publish_deadline_miss.load()),
+                    event_number("max_publish_interval_ms", max_publish_interval_ms.load())});
     std::cout << player_log_prefix() << " completed bfm_zero\n";
   }
 
@@ -465,80 +557,94 @@ void GenericPolicyPlayer::control_loop_single_unitree() {
 
     const auto start = std::chrono::steady_clock::now();
     auto next_policy = start;
-    auto next_publish = start;
     const auto policy_dt = std::chrono::duration_cast<std::chrono::steady_clock::duration>(
         std::chrono::duration<double>(1.0 / std::max(1, inference_hz_)));
-    const auto publish_dt = std::chrono::duration_cast<std::chrono::steady_clock::duration>(
-        std::chrono::duration<double>(1.0 / std::max(1, publish_hz_)));
-    std::vector<float> target_begin = q, target_goal = q, filtered_target = q;
-    auto target_update_time = start;
     Command last_cmd;
     std::vector<float> action(motor_count_, 0.f);
     int64_t steps = 0;
+    int64_t policy_deadline_miss = 0;
     double avg_ms = 0.0;
     double max_ms = 0.0;
     unitree_phase_time_ = 0.0;
+    AsyncCommandPublisher command_publisher(
+        publish_hz_, target_interp_sec_, JointCommand{q, kp, kd},
+        [this](const JointCommand& command, bool active) {
+          const auto state = snapshot();
+          publish(command.q, command.kp, command.kd, state.mode_machine, false,
+                  active ? CommandPhase::kActive : CommandPhase::kHold);
+        });
     std::cout << player_log_prefix() << " start single_actor_state/unitree_rl_mjlab model=" << runtime_model_path_.string()
               << " obs_dim=" << unitree_obs_dim_ << " hz=" << inference_hz_ << " publish_hz=" << publish_hz_
               << " command_source=" << unitree_command_source_ << "\n";
-    while (!g_stop_requested.load()) {
-      const auto now = std::chrono::steady_clock::now();
-      if (duration_sec_ > 0.0 && std::chrono::duration<double>(now - start).count() >= duration_sec_) break;
-      if (now >= next_policy) {
-        while (next_policy <= now) next_policy += policy_dt;
-        s = snapshot();
-        std::vector<float> new_goal;
-        if (unitree_startup_sec_ > 1e-6 && std::chrono::duration<double>(now - start).count() < unitree_startup_sec_) {
-          const double alpha = std::clamp(std::chrono::duration<double>(now - start).count() / unitree_startup_sec_, 0.0, 1.0);
-          new_goal = lerp_vec(q, default_q_, alpha);
-          last_cmd = unitree_command_from_remote(s.wireless_remote);
-          action.assign(motor_count_, 0.f);
-        } else {
-          const auto t0 = std::chrono::steady_clock::now();
-          build_unitree_target(s, new_goal, kp, kd, last_cmd, action);
-          const auto t1 = std::chrono::steady_clock::now();
-          const double ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
-          avg_ms += (ms - avg_ms) / static_cast<double>(steps + 1);
-          max_ms = std::max(max_ms, ms);
+    std::exception_ptr inference_error;
+    try {
+      while (!g_stop_requested.load() && !command_publisher.failed()) {
+        const auto now = std::chrono::steady_clock::now();
+        if (duration_sec_ > 0.0 && std::chrono::duration<double>(now - start).count() >= duration_sec_) break;
+        if (now >= next_policy) {
+          policy_deadline_miss += advance_deadline(next_policy, policy_dt, now);
+          s = snapshot();
+          std::vector<float> new_goal;
+          if (unitree_startup_sec_ > 1e-6 && std::chrono::duration<double>(now - start).count() < unitree_startup_sec_) {
+            const double alpha = std::clamp(std::chrono::duration<double>(now - start).count() / unitree_startup_sec_, 0.0, 1.0);
+            new_goal = lerp_vec(q, default_q_, alpha);
+            last_cmd = unitree_command_from_remote(s.wireless_remote);
+            action.assign(motor_count_, 0.f);
+          } else {
+            const auto t0 = std::chrono::steady_clock::now();
+            build_unitree_target(s, new_goal, kp, kd, last_cmd, action);
+            const auto t1 = std::chrono::steady_clock::now();
+            const double ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
+            avg_ms += (ms - avg_ms) / static_cast<double>(steps + 1);
+            max_ms = std::max(max_ms, ms);
+          }
+          command_publisher.update({std::move(new_goal), kp, kd});
+          ++steps;
+          if (stats_interval_ > 0 && steps % stats_interval_ == 0) {
+            float action_abs_max = 0.f;
+            for (float v : action) action_abs_max = std::max(action_abs_max, std::abs(v));
+            const auto metrics = command_publisher.metrics();
+            std::cout << player_log_prefix() << " unitree step=" << steps
+                      << " cmd=(" << last_cmd.vx << "," << last_cmd.vy << "," << last_cmd.yaw << ")"
+                      << " tilt=" << tilt_deg_from_quat(s.quat) << "deg action_abs_max=" << action_abs_max << "\n";
+            event_log_.log("runtime_metrics",
+                           {event_string("player", player_label()),
+                            event_string("template", template_),
+                            event_string("variant", variant_),
+                            event_int("step", steps),
+                            event_number("infer_ms_avg", avg_ms),
+                            event_number("infer_ms_max", max_ms),
+                            event_number("action_abs_max", action_abs_max),
+                            event_number("cmd_vx", last_cmd.vx),
+                            event_number("cmd_vy", last_cmd.vy),
+                            event_number("cmd_yaw", last_cmd.yaw),
+                            event_int("publish_count", metrics.publish_count),
+                            event_int("policy_deadline_miss", policy_deadline_miss),
+                            event_int("publish_deadline_miss", metrics.deadline_miss),
+                            event_number("max_publish_interval_ms", metrics.max_publish_interval_ms)});
+            max_ms = 0.0;
+          }
         }
-        target_begin = filtered_target;
-        target_goal = std::move(new_goal);
-        target_update_time = now;
-        ++steps;
-        if (stats_interval_ > 0 && steps % stats_interval_ == 0) {
-          float action_abs_max = 0.f;
-          for (float v : action) action_abs_max = std::max(action_abs_max, std::abs(v));
-          std::cout << player_log_prefix() << " unitree step=" << steps
-                    << " cmd=(" << last_cmd.vx << "," << last_cmd.vy << "," << last_cmd.yaw << ")"
-                    << " tilt=" << tilt_deg_from_quat(s.quat) << "deg action_abs_max=" << action_abs_max << "\n";
-          event_log_.log("runtime_metrics",
-                         {event_string("player", player_label()),
-                          event_string("template", template_),
-                          event_string("variant", variant_),
-                          event_int("step", steps),
-                          event_number("infer_ms_avg", avg_ms),
-                          event_number("infer_ms_max", max_ms),
-                          event_number("action_abs_max", action_abs_max),
-                          event_number("cmd_vx", last_cmd.vx),
-                          event_number("cmd_vy", last_cmd.vy),
-                          event_number("cmd_yaw", last_cmd.yaw)});
-          max_ms = 0.0;
-        }
+        if (next_policy > std::chrono::steady_clock::now()) std::this_thread::sleep_until(next_policy);
       }
-      if (now >= next_publish) {
-        while (next_publish <= now) next_publish += publish_dt;
-        if (target_interp_sec_ > 1e-6) {
-          filtered_target = lerp_vec(target_begin, target_goal,
-                                     std::chrono::duration<double>(now - target_update_time).count() / target_interp_sec_);
-        } else {
-          filtered_target = target_goal;
-        }
-        s = snapshot();
-        publish(filtered_target, kp, kd, s.mode_machine);
-      }
-      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    } catch (...) {
+      inference_error = std::current_exception();
     }
+    command_publisher.stop_and_join();
+    command_publisher.rethrow_if_failed();
+    if (inference_error) std::rethrow_exception(inference_error);
     if (g_stop_requested.load() && damping_on_stop_) publish_damping_for_stop();
+    const auto metrics = command_publisher.metrics();
+    event_log_.log("runtime_metrics",
+                   {event_string("player", player_label()),
+                    event_string("template", template_),
+                    event_string("variant", variant_),
+                    event_string("phase", "final"),
+                    event_int("step", steps),
+                    event_int("publish_count", metrics.publish_count),
+                    event_int("policy_deadline_miss", policy_deadline_miss),
+                    event_int("publish_deadline_miss", metrics.deadline_miss),
+                    event_number("max_publish_interval_ms", metrics.max_publish_interval_ms)});
     std::cout << player_log_prefix() << " completed unitree_rl_mjlab\n";
   }
 

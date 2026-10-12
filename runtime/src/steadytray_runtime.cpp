@@ -1,3 +1,4 @@
+#include "action_go/runtime/activation_blend.h"
 #include "action_go/runtime/command_safety_filter.h"
 #include "action_go/runtime/event_logger.h"
 #include "action_go/runtime/policy_protocol.h"
@@ -74,6 +75,8 @@ std::atomic<bool> g_stop_requested{false};
 void signal_handler(int) { g_stop_requested.store(true); }
 
 using action_go::runtime::CommandSafetyConfig;
+using action_go::runtime::ActivationBlend;
+using action_go::runtime::JointCommand;
 using action_go::runtime::CommandSafetyFilter;
 using action_go::runtime::CommandSafetyLimits;
 using action_go::runtime::CommandSafetyState;
@@ -286,6 +289,7 @@ struct Args {
   int warmup_steps{5};
   double duration_sec{0.0};
   double target_interp_sec{0.02};
+  double activation_blend_sec{0.10};
   double preview_timeout_sec{5.0};
   double pose_timeout_sec{0.15};
   double camera_timeout_sec{2.0};
@@ -357,6 +361,7 @@ Args parse_args(int argc, char** argv) {
     else if (k == "--warmup-steps") a.warmup_steps = std::stoi(need_arg(i, argc, argv, k));
     else if (k == "--duration-sec") a.duration_sec = std::stod(need_arg(i, argc, argv, k));
     else if (k == "--target-interp-sec") a.target_interp_sec = std::stod(need_arg(i, argc, argv, k));
+    else if (k == "--activation-blend-sec") a.activation_blend_sec = std::stod(need_arg(i, argc, argv, k));
     else if (k == "--preview-timeout-sec") a.preview_timeout_sec = std::stod(need_arg(i, argc, argv, k));
     else if (k == "--pose-timeout-sec") a.pose_timeout_sec = std::stod(need_arg(i, argc, argv, k));
     else if (k == "--camera-timeout-sec") a.camera_timeout_sec = std::stod(need_arg(i, argc, argv, k));
@@ -953,7 +958,8 @@ class UnitreeDDS {
  public:
   explicit UnitreeDDS(const Args& args,
                       const std::vector<float>& lower_limits,
-                      const std::vector<float>& upper_limits) : args_(args) {
+                      const std::vector<float>& upper_limits)
+      : args_(args), activation_blend_(args.activation_blend_sec) {
     event_log_.open_append(args_.event_log);
     CommandSafetyConfig safety_cfg;
     safety_cfg.lowstate_timeout_sec = 0.2;
@@ -990,7 +996,8 @@ class UnitreeDDS {
   }
 
   void publish(const std::vector<float>& q, const std::vector<float>& kp, const std::vector<float>& kd,
-               bool allow_stale_state = false, bool active_command = true) {
+               bool allow_stale_state = false, bool active_command = true,
+               bool bypass_activation = false) {
     if (args_.dry_run || !publisher_) return;
     if (!active_command && args_.experimental_no_prestart_hold) {
       if (!prestart_hold_suppressed_logged_) {
@@ -1008,9 +1015,34 @@ class UnitreeDDS {
     safety_state.stamp = s.recv_stamp;
     safety_state.seq = s.seq;
     safety_state.q = s.q;
+    JointCommand command{q, kp, kd};
+    action_go::runtime::ActivationBlendResult blend_result;
+    if (active_command) {
+      blend_result = activation_blend_.apply(command, ActivationBlend::Clock::now(),
+                                             bypass_activation);
+      command = std::move(blend_result.command);
+      if (blend_result.started) {
+        event_log_.log("activation_blend_started",
+                       {event_string("player", "generic_sensor_policy_player"),
+                        event_string("variant", "steadytray"),
+                        event_number("duration_sec", args_.activation_blend_sec),
+                        event_number("max_q_delta", blend_result.max_q_delta),
+                        event_number("max_kp_delta", blend_result.max_kp_delta),
+                        event_number("max_kd_delta", blend_result.max_kd_delta)});
+      }
+      if (bypass_activation && !activation_blend_bypass_logged_) {
+        activation_blend_bypass_logged_ = true;
+        event_log_.log("activation_blend_bypassed",
+                       {event_string("player", "generic_sensor_policy_player"),
+                        event_string("variant", "steadytray"),
+                        event_string("reason", "preview_commit")});
+      }
+    }
     action_go::runtime::FilteredCommand filtered;
     try {
-      filtered = safety_filter_.filter(q, kp, kd, safety_state, safety_limits_, kNumJoints, allow_stale_state);
+      filtered = safety_filter_.filter(command.q, command.kp, command.kd,
+                                       safety_state, safety_limits_, kNumJoints,
+                                       allow_stale_state);
     } catch (const std::exception& e) {
       safety_failed_.store(true);
       event_log_.log("safety_stop",
@@ -1036,6 +1068,15 @@ class UnitreeDDS {
     }
     cmd.crc() = crc32_core((uint32_t*)&cmd, (sizeof(cmd) >> 2) - 1);
     publisher_->Write(cmd);
+    if (!active_command) {
+      activation_blend_.observe_hold({filtered.q, filtered.kp, filtered.kd});
+    } else if (blend_result.completed && !blend_result.bypassed &&
+               args_.activation_blend_sec > 0.0) {
+      event_log_.log("activation_blend_completed",
+                     {event_string("player", "generic_sensor_policy_player"),
+                      event_string("variant", "steadytray"),
+                      event_number("duration_sec", args_.activation_blend_sec)});
+    }
     if (!first_command_logged_) {
       first_command_logged_ = true;
       event_log_.log("first_command_published",
@@ -1112,10 +1153,12 @@ class UnitreeDDS {
   CommandSafetyFilter safety_filter_;
   CommandSafetyLimits safety_limits_;
   RuntimeEventLogger event_log_;
+  ActivationBlend activation_blend_;
   bool first_command_logged_{false};
   bool first_hold_logged_{false};
   bool first_active_command_logged_{false};
   bool prestart_hold_suppressed_logged_{false};
+  bool activation_blend_bypass_logged_{false};
   std::atomic<bool> safety_failed_{false};
   std::atomic<bool> connected_{false};
   std::atomic<uint64_t> sequence_{0};
@@ -1238,7 +1281,7 @@ class SteadyTrayRunner {
           args_.preview_file, args_.commit_file, args_.discard_file,
           args_.preview_timeout_sec, std::max(args_.publish_hz, args_.hz),
           []() { return g_stop_requested.load(); },
-          [&]() { dds.publish(preview_target, cfg_.kp, cfg_.kd); });
+          [&]() { dds.publish(preview_target, cfg_.kp, cfg_.kd, false, true, true); });
       if (decision != action_go::runtime::PreviewLifecycleDecision::kCommit) {
         policy_->restore_state(policy_state);
         event_log_.log("preview_state_restored",
@@ -1269,7 +1312,6 @@ class SteadyTrayRunner {
               std::chrono::duration_cast<std::chrono::steady_clock::duration>(
                   std::chrono::duration<double>(1.0 / std::max(1, args_.hz)))
         : std::chrono::steady_clock::now();
-    auto next_pub = std::chrono::steady_clock::now();
     std::vector<float> target = preview_mode ? preview_target : dds.snapshot().q;
     if (target.size() < kNumJoints) target.assign(kNumJoints, 0.f);
     std::vector<float> from = target, to = target;
@@ -1278,9 +1320,70 @@ class SteadyTrayRunner {
     double infer_ms_avg = 0.0;
     double infer_ms_max = 0.0;
     long long policy_deadline_miss = 0;
-    long long publish_deadline_miss = 0;
+    std::atomic<long long> publish_deadline_miss{0};
+    std::atomic<long long> publish_count{0};
+    std::atomic<double> max_publish_interval_ms{0.0};
+    std::mutex command_mutex;
+    bool command_active = preview_mode;
+    std::atomic<bool> publisher_stop{false};
+    std::exception_ptr publisher_error;
+    std::mutex publisher_error_mutex;
+    const auto publish_dt = std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+        std::chrono::duration<double>(1.0 / std::max(args_.publish_hz, args_.hz)));
+    std::thread publisher_thread([&]() {
+      try {
+        auto next_pub = std::chrono::steady_clock::now();
+        auto previous_publish = std::chrono::steady_clock::time_point{};
+        while (!publisher_stop.load() && !g_stop_requested.load()) {
+          const auto now = std::chrono::steady_clock::now();
+          std::vector<float> publish_target;
+          bool publish_active = false;
+          {
+            std::lock_guard<std::mutex> lock(command_mutex);
+            const double a = args_.target_interp_sec > 1e-6
+                ? std::clamp(std::chrono::duration<double>(now - interp_start).count() /
+                                 args_.target_interp_sec,
+                             0.0, 1.0)
+                : 1.0;
+            publish_target = to;
+            if (from.size() == to.size()) {
+              for (size_t i = 0; i < publish_target.size(); ++i) {
+                publish_target[i] = static_cast<float>(from[i] + a * (to[i] - from[i]));
+              }
+            }
+            target = publish_target;
+            publish_active = command_active;
+          }
+          dds.publish(publish_target, cfg_.kp, cfg_.kd, false, publish_active,
+                      preview_mode);
+          const auto published_at = std::chrono::steady_clock::now();
+          if (previous_publish.time_since_epoch().count() != 0) {
+            const double interval_ms =
+                std::chrono::duration<double, std::milli>(published_at - previous_publish).count();
+            double observed = max_publish_interval_ms.load();
+            while (interval_ms > observed &&
+                   !max_publish_interval_ms.compare_exchange_weak(observed, interval_ms)) {
+            }
+          }
+          previous_publish = published_at;
+          publish_count.fetch_add(1);
+          next_pub += publish_dt;
+          if (next_pub < published_at) {
+            publish_deadline_miss.fetch_add(1);
+            next_pub = published_at;
+          }
+          std::this_thread::sleep_until(next_pub);
+        }
+      } catch (...) {
+        std::lock_guard<std::mutex> lock(publisher_error_mutex);
+        publisher_error = std::current_exception();
+        publisher_stop.store(true);
+      }
+    });
 
-    while (!g_stop_requested.load()) {
+    std::exception_ptr inference_error;
+    try {
+      while (!g_stop_requested.load() && !publisher_stop.load()) {
       const auto now = std::chrono::steady_clock::now();
       if (args_.duration_sec > 0.0 && std::chrono::duration<double>(now - start).count() >= args_.duration_sec) break;
 
@@ -1294,14 +1397,22 @@ class SteadyTrayRunner {
             throw std::runtime_error("object pose missing/stale: " + object_source_->stats());
           }
         }
+        std::vector<float> next_target;
+        bool next_active = true;
         if (!preview_mode && infer_count < args_.warmup_steps) {
-          to = s.q;
+          next_target = s.q;
+          next_active = false;
         } else {
           const auto action = policy_->infer(s.q, s.dq, s.quat, s.gyro, op.obs);
-          to = policy_->action_to_target(action);
+          next_target = policy_->action_to_target(action);
         }
-        from = target;
-        interp_start = now;
+        {
+          std::lock_guard<std::mutex> lock(command_mutex);
+          from = target.size() == to.size() ? target : to;
+          to = std::move(next_target);
+          interp_start = now;
+          command_active = next_active;
+        }
         ++infer_count;
         const auto infer_end = std::chrono::steady_clock::now();
         const double infer_ms = std::chrono::duration<double, std::milli>(infer_end - infer_begin).count();
@@ -1322,7 +1433,10 @@ class SteadyTrayRunner {
                           event_number("object_age_sec", std::isfinite(op.age_sec) ? op.age_sec : -1.0),
                           event_number("target0", target0),
                           event_int("policy_deadline_miss", policy_deadline_miss),
-                          event_int("publish_deadline_miss", publish_deadline_miss)});
+                          event_int("publish_count", publish_count.load()),
+                          event_int("publish_deadline_miss", publish_deadline_miss.load()),
+                          event_number("max_publish_interval_ms",
+                                       max_publish_interval_ms.load())});
           infer_ms_max = 0.0;
         }
         next_infer += std::chrono::duration_cast<std::chrono::steady_clock::duration>(std::chrono::duration<double>(1.0 / std::max(1, args_.hz)));
@@ -1330,24 +1444,29 @@ class SteadyTrayRunner {
         if (next_infer < after_infer) { ++policy_deadline_miss; next_infer = after_infer; }
       }
 
-      if (now >= next_pub) {
-        double a = args_.target_interp_sec > 1e-6 ? std::chrono::duration<double>(now - interp_start).count() / args_.target_interp_sec : 1.0;
-        a = std::clamp(a, 0.0, 1.0);
-        if (target.size() != to.size()) target = to;
-        for (size_t i = 0; i < target.size(); ++i) target[i] = static_cast<float>(from[i] + a * (to[i] - from[i]));
-        dds.publish(target, cfg_.kp, cfg_.kd);
-        next_pub += std::chrono::duration_cast<std::chrono::steady_clock::duration>(std::chrono::duration<double>(1.0 / std::max(args_.publish_hz, args_.hz)));
-        const auto after_publish = std::chrono::steady_clock::now();
-        if (next_pub < after_publish) { ++publish_deadline_miss; next_pub = after_publish; }
+        if (next_infer > std::chrono::steady_clock::now()) {
+          std::this_thread::sleep_until(next_infer);
+        }
       }
-      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    } catch (...) {
+      inference_error = std::current_exception();
     }
+    publisher_stop.store(true);
+    if (publisher_thread.joinable()) publisher_thread.join();
+    {
+      std::lock_guard<std::mutex> lock(publisher_error_mutex);
+      if (publisher_error) std::rethrow_exception(publisher_error);
+    }
+    if (inference_error) std::rethrow_exception(inference_error);
     event_log_.log("runtime_metrics",
                    {event_string("player", "generic_sensor_policy_player"),
                     event_string("template", "object_conditioned_actor"),
                     event_string("variant", "steadytray"),
+                    event_int("publish_count", publish_count.load()),
                     event_int("policy_deadline_miss", policy_deadline_miss),
-                    event_int("publish_deadline_miss", publish_deadline_miss)});
+                    event_int("publish_deadline_miss", publish_deadline_miss.load()),
+                    event_number("max_publish_interval_ms",
+                                 max_publish_interval_ms.load())});
     if (!args_.no_damping_on_stop) dds.publish_damping();
     if (dds.safety_failed()) throw std::runtime_error("CommandSafetyFilter stopped SteadyTray publishing");
     std::cout << "[generic_sensor_policy_player][steadytray] stopped\n";

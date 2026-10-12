@@ -9,7 +9,6 @@
 #include "action_go/runtime/policy_protocol.h"
 #include "action_go/runtime/prearm_command.h"
 #include "action_go/runtime/reference_endpoint.h"
-#include "action_go/runtime/recovery_arm_gate.h"
 #include "action_go/runtime/sonic_planner.h"
 #include "action_go/runtime/sonic_policy.h"
 
@@ -126,49 +125,6 @@ void test_async_command_publisher() {
                [&] { failing.rethrow_if_failed(); });
 }
 
-void test_recovery_arm_gate() {
-  using action_go::runtime::RecoveryArmGate;
-  using Clock = RecoveryArmGate::Clock;
-  RecoveryArmGate gate({57.3, std::chrono::milliseconds(60),
-                        std::chrono::milliseconds(500)});
-  const auto t0 = Clock::time_point(std::chrono::seconds(10));
-
-  gate.arm("bfm_zero_stand");
-  expect_true("recovery ARM selects primary backend",
-              gate.armed() && gate.recovery_backend() == "bfm_zero_stand");
-  expect_true("upright ARM does not trigger",
-              !gate.observe(true, 0.0, t0, t0));
-  expect_true("fall below debounce does not trigger",
-              !gate.observe(true, 60.0, t0, t0 + std::chrono::milliseconds(59)));
-  expect_true("fall debounce triggers at 60ms",
-              gate.observe(true, 60.0, t0, t0 + std::chrono::milliseconds(119)));
-  expect_true("fall debounce triggers only once",
-              !gate.observe(true, 60.0, t0, t0 + std::chrono::milliseconds(180)));
-
-  gate.arm("ufo_stand");
-  expect_true("recovery ARM preserves alternate backend",
-              gate.recovery_backend() == "ufo_stand");
-  expect_true("alternate ARM starts a fresh debounce",
-              !gate.observe(true, 60.0, t0, t0 + std::chrono::milliseconds(200)));
-  expect_true("tilt recovery resets debounce",
-              !gate.observe(true, 10.0, t0, t0 + std::chrono::milliseconds(240)));
-  expect_true("fall after tilt reset starts over",
-              !gate.observe(true, 60.0, t0, t0 + std::chrono::milliseconds(250)));
-  expect_true("invalid IMU resets debounce",
-              !gate.observe(false, 60.0, t0, t0 + std::chrono::milliseconds(300)));
-  expect_true("fall after invalid IMU starts over",
-              !gate.observe(true, 60.0, t0, t0 + std::chrono::milliseconds(310)));
-  expect_true("non-finite tilt resets debounce",
-              !gate.observe(true, std::numeric_limits<double>::quiet_NaN(), t0,
-                            t0 + std::chrono::milliseconds(320)));
-  expect_true("fall after non-finite tilt starts over",
-              !gate.observe(true, 60.0, t0, t0 + std::chrono::milliseconds(330)));
-  expect_true("stale IMU resets debounce",
-              !gate.observe(true, 60.0, t0, t0 + std::chrono::milliseconds(600)));
-  expect_true("fresh sample after stale IMU starts over",
-              !gate.observe(true, 60.0, t0 + std::chrono::milliseconds(601),
-                            t0 + std::chrono::milliseconds(601)));
-}
 
 int g_failures = 0;
 
@@ -994,7 +950,6 @@ int main() {
   try {
     test_activation_blend();
     test_async_command_publisher();
-    test_recovery_arm_gate();
     test_policy_contract();
     test_policy_protocol_constraints();
     test_command_safety_filter();

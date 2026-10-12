@@ -76,16 +76,17 @@ SHELL_IDLE
 - 不切 UserCtrl
 - 不接管机器人
 
-按 `Start` 或 `Left+B` 只会进入 ARM 状态、选择 recovery backend，并启用动作和
-IMU safety 监控。ARM 本身不会切 `UserCtrl`、不会调用 7110，也不会启动 BFM/UFO
-payload；机器人保持当前官方模式。只有有效 IMU 倾角连续达到配置阈值满 60 ms，
-才进入 recovery。
+按 `Start` 或 `Left+B` 进入 ARM 状态、选择 recovery backend，并启用动作和
+IMU safety 监控。IMU 有效且倾角不低于 `recover_angle_deg`（默认 30°）时，
+立即启动所选 BFM/UFO recovery，通过既有 ready/start 交接切入 `UserCtrl`。
+低于该阈值或 IMU 无效时只 enable，机器人保持当前官方模式。
+动作正在运行时 ARM 请求会被忽略。
 
 ## 默认遥控按键
 
 ```text
-Start         -> ARM，选择 bfm_zero_stand，启用动作/safety；不立即启动策略
-Left+B        -> ARM，选择备用 ufo_stand；不立即启动策略
+Start         -> ARM，选择 bfm_zero_stand；IMU 有效且倾角 >=30° 时立即恢复
+Left+B        -> ARM，选择备用 ufo_stand；IMU 有效且倾角 >=30° 时立即恢复
 R2+A          -> 停止当前模型，切官方 walkrun，回到 SHELL_IDLE/睡眠态，程序不退出
 Select+Start  -> 切官方 passive，回到 SHELL_IDLE，程序不退出
 
@@ -123,34 +124,38 @@ Instinct parkour 保持官方的 `inference_hz=50`、不做策略帧间插值且
 逻辑：
 
 ```text
-ARM 后的任意动作/官方 walkrun 中
+ARM 后启用 supervisor IMU safety 的动作/官方 walkrun 中
   -> 检测倾角 >= fall_angle_deg 持续 fall_hold_ms
-  -> 中断当前动作，不先切回官方
-  -> 启动 bfm_zero_stand
-  -> 站稳 recover_hold_ms 后切回 walkrun
+  -> 中断当前动作，切官方阻尼，回到未使能外壳
+  -> 默认等待操作员按 Start/Left+B 人工请求恢复
+  -> 若 safety_auto_recovery=true，阻尼后自动启动所选 recovery
+
+人工 ARM：IMU 有效且倾角 >= recover_angle_deg
+  -> 立即启动所选 recovery，不等待 fall_hold_ms
+  -> 恢复期间忽略普通摔倒角度中断；payload 失败则阻尼
+  -> 新鲜 IMU 倾角 <= recover_angle_deg 稳定 recover_hold_ms 后切回 walkrun
 ```
 
 配置：
 
 ```yaml
 safety_enable: true
+safety_auto_recovery: false
 safety_action: bfm_zero_stand
 safety_return_mode: walkrun
 fall_angle_deg: 57.3
-recover_angle_deg: 20.0
+recover_angle_deg: 30.0
 fall_hold_ms: 60
-recover_hold_ms: 200
+recover_hold_ms: 1200
 safety_cooldown_ms: 1000
 ```
 
-倾角回落到阈值以下、IMU 无效或 IMU 时间戳超过 500 ms 都会清空 60 ms 计时；恢复
-新鲜数据后必须重新连续计满。即使按 ARM 时机器人已经倾倒，也不会绕过去抖直接启动
-recovery。一次持续超阈值只触发一次，恢复完成后才重新启用下一次触发。
-
-远端配置还支持 `safety_auto_recovery`。默认值为 `false`：跌倒后进入阻尼并保持
-未使能，等待操作员重新 ARM；只有显式设为 `true` 时，阻尼后才允许自动启动当前
-选择的 recovery backend。无论开关如何设置，IMU 必须有效且未过期，不能用一次
-失真的遥测样本绕过 debounce gate。
+ARM 与恢复沿用 Vincent `feature` 的行为：人工 ARM 只检查 IMU 有效和恢复角度，
+不检查样本年龄，不等待摔倒去抖，也不受 `safety_auto_recovery` 限制；倾角超过
+`fall_angle_deg` 仍允许人工恢复。普通摔倒监控跳过无效或超过 500 ms 的 IMU，
+保留已有摔倒计时；倾角回落到摔倒阈值以下、禁用动作 safety、冷却期或状态重置
+才清空摔倒计时。恢复回 walkrun 的计时遇到无效、过期或高于恢复阈值的 IMU
+会清空，必须重新站稳满 1200 ms。恢复失败后进入阻尼，等待操作员再次 ARM。
 
 ## Generic 策略启动平滑与发布线程
 

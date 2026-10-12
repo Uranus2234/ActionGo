@@ -29,7 +29,7 @@ bindings:
 
 # 外壳模式：
 # 启动 action_go_remote_test 后默认只监听遥控器，不启用动作/safety，不接管机器人。
-# Start/Left+B 只进入“运行态”并启用动作与 IMU safety；仅检测到摔倒后才运行对应 stand recovery。
+# Start/Left+B 启用动作与 IMU safety；IMU 有效且倾角不低于 recover_angle_deg 时立即运行所选 stand recovery，否则仅 enable。
 # Select+Start 立即切官方阻尼并回到外壳态，程序保持运行。
 # R2+A 无论当前是否在跑模型，都会停止当前模型、切回官方 walkrun，并回到外壳/睡眠态。
 shell_start: Start

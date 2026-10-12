@@ -111,9 +111,9 @@ Only proceed after the strict asset and schema gates pass, the action-specific s
 ACTION_GO_NET=<robot-network-interface> tools/launch/start_safe.sh
 ```
 
-The supervisor starts in `SHELL_IDLE`: it listens but does not take ownership. Confirm that the robot is already in official walkrun or damping before arming. `Start` selects BFM recovery and `Left+B` selects UFO recovery; both enable actions and IMU monitoring without immediately starting a policy or switching to UserCtrl. `R2+A` stops the current action, returns to official walkrun, and enters `SHELL_IDLE`. `Select+Start` stops the current action, forces official damping, and enters `SHELL_IDLE`.
+The supervisor starts in `SHELL_IDLE`: it listens but does not take ownership. Confirm that the robot is already in official walkrun or damping before arming. `Start` selects BFM recovery and `Left+B` selects UFO recovery. Both enable actions and IMU monitoring; if the IMU is valid and tilt is at or above `30 deg`, ARM immediately starts the selected recovery policy through the ready/start handoff. Below `30 deg`, ARM only enables monitoring and preserves the official mode. `R2+A` stops the current action, returns to official walkrun, and enters `SHELL_IDLE`. `Select+Start` stops the current action, forces official damping, and enters `SHELL_IDLE`.
 
-With the checked-in defaults, a fresh IMU tilt at or above `57.3 deg` for `60 ms` triggers damping during supervised operation. Automatic recovery is disabled (`safety_auto_recovery: false`); pressing ARM again only re-enables monitoring. When automatic recovery is explicitly enabled, the selected recovery policy runs after damping; tilt at or below `30 deg` for `1200 ms` permits a return to walkrun. Recovery failure enters damping. The recovery policy is exempt from the normal fall-angle interruption while getting up.
+With the checked-in defaults, a fresh IMU tilt at or above `57.3 deg` for `60 ms` triggers damping during supervised operation. Automatic recovery is disabled (`safety_auto_recovery: false`); press ARM again to request manual recovery when tilt is at or above `30 deg`. Manual ARM recovery does not require the fall debounce or automatic recovery setting. When automatic recovery is explicitly enabled, the selected recovery policy runs after damping. During either recovery path, fresh IMU tilt at or below `30 deg` for `1200 ms` permits a return to walkrun. Recovery failure enters damping. The recovery policy is exempt from the normal fall-angle interruption while getting up.
 
 ### Default Remote Map
 
@@ -121,8 +121,8 @@ Arm first with `Start` or `Left+B`, then use an action binding. The checked-in d
 
 | Buttons | Result |
 |---|---|
-| `Start` | ARM with `bfm_zero_stand`; enable actions and IMU safety |
-| `Left+B` | ARM with alternate `ufo_stand` recovery backend |
+| `Start` | ARM with `bfm_zero_stand`; valid IMU tilt at or above `30 deg` starts recovery |
+| `Left+B` | ARM with `ufo_stand`; valid IMU tilt at or above `30 deg` starts recovery |
 | `R2+A` | Stop the current action, return to official walkrun, enter `SHELL_IDLE` |
 | `Select+Start` | Stop the current action, enter official passive/damping, enter `SHELL_IDLE` |
 | `R2+Down` | `kick_right` |

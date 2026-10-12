@@ -46,7 +46,9 @@ ACTION_GO_NET=lo tools/launch/start_dry_run.sh
 ACTION_GO_NET=<机器人网卡> tools/launch/start_safe.sh
 ```
 
-程序默认停在 `SHELL_IDLE`，不会立即接管。确认机器人已在官方 walkrun 或 damping 后再 ARM。`Start`/`Left+B` 只选择 recovery backend 并启用监控，不切 `UserCtrl`、不启动 BFM/UFO；新鲜 IMU 倾角连续不低于 `57.3 deg` 满 `60 ms` 后进入阻尼和 `SHELL_IDLE`。默认 `safety_auto_recovery: false`，再次 ARM 只重新启用监控；显式开启自动恢复后才在阻尼后运行所选策略，倾角不高于 `30 deg` 稳定 `1200 ms` 后切回 walkrun。恢复策略运行时不参与普通摔倒角度中断，运行失败则进入阻尼。`R2+A` 停止动作并回官方 walkrun，`Select+Start` 强制进入 passive/damping。OmniXtreme、SteadyTray、部分 BeyondMimic/UFO 恢复动作和 unitree_rl_mjlab 默认关闭 supervisor IMU interruption，必须在更强物理保护下单独审核。
+程序默认停在 `SHELL_IDLE`，不会立即接管。确认机器人已在官方 walkrun 或 damping 后再 ARM。`Start` 选择 BFM，`Left+B` 选择 UFO；按键时 IMU 有效且倾角不低于 `30 deg`，立即通过 ready/start 交接启动所选恢复策略；低于该阈值只启用动作和 IMU 监控，保持官方模式。
+
+普通监控中，倾角不低于 `57.3 deg` 达 `60 ms` 后进入阻尼和 `SHELL_IDLE`。默认 `safety_auto_recovery: false`，需要操作员再次 ARM 请求恢复；人工 ARM 恢复不受自动恢复开关、摔倒去抖或摔倒角度上限限制。显式开启自动恢复后，检测到摔倒会在阻尼后自动运行所选策略。两种恢复路径均在新鲜 IMU 倾角不高于 `30 deg` 稳定 `1200 ms` 后切回 walkrun。恢复策略运行时不参与普通摔倒角度中断，运行失败则进入阻尼。`R2+A` 停止动作并回官方 walkrun，`Select+Start` 强制进入 passive/damping。OmniXtreme、SteadyTray、部分 BeyondMimic/UFO 恢复动作和 unitree_rl_mjlab 默认关闭 supervisor IMU interruption，必须在更强物理保护下单独审核。
 
 ### 默认遥控按键
 
@@ -54,8 +56,8 @@ ACTION_GO_NET=<机器人网卡> tools/launch/start_safe.sh
 
 | 按键 | 行为 |
 |---|---|
-| `Start` | 使用 `bfm_zero_stand` ARM，启用动作和 IMU safety；不立即启动策略 |
-| `Left+B` | 使用备用 `ufo_stand` recovery backend ARM；不立即启动策略 |
+| `Start` | 使用 `bfm_zero_stand` ARM；IMU 有效且倾角 ≥30° 时立即启动恢复 |
+| `Left+B` | 使用 `ufo_stand` ARM；IMU 有效且倾角 ≥30° 时立即启动恢复 |
 | `R2+A` | 停止当前动作，回官方 walkrun，进入 `SHELL_IDLE` |
 | `Select+Start` | 停止当前动作，进入官方 passive/damping 和 `SHELL_IDLE` |
 | `R2+Down` | `kick_right` |

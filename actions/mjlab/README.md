@@ -64,10 +64,11 @@ ACTION_GO_NET=enP8p1s0 tools/launch/start_safe.sh
 
 1. 程序启动后处于 `SHELL_IDLE`，不会接管机器人。
 2. 按一次 `Start` 选择 BFM recovery backend 并 ARM；也可以用 `Left+B`
-   选择 UFO backend。ARM 只启用动作和 IMU 监控，不立即启动 stand 或接管控制。
+   选择 UFO backend。IMU 有效且倾角不低于 `30°` 时立即启动所选 stand；
+   低于该阈值只启用动作和 IMU 监控，保持官方模式。
 3. 新鲜 IMU 倾角不低于 `57.3°` 持续 `60 ms` 后，safety 自动阻尼并回到
-   `SHELL_IDLE`；自动 recovery 默认关闭。再次 ARM 只重新启用监控。
-   显式启用自动 recovery 后才在阻尼后运行所选 stand；倾角不高于 `30°`
+   `SHELL_IDLE`；自动 recovery 默认关闭。再次 ARM 可人工请求所选 stand，
+   不受自动 recovery 开关限制。显式启用自动 recovery 后会在阻尼后自动恢复；倾角不高于 `30°`
    稳定 `1200 ms` 后切回 walkrun。恢复或其他动作运行期间，新动作按键会被忽略。
 4. 平地动作：先按住 `Up`，再按一下 `X`，随后松开两键。
 5. 地形动作：先按住 `Up`，再按一下 `A`，随后松开两键。

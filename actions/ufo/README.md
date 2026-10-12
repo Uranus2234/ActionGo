@@ -4,9 +4,10 @@ UFO 是当前 ActionGo 中启用的 Unitree G1 29DoF latent-conditioned policy�
 它通过 `generic_policy_player` 部署，支持固定 reward prompt、时序 tracking
 latent，以及用于倾倒恢复的固定 stand prompt。
 
-`actions/bfm0` 与 `actions/ufo` 当前同时注册。`Start` ARM 后运行
-`bfm_zero_stand`，`Left+B` ARM 后运行 `ufo_stand`；两者恢复直立后都会切回
-walkrun，之后发生倾倒时继续使用该 ARM 入口选择的 stand backend。
+`actions/bfm0` 与 `actions/ufo` 当前同时注册。`Start` 选择 `bfm_zero_stand`，
+`Left+B` 选择 `ufo_stand`；IMU 有效且倾角不低于 30° 时 ARM 立即运行所选恢复，
+否则只启用动作和监控。两者站稳后都会切回 walkrun。默认后续倾倒只进入阻尼，
+等待再次 ARM；显式启用自动恢复时才自动运行所选 stand backend。
 
 ## 模型协议
 
@@ -194,8 +195,8 @@ ACTION_GO_NET=enP8p1s0 tools/launch/start_safe.sh
 
 | 按键 | 功能 |
 |---|---|
-| `Start` | ARM，并运行 `bfm_zero_stand` |
-| `Left + B` | ARM，并运行 `ufo_stand` |
+| `Start` | ARM；IMU 有效且倾角 ≥30° 时运行 `bfm_zero_stand` |
+| `Left + B` | ARM；IMU 有效且倾角 ≥30° 时运行 `ufo_stand` |
 | `Left + A` | 启动 `ufo_tracking_zs7` |
 | `R2 + A` | 停止动作，切回官方 walkrun，返回 shell |
 | `Select + Start` | 停止动作，切入 passive/damping，返回 shell |
@@ -206,6 +207,7 @@ ACTION_GO_NET=enP8p1s0 tools/launch/start_safe.sh
 
 ```yaml
 safety_enable: true
+safety_auto_recovery: false
 shell_start: Start
 shell_start_action: bfm_zero_stand
 shell_start_alt: Left+B
@@ -213,7 +215,7 @@ shell_start_alt_action: ufo_stand
 safety_action: bfm_zero_stand
 safety_return_mode: walkrun
 fall_angle_deg: 57.3
-recover_angle_deg: 20.0
+recover_angle_deg: 30.0
 fall_hold_ms: 60
 recover_hold_ms: 1200
 safety_cooldown_ms: 1000
@@ -226,18 +228,19 @@ safety_cooldown_ms: 1000
 ```text
 按 Start
   -> ARM ActionGo
-  -> 运行 bfm_zero_stand
-  -> 后续倾倒继续使用 bfm_zero_stand
+  -> IMU 有效且倾角 >=30° 时运行 bfm_zero_stand，否则仅 enable
 
 按 Left+B
   -> ARM ActionGo
-  -> 运行 ufo_stand
-  -> 后续倾倒继续使用 ufo_stand
+  -> IMU 有效且倾角 >=30° 时运行 ufo_stand，否则仅 enable
 
 倾角 >= 57.3° 持续 60ms
   -> 中断当前动作或官方 walkrun
-  -> 启动当前 ARM 入口选择的 stand backend
-  -> 倾角 <= 20° 稳定 1200ms
+  -> 进入阻尼，默认等待操作员再次 ARM
+  -> 自动恢复开启时才自动启动当前选择的 stand backend
+
+恢复运行中
+  -> 新鲜 IMU 倾角 <=30° 稳定 1200ms
   -> 切回官方 walkrun
 ```
 

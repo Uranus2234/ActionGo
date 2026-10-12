@@ -1,6 +1,5 @@
 #include "action_go/motion_action_controller.h"
 #include "action_go/runtime/network_command.h"
-#include "action_go/runtime/recovery_arm_gate.h"
 #include "action_go/runtime/bridge_gate.h"
 #include "action_go/runtime/bridge_risk_monitor.h"
 
@@ -894,7 +893,9 @@ int main(int argc, char** argv) {
 
     enum class SafetyState { Normal, Recovering, Damped };
     SafetyState safety_state = SafetyState::Normal;
+    bool fall_timer_active = false;
     bool recover_timer_active = false;
+    auto fall_since = std::chrono::steady_clock::now();
     auto recover_since = std::chrono::steady_clock::now();
     auto last_safety_finish = std::chrono::steady_clock::now() -
         std::chrono::milliseconds(std::max(0, args.remote.safety.cooldown_ms));
@@ -915,10 +916,6 @@ int main(int argc, char** argv) {
                 << " provider=" << bridge_risk->risk_percent() << " B=" << args.b_action << std::endl;
     }
     std::string selected_safety_action = args.remote.safety.action;
-    action_go::runtime::RecoveryArmGate recovery_arm_gate({
-        args.remote.safety.fall_angle_deg,
-        std::chrono::milliseconds(args.remote.safety.fall_hold_ms),
-        std::chrono::milliseconds(500)});
 
     auto requestAction = [&](const std::string& action,
                              std::chrono::steady_clock::time_point when,
@@ -977,6 +974,7 @@ int main(int argc, char** argv) {
 
     auto startSafetyRecovery = [&](double tilt_deg) {
       scheduled_action.clear();
+      fall_timer_active = false;
       recover_timer_active = false;
       std::cerr << "[action_go_remote_test][safety] robot fallen: tilt="
                 << tilt_deg << " deg >= " << args.remote.safety.fall_angle_deg
@@ -1060,71 +1058,39 @@ int main(int argc, char** argv) {
       if (controller.isRunning()) {
         const std::string current = controller.currentAction();
         if (!current.empty() && !controller.actionSafetyEnabled(current)) {
-          recovery_arm_gate.reset_debounce();
+          fall_timer_active = false;
           recover_timer_active = false;
           return;
         }
       }
 
-      // Invalid or stale samples must not allow a fall/recovery hold timer to
-      // bridge a telemetry gap.  A later valid sample starts a new hold.
-      if (!imu.valid || imu.stamp.time_since_epoch().count() == 0 ||
-          now - imu.stamp > std::chrono::milliseconds(500)) {
-        recovery_arm_gate.reset_debounce();
-        recover_timer_active = false;
+      if (!imu.valid) return;
+      if (now - imu.stamp > std::chrono::milliseconds(500)) return;
+
+      const bool fallen = imu.tilt_deg >= args.remote.safety.fall_angle_deg;
+      recover_timer_active = false;
+      if (now - last_safety_finish <
+          std::chrono::milliseconds(std::max(0, args.remote.safety.cooldown_ms))) {
+        fall_timer_active = false;
         return;
       }
-
-      const bool upright = imu.tilt_deg <= args.remote.safety.recover_angle_deg;
-
-      if (safety_state == SafetyState::Normal) {
-        recover_timer_active = false;
-        if (now - last_safety_finish < std::chrono::milliseconds(std::max(0, args.remote.safety.cooldown_ms))) {
-          recovery_arm_gate.reset_debounce();
-          return;
-        }
-        if (recovery_arm_gate.observe(imu.valid, imu.tilt_deg, imu.stamp, now)) {
-          startSafetyRecovery(imu.tilt_deg);
-        }
+      if (!fallen) {
+        fall_timer_active = false;
         return;
       }
-
-      // Recovering: keep BFM-Zero alive until the IMU is stable upright.
-      ensureSafetyRecoveryRunning("recovering_watchdog");
-
-      if (!upright) {
-        recover_timer_active = false;
-        return;
+      if (!fall_timer_active) {
+        fall_since = now;
+        fall_timer_active = true;
       }
-      if (!recover_timer_active) {
-        recover_since = now;
-        recover_timer_active = true;
-      }
-      if (now - recover_since < std::chrono::milliseconds(std::max(0, args.remote.safety.recover_hold_ms))) {
-        return;
-      }
-
-      std::cout << "[action_go_remote_test][safety] recovered upright: tilt="
-                << imu.tilt_deg << " deg <= " << args.remote.safety.recover_angle_deg
-                << " deg, switch back to " << args.remote.safety.return_mode << std::endl;
-      if (controller.stopAndSwitchToOfficial(args.remote.safety.return_mode)) {
-        active_action.clear();
-        scheduled_action.clear();
-        safety_state = SafetyState::Normal;
-        recovery_arm_gate.reset_debounce();
-        recover_timer_active = false;
-        last_safety_finish = now;
-        last_status = controller.update();
-      } else {
-        std::cerr << "[action_go_remote_test][safety] switch back warning: "
-                  << controller.lastError() << std::endl;
-        recover_timer_active = false;
+      if (now - fall_since >=
+          std::chrono::milliseconds(std::max(0, args.remote.safety.fall_hold_ms))) {
+        startSafetyRecovery(imu.tilt_deg);
       }
     };
 
     auto resetSafetyState = [&]() {
       safety_state = SafetyState::Normal;
-      recovery_arm_gate.reset_debounce();
+      fall_timer_active = false;
       recover_timer_active = false;
       last_safety_finish = std::chrono::steady_clock::now() -
           std::chrono::milliseconds(std::max(0, args.remote.safety.cooldown_ms));
@@ -1236,15 +1202,20 @@ int main(int argc, char** argv) {
       }
       shell_armed = true;
       selected_safety_action = recovery_action.empty() ? args.remote.safety.action : recovery_action;
-      recovery_arm_gate.arm(selected_safety_action);
       scheduled_action.clear();
       resetSafetyState();
+      const ImuSample imu = remote.imu();
       std::cout << "[action_go_remote_test][shell] ARMED by " << source
-                << ": actions and IMU fall monitoring enabled, recovery="
+                << ": actions and IMU safety enabled, recovery="
                 << selected_safety_action << std::endl;
-      // ARM only enables the shell and chooses the recovery backend.  The
-      // debounced IMU path is the sole transition into recovery.
-      safety_state = SafetyState::Normal;
+      fall_timer_active = false;
+      recover_timer_active = false;
+      if (imu.valid && imu.tilt_deg >= args.remote.safety.recover_angle_deg) {
+        safety_state = SafetyState::Recovering;
+        std::cout << "[action_go_remote_test][shell] tilt=" << imu.tilt_deg
+                  << " deg, starting selected recovery action" << std::endl;
+        ensureSafetyRecoveryRunning("arm:" + source);
+      }
     };
 
     auto startLieAction = [&](const std::string& source) {

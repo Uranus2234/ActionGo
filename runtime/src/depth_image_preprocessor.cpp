@@ -46,4 +46,35 @@ std::vector<float> preprocess_php_depth(const std::vector<float>& depth_m) {
   return output;
 }
 
+std::vector<float> preprocess_pbfm_depth(const std::vector<float>& optical_z_m) {
+  if (optical_z_m.size() != 36 * 64) throw std::runtime_error("P-BFM raw optical-Z must be 36x64 metres");
+  std::vector<float> cropped(18 * 32);
+  for (int row = 0; row < 18; ++row) {
+    for (int column = 0; column < 32; ++column) {
+      const float raw = optical_z_m[(row + 18) * 64 + column + 16];
+      cropped[row * 32 + column] = std::isfinite(raw) && raw > 0.f ? std::min(raw, 2.5f) : 2.5f;
+    }
+  }
+  const float edge = std::exp(-0.5f);
+  const float total = 1.f + 2.f * edge;
+  const float weights[3]{edge / total, 1.f / total, edge / total};
+  const auto reflect = [](int index, int size) {
+    return index < 0 ? -index : index >= size ? 2 * size - 2 - index : index;
+  };
+  std::vector<float> output(18 * 32, 0.f);
+  for (int row = 0; row < 18; ++row) {
+    for (int column = 0; column < 32; ++column) {
+      float blurred = 0.f;
+      for (int offset_row = 0; offset_row < 3; ++offset_row) {
+        for (int offset_column = 0; offset_column < 3; ++offset_column) {
+          blurred += (weights[offset_row] * weights[offset_column]) *
+              cropped[reflect(row + offset_row - 1, 18) * 32 + reflect(column + offset_column - 1, 32)];
+        }
+      }
+      output[row * 32 + column] = std::nearbyint(std::clamp(blurred, 0.f, 2.5f) / 2.5f * 255.f) / 255.f;
+    }
+  }
+  return output;
+}
+
 }

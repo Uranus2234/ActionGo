@@ -165,6 +165,402 @@ index f66b13c..6d685fe 100644
  See the [Holosoma inference guide](https://github.com/amazon-far/holosoma/blob/jinkunc/php-release-port/src/holosoma_inference/README.md)
  for supported systems and runtime dependencies. This standalone route uses
  Holosoma's local simulator bridge and depth shared memory; it does not require
+diff --git a/docs/ACTIONGO_INTEGRATION_PLAN.md b/docs/ACTIONGO_INTEGRATION_PLAN.md
+new file mode 100644
+--- /dev/null
++++ b/docs/ACTIONGO_INTEGRATION_PLAN.md
+@@ -0,0 +1,139 @@
++# PHP 接入 ActionGo 计划
++
++日期：2026-10-10。目标为同级 `../action_go`，首个接入对象是公开的
++`student-assets-v1` D435i locomotion 双模型。ActionGo 接入已实现，平地仿真与官方
++数值对照已修正；仅限仿真的官方目标角配置已完成两次全场12/12阶梯通过。
++真机阶段尚未开始。正式与仿真配置现共用pd_torque，在物理目标限位内补偿
++官方饱和PD力矩；RealSense与双IMU接口已接入，实际硬件采集仍待执行。
++
++执行结果：已新增动作包、通用player的PHP variant、可复用SHM depth模块和官方
++MuJoCo/ActionGo native bridge仿真入口。`Up+B`已获用户批准并绑定。
++26个spec schema、PHP/Instinct check-only、runtime_hardening_test、
++motion_action_controller_test通过。平地无吊架28秒完成行走与站稳切回；
++1000帧官方Python对照最大action误差9.57e-7、原始target1.04e-6。
++此前对官方target也做限位的比较已撤回；阶梯543/1000帧受截断影响，最大3.976rad。
++深度缺失在ready前失败，深度中断退出后自动回walkrun。
++阶段3以完整官方阶梯场景12个障碍为验收，平地不作为完成标准。
++阶段4真机RealSense/IMU/高速/侧向与启动过渡验证仍待执行。
++视频与完整结果见 `docs/LOCAL_SIM.md`、`outputs/php_full_course_v4/`。
++
++## 接入方式
++
++复用 `depth_conditioned_actor` 模板及 `generic_sensor_policy_player`，增加 `php`
++variant；在共享 runtime 内实现 PHP 所需的观测及双 session 执行路径。
++当前该模板直接转入 Instinct runtime，必须修改分发，不能只复制 YAML 或重命名 ONNX。
++继续复用 DDS、`CommandSafetyFilter`、supervisor 与 ready/start handoff。
++
++官方 MuJoCo + 深度共享内存已验证 ActionGo C++ 推理。真机 RealSense 复用
++Instinct 的rs2 pipeline，增加已逐像素对照的PHP预处理；硬件用必需torso IMU
++提供重力姿态，pelvis gyro保持训练frame。部署步骤见ActionGo动作包README。
++
++## 已提取的部署语义
++
++以下接口尺寸和 action scale 已从本机发布模型实际读取。源路径均相对 PHP 仓库，
++ActionGo 的源路径以 `../action_go/` 开头。
++
++| 语义 | 官方来源 | 提取值 / ActionGo 应表达的字段 |
++|---|---|---|
++| 深度 session | 发布模型、`wbt_training/utils/exporter.py` | `depth_image: float32[1,58,87]` → `depth_latent: float32[1,32]`；显式配置 session 路径、名称和形状 |
++| 学生 session | 发布模型 | `obs: float32[1,140]`、`time_step: float32[1,1]` → `actions: float32[1,29]`；包含六项额外参考输出 |
++| 学生观测布局 | Holosoma `config/config_values/observation.py`、`policies/depth_distillation.py` | `[actions(29), base_ang_vel(3), dof_pos(29), dof_vel(29), torso_gravity(3), command(15), latent(32)]`，history=1 |
++| 观测处理 | Holosoma `policies/base.py`、`depth_distillation.py` | `dof_pos=q-default_q`，各项 scale=1；上一帧 action 保持模型关节顺序，不额外加 normalizer |
++| time_step | Holosoma `DepthDistillationPolicy.prepare_obs_for_rl` | 官方学生部署每 tick 输入 float32 零，不递增舞蹈帧；额外参考输出不作为直接关节目标 |
++| 方向指令 | Holosoma `DepthDistillationPolicy.CMD_CODES` | stand=0；低速前/左45/左90/右45/右90=1..5；高速对应=6..10；back=11；15 维 one-hot |
++| 关节顺序 | 发布模型 `joint_names`、官方 robot preset | 根据名称生成 model↔motor 映射；模型反馈 action 用 model order，最终目标用 motor order |
++| 策略输出 | 发布模型、Holosoma `rl_inference`、`BasePolicy.policy_action` | action clip 为 `[-100,100]`；发布模型逐关节 scale 均为 1；`q_target=default_q+scale*action` |
++| 默认姿态 | 官方 `g1_29dof_wbt_distillation` / `BasePolicy` | 部署 default q 来自 robot config；启动 stiff pose 单独配置，不能将两者混用 |
++| PD 参数 | Holosoma `config/config_values/robot.py` | 官方配置 `motor_kp/motor_kd` 优先于模型 metadata；完整数组在配置快照中 |
++| 躯干重力 | Holosoma `_get_anchor_quat` | 仿真 pelvis quaternion 乘 waist yaw/roll/pitch 得到 torso quaternion；真机确认 torso IMU frame，防止重复补偿 |
++| 相机 | Holosoma `config_values/wbt/g1/sensor.py` | torso mount `(0.01,0.01,0.44)`，训练姿态 roll/pitch/yaw `(1,27,1)` 度；106×60，hfov=89.5°，vfov=58.5953° |
++| 深度预处理 | Holosoma `simulator/plugins/depth_shm_plugin.py` | crop `[2:,4:-4]`；clamp `[0.3,3.0]`；bicubic+antialias→58×87；远端再截断、低于0.15视为空；归一化 `(d-0.3)/2.7-0.5` |
++| 深度传输 | Holosoma `DepthShmPlugin`、`DepthShmSensor` | `depth_img_shm`：float32 `[1,1,58,87]`，20184 bytes；传给编码器时去掉 channel 维，不重复预处理 |
++| 时序 | 官方实际运行 / 预设 | MuJoCo 500 Hz，策略 50 Hz；默认后台深度渲染10 Hz、latency_frames=0；物理帧率不等于相机帧率 |
++| 深度失效 | Holosoma depth heartbeat / task config | `ipc:///tmp/depth_img_shm.heartbeat`，warn=0.25s、stop=0.5s；仿真阶段复用官方 heartbeat 协议 |
++
++补充：当前训练侧的 `robot_anchor_projected_gravity` 字段名与官方发布部署预设
++`projected_gravity` 不同。首个接入应以实际发布模型及已跑通的官方推理路径为对照，
++通过输入快照验证布局，不能只按当前训练配置或 metadata 排序猜测。
++先前“PD 和默认姿态都从 metadata 读取”的建议需要修正：官方部署中配置覆盖它们。
++
++## 实施阶段与完成条件
++
++### 1. 固化官方对照数据
++
++导出同一时刻的机器人状态、上一帧动作、方向指令、归一化深度帧、140 维输入、
++深度 latent、原始 action 和最终 robot-order target q。保存实际使用的 default q、
++kp/kd 和 joint map。先检查 stand 和低/高速方向，再采集腰部非零角度的快照。
++
++完成条件：数据可离线重复执行，能区分观测构建、模型推理与动作解码的差异。
++这一步也补做解除吊架后的官方平地站立/行走基准。
++
++### 2. 扩展通用感知 runtime
++
++预计涉及：
++
++- `../action_go/runtime/src/policy_contract.cpp`：允许 `php` variant。
++- `../action_go/runtime/include/action_go/runtime/policy_protocol.h` 和对应实现：声明 PHP 双 session 协议。
++- `../action_go/runtime/players/generic_sensor_policy_player.cpp`：按 variant 分发 PHP 路径。
++- `../action_go/runtime/include/action_go/runtime/`、`runtime/src/`：共享 depth source、PHP observation builder、ONNX pipeline 和 action decoder；保留现有 Instinct 接口。
++- `../action_go/runtime/tools/policy_spec_schema_check.cpp`：检查 session、尺寸、映射和必要配置。
++- 必要的 CMake 源文件登记和 runtime contract 测试。
++
++实现仿真共享内存 source，支持 float32 3D 编码器输入、双输入学生、连续动作反馈及
++配置中的 startup/default pose。共享 publish 和安全路径，不新增独立的专用 player 可执行文件。
++
++完成条件：新 variant 的 schema 和 check-only 通过；相同快照的 obs、latent、action、
++target q 与官方结果数值一致，并报告具体误差；可用 float32 数值容差判断，不以 shape 通过代替语义验证。
++
++### 3. 创建动作包并跑 MuJoCo
++
++新增 `../action_go/actions/php/`：
++
++```text
++php.yaml
++README.md
++config/generic_php.yaml
++config/PHPParams.yaml
++model/depth_backbone.onnx
++model/student.onnx
++```
++
++模型通过本项目下载器获取，部署包记录其发布版本。动作暂命名 `php_locomotion`。
++在 `config/motion_actions.yaml` 注册动作，明确 prestart、ready/start、停止及 switch-back
++语义。用户已批准 `Up+B` 绑定 `php_locomotion`。
++
++仿真入口为 `run_actiongo_sim.sh`。保留官方 MuJoCo 模型及深度插件，使用 ActionGo
++现有 NativeActionGoBridge 和 SimActionManager 分开 `rt/lowcmd` 与 `rt/user_lowcmd`，
++复用 ready→门控切换→停止walkrun→start 的交接及 switch-back。
++推理来自 ActionGo C++ player；仿真 walkrun 用现有 unitree_rl_mjlab 替代内置服务。
++
++完成条件：check-only、schema、`ACTION_GO_NET=lo tools/launch/start_dry_run.sh` 通过；
++在官方同一阶梯场景无吊架穿越全部12个38/76厘米障碍，逐个记录脚踩顶面及出口，
++无跌倒、站稳后按原协议切回walkrun。仅x达到终点或绕过障碍不通过。
++
++### 4. 接入 RealSense 和机器人启动流程
++
++软件部分已完成：Instinct同款rs2 pipeline、PHP预处理（与官方逐像素误差<6e-7）、
++双IMU分工、同一pd_torque控制与缺失/断流回退；双IMU全场12/12通过。
++以下硬件采集步骤仍须实际执行。
++
++根据实际相机型号、安装位置和分辨率将真机图像转换为训练/官方部署对应的视野和
++深度分布。不把 Instinct 的裁剪、多帧 history 或归一化参数直接复用到 PHP。
++特别核对 C++ resize 与官方 PyTorch bicubic antialias 的数值偏差；若无法对齐，
++先复用 Python 深度生产端，C++ 消费预处理后的共享内存。
++
++确认 torso IMU、关节映射、default/stiff pose、PD、50 Hz inference 与发布频率。
++启动前完成模型、LowState 和深度可用性检查，再写 ready，由 supervisor 切换并写 start。
++运行中的相机失效使用已有 stop/switch-back 机制；避免沿用官方高刚度 stiff hold
++而不评估机器人上的切换效果。
++
++完成条件：相机检查和当前姿态 hold 成功；悬挂测试通过；地面站立与低速行走完成后，
++再进入障碍测试。网卡沿用Instinct的enP8p1s0（支持环境变量覆盖），按键已批准Up+B；
++实际相机mount仍需现场测量，不能从其他policy的真机通过推断PHP安装满足训练视野。
++
++## 范围与当前限制
++
++ActionGo 当前目录存在大量本地修改，接入时需保留它们，并遵循该仓库的分支要求。
++本次已修改 ActionGo 文件、经批准绑定Up+B；未启动机器人控制。
++公开双模型是 locomotion 示例；高攀爬、翻越等能力是否包含在目标模型中，需要独立确认，
++不能将论文演示能力直接作为这个模型的验收目标。
+diff --git a/docs/LOCAL_SIM.md b/docs/LOCAL_SIM.md
+new file mode 100644
+--- /dev/null
++++ b/docs/LOCAL_SIM.md
+@@ -0,0 +1,247 @@
++# 本机官方仿真配置
++
++配置日期：2026-10-10。以下命令在本机 Linux 执行环境中运行。
++
++## 已配置内容
++
++- Holosoma 子模块固定在 `4a0bf04cde5930af5ed59da797568d32be972525`。
++- 官方 `student-assets-v1` 双 ONNX 模型已由项目下载器校验，位于
++  `~/.cache/php-parkour/student/`。
++- `.venv-php-sim` 基于 `~/miniconda3/envs/hsmujoco` 创建，使用
++  `--system-site-packages`，并在本地安装本项目固定版本的 `holosoma`。
++- `.venv-php-inference` 同样基于 `~/miniconda3/envs/hsinference`，本地安装
++  `holosoma_inference`。已有环境的 editable install 未替换。
++- 根目录 `.env.local` 保存解释器、动态库和模型路径，已被 Git 忽略。
++  原有启动脚本自动读取它，无须每次设置模型路径。
++- `DISPLAY=:1` 和现有 `XAUTHORITY` 可用于本机图形桌面；SSH 会话应使用
++  可访问该桌面的环境变量。
++
++这两个虚拟环境仍依赖原有 Conda 环境和用户 site-packages；它们不是可搬迁的完整环境。
++
++## 启动
++
++从 `php_parkour` 根目录，在两个终端执行：
++
++```bash
++# 终端 1：默认阶梯地形、半球手 G1、D435i 深度相机
++bash run_php_sim.sh
++```
++
++等待出现 `DepthShmPlugin` 创建 `depth_img_shm` 的消息，然后运行：
++
++```bash
++# 终端 2：官方学生策略
++bash run_php_inference.sh
++```
++
++在 MuJoCo 窗口按 `8` 降低吊架，脚接触地面后按 `9` 解除吊架。
++在策略终端按 `]` 开始策略；`i` 返回启动姿态，`o` 进入阻尼模式。
++方向键为 `w/s/a/d/q/e`，`=` 切换速度档，`z` 清除方向指令。
++MuJoCo 窗口中 `Backspace` 重置场景。先停止策略，再停止仿真；两个终端均可用 `Ctrl-C`。
++
++平地验证可以将终端 1 改为：
++
++```bash
++bash run_php_sim.sh terrain:terrain-locomotion-plane
++```
++
++替换模型时，显式设置 `BACKBONE` 与 `STUDENT`；二者优先于 `.env.local` 的默认值。
++使用 W&B 时设置 `RUN` / `STEP`。`PHP_ENV_FILE=/dev/null` 跳过本地配置，恢复
++官方默认 Conda 激活流程。
++
++## 本次实际验证
++
++- 官方 Classic MuJoCo、阶梯地形和 D435i 相机成功启动，物理循环约 500 Hz。
++- 深度共享内存为 float32 `[1,1,58,87]`，大小 20184 字节；后台渲染 10 Hz。
++- 官方推理成功连接深度共享内存及 `lo` 上的模拟机器人。
++- 通过策略终端的 `]` 启动双模型推理，连续运行约 30 秒，策略循环约 50 Hz；
++  随后用 `i` 返回启动姿态并停止两个进程。
++- 本次验证覆盖启动、深度生产/消费、推理与控制发布链路；未完成解除吊架后的
++  地面行走或阶梯通过验证，不能据此声称跑酷行为已验收。
++- 日志在 `outputs/php-official-sim.log` 和 `outputs/php-official-inference.log`。
++- 实际 ONNX 接口及 metadata 在 `outputs/php_official_model_contract.json`，
++  官方推理预设快照在 `outputs/php_official_inference_config.json`。
++- 启动脚本相关测试中，本地配置和推理路径的 6 项通过；原有仿真参数测试仍有
++  一项已有不一致：期待值未包含启动脚本原本就存在的 `--simulator.config.sim.fps=500`。
++  根目录 `tests/` 全量结果为 30 项通过、这一项失败；Shell 语法与 `git diff --check` 通过。
++
++## ActionGo C++ 推理仿真
++
++ActionGo 动作包位于同级 `actions/php/`，已批准按键 `Up+B`。
++从本仓库运行：
++
++```bash
++bash run_actiongo_sim.sh
++```
++
++该入口显示官方 MuJoCo 模型，但由 ActionGo C++双模型推理发布命令。
++复用 ActionGo 的 NativeActionGoBridge/SimActionManager，保留两条DDS命令topic：
++walkrun=`rt/lowcmd`，PHP=`rt/user_lowcmd`。
++2秒请求PHP，ready后转交控制、写start；6秒前进。
++默认验收官方 `terrain-load-step` 的全部12个38/76厘米障碍，最长100秒。
++到达x=62米后站立，4秒后切回walkrun，再观察4秒。
++仿真驱动器根据位置/航向选择官方离散方向指令，所有动作推理由ActionGo C++完成。
++`--headless` 仅录制；吊架开启不能通过阶梯验收。
++不要与官方推理进程或另一个ActionGo仿真同时运行，它们会争用DDS和深度共享内存。
++
++本机已完成：
++
++- 平地无吊架28秒：站立→PHP行走约10米→站稳→切回walkrun，未跌倒。
++  PHP段倾角最大11.8°，切回后保持站立。录像及日志为
++  `outputs/actiongo_php_verified/simulation.mp4`、`outputs/actiongo_php_verified.log`。
++- 此前1000帧对比对官方目标角也做了物理关节限位，掩盖了最终控制差异；
++  该target一致性结论撤回。修正后的比较直接使用官方原始target。
++- 深度producer主动停止：PHP退出码1，manager自动切回walkrun，未跌倒。
++  `outputs/actiongo_php_depth_dropout/summary.json` 及对应日志保留此结果。
++- 最终版本图形窗口复测28秒：平地行走与切回成功，无跌倒；倾角最大11.74°。
++  `outputs/actiongo_php_demo/simulation.mp4`、`summary.json` 和根目录对应日志。
++- 阶梯地形 `terrain-load-step`：约12秒遇障碍后跌倒，未通过阶梯验证。
++  录像 `outputs/actiongo_php_steps/simulation.mp4`；不能将此结果表述为跑酷验收。
++- 25个spec严格schema通过、PHP check-only通过、runtime_hardening_test通过。
++  motion_action_controller_test和Instinct check-only也通过。
++  supervisor重新构建后dry-run加载85个动作与remote map通过（等待模拟LowState时受控退出）。
++
++数值对照复现（仿真官方目标角语义）：
++
++```bash
++LD_LIBRARY_PATH="$HOME/miniconda3/envs/hsinference/lib" \
++  .venv-php-inference/bin/python tools/compare_actiongo_php.py \
++  outputs/php_steps_cpp_raw/trace.yaml --samples 1000
++```
++
++深度中断复现：
++
++```bash
++bash run_actiongo_sim.sh --headless --terrain terrain-locomotion-plane --duration 14 --stop-depth-at 8 \
++  --output "$PWD/outputs/php_depth_dropout"
++```
++
++本次未启动真实机器人。接入的startup目标/增益来自官方stiff配置，但姿态过渡复用
++ActionGo现有1秒线性过渡及0.5秒保持，与官方Python的2秒smoothstep/gain ramp不同。
++此处为早期接入状态；最新RealSense、双IMU、同控制配置的结果见末节。
++
++## 深度与阶梯专项修正
++
++官方 `BasePolicy.policy_action` 将 `default_q + clip(action,-100,100)` 直接交给PD。
++物理关节运动范围不等于PD目标范围：超出运动范围的目标仍会产生攀爬所需力矩。
++原ActionGo适配额外将target压到物理限位，1000帧阶梯快照中543帧被改变，
++最大误差3.9763rad；obs/action误差仅约1e-6，说明差异发生在动作解码后。
++
++新增 `actions/php/config/generic_php_sim.yaml`，显式使用
++`safety.command_limit_source: simulation_model_action`。
++目标仍通过共享 `CommandSafetyFilter`，限于官方clip产生的有限范围；
++有限数、LowState超时及增益约束保留。该配置只允许 `lo` 与SHM，传入其他网卡即拒绝。
++该段记录历史诊断模式。当前正式与仿真已改为末节的同一pd_torque实现，
++并重新进行全场验收；实际机器人响应仍不能据仿真结果认定。
++
++深度使用固定版本官方 `DepthShmPlugin`，106x60、D435i原安装参数、
++`[2:,4:-4]`裁剪、bicubic antialias到58x87、0.3–3m归一化，C++不二次处理。
++用官方训练 `CameraSensor` 的真实Warp射线/机器人mesh对同一MuJoCo姿态复核7个位置：
++归一化平均差约0.0099–0.0114，p95约0.0187–0.0337，存在栅格与mesh表示差异。
++结果 `outputs/php_depth_geometry/depth_geometry.json`；可通过
++`bash run_actiongo_sim.sh --headless --depth-check-only` 重做。
++训练Warp 50Hz、3帧延迟对照未通过全场，不能用此调参替代官方部署默认10Hz结果。
++
++修正后1000帧官方原方法对照：obs最大误差3.87e-7、latent4.71e-9、
++action9.57e-7、原始target1.04e-6、kp/kd=0，target改变帧数0。
++结果 `outputs/php_steps_cpp_raw/comparison.json`。
++官方Python原方法的诊断基线也无吊架越过前4个障碍到x=23.33，未跌倒。
++
++全场首次通过录像在 `outputs/php_full_course_v4/simulation_depth.mp4`，
++原录像、telemetry、depth、C++trace及summary在同目录。
++12个障碍均记录进入范围、脚踩顶面、越过出口，未跌倒，终点x=62.69、y=0.098、
++root z=0.784，按原ready/start协议接入并切回walkrun。
++最终入口独立复测 `outputs/php_stairs_acceptance_repeat/` 同样12/12通过，
++终点x=63.13、y=0.258、root z=0.783、倾角2.09°，最后一秒直立。
++复测1000帧包含stand/high-forward/左右45°：obs误差3.58e-7、action1.16e-6、
++原始target1.16e-6、kp/kd=0；target改变帧数0。
++这是两次成功运行的记录，不代表所有起始状态、传感器时序或方向输入都通过。
++右下角深度为25Hz记录的官方SHM生产端画面；实际C++消费帧保存在trace中。
++前次 `php_full_course_v2` 虽未跌倒但绕过第5个障碍，11/12，明确判失败。
++
++## 真机同控制配置复测（2026-10-10）
++
++正式 `generic_php.yaml` 与仿真 `generic_php_sim.yaml` 的robot、model、observation、
++startup、handoff、action、safety及推理/发布周期相同。
++默认采用共享 `CommandSafetyFilter.preserve_pd_torque`：每次发布按最新q/dq
++计算官方PD力矩并饱和，目标角仍在物理关节范围，截断差额用LowCmd.tau表达。
++若原增益无法同时满足目标角和feedforward限位，该次以kp=kd=0和有界tau表达。
++这是每个发布快照的合力矩等价，不声称连续时间电机响应已经在真机测量。
++其他策略不启用该选项，原有ready/start和supervisor交接保持不变。
++
++采集结果：
++
++| 运行 | 结果 |
++|---|---|
++| `outputs/php_hardware_parity_stairs/` | 第一版因高速踝关节所需补偿超出feedforward限位而退出，未通过；保留失败日志 |
++| `outputs/php_hardware_parity_stairs_v2/` | 修正表达方式后12/12、无跌倒、站稳切回；3386个最终LowCmd快照力矩最大误差1.78e-5Nm |
++| `outputs/php_hardware_dual_imu_stairs/` | 与真机相同的secondary torso IMU分支，12/12、无跌倒、站稳切回；终点(62.991,0.127,0.783)m |
++
++双IMU运行3352个最终LowCmd快照中1646个使用非零补偿，力矩误差最大1.78e-5Nm，
++全部物理目标角和feedforward限位通过。1000个官方原方法快照对照：
++obs2.39e-7、latent4.73e-9、action9.53e-7、原始target8.73e-7、静态kp/kd=0。
++这1000帧全部使用实测torso quaternion，因此官方比较方法显式跳过腰关节连乘；
++pelvis gyro保持训练frame，避免把torso角速度误当base_ang_vel。
++
++真机相机复用Instinct的rs2 pipeline：848×480 Z16@30Hz，经真实标定内参投影到
++官方106×60光线，10Hz取样，再使用C++实现的官方预处理。
++9组近/远平面、深度断面、棋盘、斜坡和随机输入，每组5046像素逐一对照官方
++`DepthShmPlugin._resize_clip_normalize`，最大误差5.97e-7。
++RealSense零读数先置far，整帧无测距不更新有效时间；3个有效帧后才就绪。
++相机视野不覆盖训练crop时明确拒绝初始化，不能靠图像拉伸掩盖视野差异。
++
++复现最终发布命令与深度验证：
++
++```bash
++.venv-php-sim/bin/python tools/check_php_hardware_parity.py \
++  --lowcmd-trace outputs/php_hardware_dual_imu_stairs/trace.yaml.lowcmd.yaml \
++  --output outputs/php_hardware_dual_imu_stairs/hardware_parity.json
++```
++
++最新录像为`outputs/php_hardware_dual_imu_stairs/simulation_depth.mp4`，右下为深度输入。
++相机仍需按官方torso安装偏移(0.01,0.01,0.44)m、RPY(1,27,1)°安装；软件不能
++保证未经测量的实体安装正确。本机启用librealsense2.57.5/RSUSB的C++分支编译通过，
++相机探测因本机无设备明确失败，没有执行真实机器人命令。
++
++`outputs/php_hardware_imu_dropout/`：8秒停止secondary IMU，约0.2秒后停止PHP，
++退出码1、自动切回walkrun，未跌倒。
++`outputs/php_hardware_missing_imu/`：初始化时无secondary IMU，PHP在ready前退出，
++零LowCmd记录、未进入UserCtrl；仿真驱动器因未完成handoff按预期返回非零。
++`outputs/php_hardware_depth_dropout/`：8秒停止深度，PHP退出码1、自动回walkrun，未跌倒。
++26个spec严格schema、PHP/Instinct模型检查、runtime_hardening_test和
++motion_action_controller_test通过；supervisor只读启动加载85个动作及按键映射。
++部署步骤与只读检查入口见同级
++`action_go/actions/php/README.md`、`action_go/tools/launch/check_php.sh`。
++验收不将攀爬时的前倾单独视为跌倒；root低于0.35m或躯干/头/骨盆接触底面即失败。
++最终要求全部障碍、无吊架、无跌倒、无异常退出、站稳与切回。
++
++复现全场与生成深度录像：
++
++```bash
++bash run_actiongo_sim.sh --headless --output "$PWD/outputs/php_stairs_acceptance"
++.venv-php-sim/bin/python tools/annotate_php_video.py outputs/php_stairs_acceptance
++```
++
++未达验收条件时入口退出码非零，并保存失败证据。
++平地仅作诊断：`--terrain terrain-locomotion-plane --duration 28`。
++
++## 本机环境重建
++
++已有两个基础 Conda 环境时，从仓库根目录执行：
++
++```bash
++git submodule update --init --recursive thirdparty/holosoma
++python scripts/download_assets.py student
++"$HOME/miniconda3/envs/hsmujoco/bin/python" -m venv --system-site-packages .venv-php-sim
++"$HOME/miniconda3/envs/hsinference/bin/python" -m venv --system-site-packages .venv-php-inference
++.venv-php-sim/bin/python -m pip install --no-deps -e ./thirdparty/holosoma/src/holosoma
++.venv-php-sim/bin/python -m pip install tyro==1.0.16 numpy==1.26.4 far-unitree-sdk==0.1.6 prettytable==3.18.0
++.venv-php-inference/bin/python -m pip install --no-deps -e ./thirdparty/holosoma/src/holosoma_inference
++.venv-php-inference/bin/python -m pip install far-unitree-sdk==0.1.6 importlib_metadata==9.0.1 six==1.17.0 PyOpenGL==3.1.10 decorator==5.3.1 pexpect==4.9.0
++```
++
++本次解决了旧 SDK 缺少 `OdomState`、缺少 `importlib_metadata`、`six` 等运行依赖，
++以及 Pinocchio 需要 Conda `libstdc++` 的问题。动态库目录由 `.env.local` 设置。
++基础环境中与本流程无关的包仍可能在 `pip check` 中报冲突，未整体升级它们。
++
++新机器没有这些基础环境时，按 `wbt_training/DEPLOY.md` 的官方安装流程创建环境。
 diff --git a/run_actiongo_sim.sh b/run_actiongo_sim.sh
 new file mode 100755
 --- /dev/null

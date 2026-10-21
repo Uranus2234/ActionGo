@@ -1,0 +1,83 @@
+name: generic_pbfm_tracking_dance
+runtime:
+  template: depth_conditioned_actor
+  variant: pbfm
+  inference_hz: 50
+  publish_hz: 500
+  onnx_threads: 2
+  warmup_steps: 0
+  target_interp_sec: 0.02
+  duration_sec: 0.0
+  dry_run_duration_sec: 1.0
+  stats_interval: 50
+robot:
+  params: PBFM.yaml
+  motor_count: 29
+model:
+  path: ../model/policy.onnx
+  input_names: [state, last_action, history_actor, heading, velocity_command, depth_image, z]
+  output_names: [action, estimated_velocity]
+observation:
+  builder: pbfm
+  obs_dim: 5334
+  state_dim: 64
+  last_action_dim: 29
+  history_dim: 372
+  history_steps: 4
+  history_timing: previous_only
+  history_reset: zero
+  history_keys: [actions, base_ang_vel, dof_pos, dof_vel, projected_gravity]
+  angular_velocity_scale: 0.25
+  latent_dim: 256
+  heading_dim: 2
+  velocity_command_dim: 3
+  depth_input_shape: [1, 8, 18, 32]
+context:
+  path: ../motions/lafan_dance_56_52_98_72/context.yaml
+  command_source: context
+sensor:
+  depth_source: realsense
+  horizontal_fov_deg: 89.51
+  vertical_fov_deg: 58.29
+  mount_position_torso_m: [0.0487988662332928, 0.01, 0.4378029937970051]
+  optical_quat_torso_xyzw: [-0.6579550475696607, 0.6623183568544073, -0.25121840449386046, 0.25558171377860706]
+  realsense:
+    width: 848
+    height: 480
+    fps: 30
+    min_frames: 3
+    min_valid_fraction: 0.20
+    startup_timeout_sec: 5.0
+  shm_name: actiongo_pbfm_depth
+  timeout_sec: 0.2
+  profile: optical_z_maxcrop18_reset_v2
+  quantity: optical_z
+  source_shape: [36, 64]
+  crop: [18, 0, 16, 16]
+  frames: 8
+  height: 18
+  width: 32
+  history_length: 37
+  sampled_ages: [35, 30, 25, 20, 15, 10, 5, 0]
+  max_distance_m: 2.5
+  invalid_fill_m: 2.5
+  gaussian_sigma: 1.0
+  depth_reset: first_valid
+  fixed_delay_frames: 0
+action:
+  type: target_q
+  action_dim: 29
+  action_rescale: 5.0
+  scale_from_params: action_scale
+  add_default: true
+  clip: [-1.0, 1.0]
+handoff:
+  cmd_topic: rt/user_lowcmd
+  state_topic: rt/lowstate
+  mode_machine: 5
+  activation_blend_sec: 1.0
+  damping_on_stop: false
+safety:
+  lowstate_timeout_sec: 0.2
+  kp_max: 300.0
+  kd_max: 20.0

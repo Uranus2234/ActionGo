@@ -20,6 +20,9 @@ jobs:
       - name: Fetch pinned ONNX Runtime
         run: tools/deps/fetch_onnxruntime.sh
 
+      - name: Install policy test dependencies
+        run: python3 -m pip install numpy PyYAML mujoco==3.8.1
+
       - name: Install Unitree SDK2
         run: |
           git clone --depth 1 https://github.com/unitreerobotics/unitree_sdk2.git /tmp/unitree_sdk2

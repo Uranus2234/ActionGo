@@ -6,7 +6,7 @@ ActionGo 源码仓库保存 runtime、配置和资产清单，第三方模型优
 
 ## 当前本地清单
 
-`MODEL_ASSETS.json` 已同步 2026-10-12 本地 `actions/` 中的 71 个模型、
+`MODEL_ASSETS.json` 已同步本地 `actions/` 中的 72 个模型、
 运动、reference、机器人 XML 和标签文件。原版 SONIC 与 v1.1 分开记录。
 清单里的校验值标识当前部署文件；`upstream_revision: unknown` 表示尚未确认
 对应资产版本，不把同级代码仓库的 commit 当成模型版本。
@@ -26,6 +26,7 @@ ActionGo 源码仓库保存 runtime、配置和资产清单，第三方模型优
 | mjlab | [MJLab](https://github.com/mujocolab/mjlab)；[包说明](../actions/mjlab/README.md) 记录本地训练 checkpoint | `actions/mjlab/model/`；当前没有这些本地导出的公开下载地址 |
 | OmniXtreme | [OmniXtreme](https://github.com/Perkins729/OmniXtreme) | 三个 ONNX 和 `actions/omnixtreme/motions/`，包含完整 motion 与各 segment |
 | PHP | [student-assets-v1](https://github.com/amazon-far/php_parkour/releases/tag/student-assets-v1) | `actions/php/model/`，两个文件的本地校验值与上游 release manifest 一致 |
+| P-BFM | [P-BFM public demo](https://github.com/Roboparty/P-BFM/tree/671fbafe71a5f58bab77eeb5d969051fd2d283f4/interactive)；[包说明](../actions/pbfm/README.md) | `actions/pbfm/model/policy.onnx`，checkpoint `364822528`；导入器保留 CC-BY-NC-4.0，文本 context 随配置提供 |
 | ProtoMotions | [ProtoMotions](https://github.com/NVlabs/ProtoMotions) | `model/unified_pipeline.onnx` 和 `motions/*.npz` |
 | SONIC | [GEAR-SONIC](https://huggingface.co/nvidia/GEAR-SONIC) | 原版在 `actions/sonic/model/`，v1.1 在 `model/sonic_v1_1/`；两版共用已记录的 V2 planner；准确资产 revision 待补 |
 | SteadyTray | [SteadyTray](https://github.com/AllenHuangGit/SteadyTray) | `model/policy_9999.onnx`；标签源图与 printable PDF 也已记录 |

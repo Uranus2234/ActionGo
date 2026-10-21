@@ -12,6 +12,9 @@ bindings:
   Up+A: reverse_vault_terrain_mjlab
   Up+Y: g1_parkour
   Up+B: php_locomotion
+  Down+A: pbfm_loco
+  Down+B: pbfm_tracking_dance
+  Down+X: pbfm_pico_teleop
   Right+X: proto_walk
   Right+Y: proto_dance
   R1+F1: holosoma_dance

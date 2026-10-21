@@ -24,6 +24,11 @@ SECRET_PATTERNS = [
 # user-home paths usually reveal a development machine or stale private layout.
 PRIVATE_PATH = re.compile(r"/(?:home|Users)/[^/\s]+/")
 
+LARGE_CONTEXT_FILES = {
+    "actions/pbfm/motions/lafan_dance/context.yaml",
+    "actions/pbfm/motions/lafan_dance_56_52_98_72/context.yaml",
+}
+
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
@@ -43,7 +48,7 @@ def main() -> int:
         if any(lowered.endswith(suffix) for suffix in FORBIDDEN_SUFFIXES):
             failures.append(f"forbidden binary/asset: {relative}")
             continue
-        if path.stat().st_size > 5 * 1024 * 1024:
+        if path.stat().st_size > 5 * 1024 * 1024 and relative.as_posix() not in LARGE_CONTEXT_FILES:
             failures.append(f"unexpected file over 5 MiB: {relative}")
             continue
         with path.open("rb") as stream:

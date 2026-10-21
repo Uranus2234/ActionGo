@@ -28,7 +28,7 @@ OpenCV 和 libzmq 用于构建 sensor player；RealSense、AprilTag、MuJoCo、R
 
 ## 模型与预检
 
-代码版不分发第三方 ONNX、运动数据、标签或预编译二进制。根据 [资产获取说明](docs/model_assets.md) 从上游取得模型或提供匹配的本地导出，再按 [MODEL_ASSETS.json](MODEL_ASSETS.json) 校验。清单已同步本地动作包的 71 个文件，包含 paoxiao、PHP、mjlab、SONIC 原版与 v1.1 及运动数据；来源不明确的 checkpoint 继续标为待补，未在本地找到的 HandoffGuard risk model 需单独提供。`blocked_pending_review` 表示 BYOW，不代表允许再分发。
+代码版不分发第三方 ONNX、运动数据、标签或预编译二进制。根据 [资产获取说明](docs/model_assets.md) 从上游取得模型或提供匹配的本地导出，再按 [MODEL_ASSETS.json](MODEL_ASSETS.json) 校验。清单已同步本地动作包的 72 个文件，包含 paoxiao、PHP、P-BFM、mjlab、SONIC 原版与 v1.1 及运动数据；来源不明确的 checkpoint 继续标为待补，未在本地找到的 HandoffGuard risk model 需单独提供。`blocked_pending_review` 表示 BYOW，不代表允许再分发。
 
 ```bash
 python3 tools/assets/check_model_assets.py --policy bfm0  # 严格检查已安装的指定动作包
@@ -70,6 +70,9 @@ ACTION_GO_NET=<机器人网卡> tools/launch/start_safe.sh
 | `Up+A` | `reverse_vault_terrain_mjlab` |
 | `Up+Y` | `g1_parkour` |
 | `Up+B` | `php_locomotion` |
+| `Down+A` | `pbfm_loco` |
+| `Down+B` | `pbfm_tracking_dance` |
+| `Down+X` | `pbfm_pico_teleop` |
 | `Right+X` | `proto_walk` |
 | `Right+Y` | `proto_dance` |
 | `R1+F1` | `holosoma_dance` |
@@ -91,6 +94,10 @@ UDP 群控默认关闭并默认绑定 `127.0.0.1`。空地址、wildcard、非 l
 SONIC 当前动作默认使用 v1.1，原版配置仍保留；v1.1 的官方 replay 和板载验收、PHP 真机阶梯验收仍待完成。Bridge/HandoffGuard 开发功能保留，需要另行提供风险模型。详见 [SONIC](actions/sonic/README.md)、[PHP](actions/php/README.md)、[mjlab](actions/mjlab/README.md) 和 [风险切换预览](docs/risk_switch_preview.md)。
 
 ## 开发者入口
+
+[P-BFM](actions/pbfm/README.md) 支持真实深度摇杆行走、离线 tracking 和 Pico UDP 全身遥操；
+文本 context 随配置提供，ONNX 通过公开模型目录导入，适用上游 CC-BY-NC-4.0。
+真机动作与 Pico 人体实流仍待验收。
 
 - [新策略接入](docs/new_policy_onboarding.md)
 - [运行时架构](docs/runtime_architecture.md)

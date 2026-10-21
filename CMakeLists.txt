@@ -401,8 +401,20 @@ if(DEFINED ACTION_GO_ONNXRUNTIME_LIB AND DEFINED ACTION_GO_ONNXRUNTIME_INCLUDE_D
     INSTALL_RPATH "$ORIGIN;$ORIGIN/../lib;${ACTION_GO_ONNXRUNTIME_DIR}/lib"
   )
 
+  set(ACTION_GO_BFM_SOURCES
+    runtime/src/bfm_context_stream.cpp
+    runtime/src/bfm_observation.cpp
+    runtime/src/bfm_action.cpp
+    runtime/src/bfm_context.cpp
+    runtime/src/pbfm_policy.cpp
+    runtime/src/depth_image_preprocessor.cpp
+    runtime/src/realsense_depth_stream.cpp
+  )
+
   add_executable(generic_policy_player
     runtime/players/generic_policy_player.cpp
+    ${ACTION_GO_BFM_SOURCES}
+    runtime/src/generic_policy_module_pbfm.cpp
     runtime/src/generic_policy_runtime.cpp
     runtime/src/generic_policy_module_self.cpp
     runtime/src/generic_policy_module_mimic.cpp
@@ -443,6 +455,8 @@ if(DEFINED ACTION_GO_ONNXRUNTIME_LIB AND DEFINED ACTION_GO_ONNXRUNTIME_INCLUDE_D
 
   add_executable(generic_motion_tracking_player
     runtime/players/generic_motion_tracking_player.cpp
+    ${ACTION_GO_BFM_SOURCES}
+    runtime/src/generic_policy_module_pbfm.cpp
     runtime/src/generic_policy_runtime.cpp
     runtime/src/generic_policy_module_self.cpp
     runtime/src/generic_policy_module_mimic.cpp
@@ -476,6 +490,11 @@ if(DEFINED ACTION_GO_ONNXRUNTIME_LIB AND DEFINED ACTION_GO_ONNXRUNTIME_INCLUDE_D
     ${ACTION_GO_NLOHMANN_JSON_TARGET}
   )
   if(LIBZMQ_FOUND)
+    target_sources(generic_policy_player PRIVATE runtime/src/shared_memory_depth_stream.cpp)
+    target_compile_definitions(generic_policy_player PRIVATE ACTION_GO_HAS_ZMQ=1)
+    target_include_directories(generic_policy_player PRIVATE ${LIBZMQ_INCLUDE_DIRS})
+    target_link_libraries(generic_policy_player ${LIBZMQ_LIBRARIES})
+    target_sources(generic_motion_tracking_player PRIVATE runtime/src/shared_memory_depth_stream.cpp)
     target_compile_definitions(generic_motion_tracking_player PRIVATE ACTION_GO_HAS_ZMQ=1)
     target_include_directories(generic_motion_tracking_player PRIVATE ${LIBZMQ_INCLUDE_DIRS})
     target_link_libraries(generic_motion_tracking_player ${LIBZMQ_LIBRARIES})
@@ -543,6 +562,9 @@ if(DEFINED ACTION_GO_ONNXRUNTIME_LIB AND DEFINED ACTION_GO_ONNXRUNTIME_INCLUDE_D
 
   add_executable(policy_spec_schema_check
     runtime/tools/policy_spec_schema_check.cpp
+    runtime/src/bfm_context.cpp
+    runtime/src/pbfm_policy.cpp
+    runtime/src/depth_image_preprocessor.cpp
     runtime/src/policy_contract.cpp
     runtime/src/policy_protocol.cpp
     runtime/src/onnx_runner.cpp
@@ -663,16 +685,27 @@ if(DEFINED ACTION_GO_ONNXRUNTIME_LIB AND DEFINED ACTION_GO_ONNXRUNTIME_INCLUDE_D
     endif()
   add_executable(generic_sensor_policy_player
       runtime/players/generic_sensor_policy_player.cpp
+      ${ACTION_GO_BFM_SOURCES}
+      runtime/src/generic_policy_runtime.cpp
+      runtime/src/generic_policy_module_self.cpp
+      runtime/src/generic_policy_module_pbfm.cpp
+      runtime/src/generic_policy_module_mimic.cpp
+      runtime/src/generic_policy_module_motion.cpp
+      runtime/src/handoff_protocol.cpp
+      runtime/src/input_freshness.cpp
+      runtime/src/onnx_runner.cpp
+      runtime/src/sonic_policy.cpp
+      runtime/src/sonic_planner.cpp
       runtime/src/policy_contract.cpp
       runtime/src/policy_protocol.cpp
       runtime/src/event_logger.cpp
       runtime/src/instinct_parkour_runtime.cpp
       runtime/src/shared_memory_depth_stream.cpp
-      runtime/src/depth_image_preprocessor.cpp
       runtime/src/steadytray_runtime.cpp
-    runtime/src/command_safety_filter.cpp
-    runtime/src/activation_blend.cpp
-    runtime/src/async_command_publisher.cpp
+      runtime/src/command_safety_filter.cpp
+      runtime/src/activation_blend.cpp
+      runtime/src/async_command_publisher.cpp
+      runtime/src/reference_endpoint.cpp
     )
     target_include_directories(generic_sensor_policy_player PRIVATE
       ${CMAKE_CURRENT_SOURCE_DIR}/runtime/include
@@ -690,7 +723,10 @@ if(DEFINED ACTION_GO_ONNXRUNTIME_LIB AND DEFINED ACTION_GO_ONNXRUNTIME_INCLUDE_D
       motion_action_onnxruntime
       ${OpenCV_LIBS}
       ${LIBZMQ_LIBRARIES}
+      ZLIB::ZLIB
+      ${ACTION_GO_NLOHMANN_JSON_TARGET}
     )
+    target_compile_definitions(generic_sensor_policy_player PRIVATE ACTION_GO_HAS_ZMQ=1)
     if(realsense2_FOUND)
       target_compile_definitions(generic_sensor_policy_player PRIVATE ACTION_GO_WITH_REALSENSE)
       if(TARGET realsense2::realsense2)
@@ -734,6 +770,16 @@ if(DEFINED ACTION_GO_ONNXRUNTIME_LIB AND DEFINED ACTION_GO_ONNXRUNTIME_INCLUDE_D
       INSTALL_RPATH "$ORIGIN;$ORIGIN/../lib;${ACTION_GO_ONNXRUNTIME_DIR}/lib"
     )
     list(APPEND ACTION_GO_ONNX_TARGETS generic_sensor_policy_player)
+    if(BUILD_TESTING AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/actions/pbfm/model/policy.onnx")
+      add_test(NAME pbfm_lifecycle_test COMMAND ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/runtime/tests/pbfm_lifecycle_test.py
+        --player $<TARGET_FILE:generic_sensor_policy_player>)
+      set_tests_properties(pbfm_lifecycle_test PROPERTIES TIMEOUT 90)
+      add_test(NAME pbfm_realtime_test COMMAND ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/runtime/tests/pbfm_realtime_test.py
+        --player $<TARGET_FILE:generic_sensor_policy_player>)
+      set_tests_properties(pbfm_realtime_test PROPERTIES TIMEOUT 45)
+    endif()
   else()
     message(WARNING "OpenCV not found; generic_sensor_policy_player target is disabled")
   endif()
@@ -746,3 +792,25 @@ add_custom_target(action_go_all ALL
   DEPENDS ${ACTION_GO_ALL_TARGETS}
 )
 message(STATUS "action_go default ALL targets: ${ACTION_GO_ALL_TARGETS}")
+
+if(BUILD_TESTING AND TARGET generic_policy_player)
+    add_executable(bfm_policy_test runtime/tests/bfm_policy_test.cpp
+      ${ACTION_GO_BFM_SOURCES} runtime/src/policy_protocol.cpp runtime/src/onnx_runner.cpp)
+    target_include_directories(bfm_policy_test PRIVATE
+      ${CMAKE_CURRENT_SOURCE_DIR}/runtime/include ${ACTION_GO_ONNXRUNTIME_INCLUDE_DIR})
+    target_link_libraries(bfm_policy_test yaml-cpp motion_action_onnxruntime ${ACTION_GO_NLOHMANN_JSON_TARGET})
+    set_target_properties(bfm_policy_test PROPERTIES BUILD_RPATH "${ACTION_GO_ONNXRUNTIME_DIR}/lib")
+    add_test(NAME bfm_policy_test COMMAND bfm_policy_test)
+    add_test(NAME pbfm_depth_test COMMAND ${Python3_EXECUTABLE}
+      ${CMAKE_CURRENT_SOURCE_DIR}/runtime/tests/pbfm_depth_test.py
+      --preprocessor $<TARGET_FILE:depth_image_preprocess>)
+    add_test(NAME pbfm_keyboard_test COMMAND ${Python3_EXECUTABLE}
+      ${CMAKE_CURRENT_SOURCE_DIR}/runtime/tests/pbfm_keyboard_test.py)
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/actions/pbfm/model/policy.onnx" AND
+       EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/actions/bfm0/model/FBcprAuxModel.onnx" AND
+       EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/actions/ufo/model/FBcprAuxModel.onnx")
+      add_test(NAME pbfm_onnx_parity COMMAND ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/runtime/tests/pbfm_onnx_parity.py --test-binary $<TARGET_FILE:bfm_policy_test>)
+      set_tests_properties(pbfm_onnx_parity PROPERTIES TIMEOUT 90)
+    endif()
+endif()

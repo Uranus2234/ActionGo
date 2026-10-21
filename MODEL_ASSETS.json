@@ -4,6 +4,20 @@
   "assets": [
     {
       "paths": [
+        "actions/pbfm/model/policy.onnx"
+      ],
+      "sha256": [
+        "42872f98404abd7a6e624b871f8b00075ad266146908965afc4dfeb2f6fc910e"
+      ],
+      "source": "https://github.com/Roboparty/P-BFM/tree/pages/interactive",
+      "upstream_revision": "671fbafe71a5f58bab77eeb5d969051fd2d283f4",
+      "upstream_code_license": "CC-BY-NC-4.0",
+      "weight_license": "CC-BY-NC-4.0 (public_demo/LICENSE)",
+      "redistribution": "blocked_pending_review",
+      "notes": "Official public demo checkpoint 364822528, assembled upstream modelParts without changing weights. Imported locally with tools/export/import_pbfm_public.py; noncommercial terms retained in the model directory."
+    },
+    {
+      "paths": [
         "actions/beyondmimic/model/hlqk.onnx",
         "actions/beyondmimic/model/kick_right.onnx",
         "actions/beyondmimic/model/lie.onnx",

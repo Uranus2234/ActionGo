@@ -1,0 +1,8 @@
+[
+  {"time": 2, "key": "W", "pressed": true},
+  {"time": 6, "key": "W", "pressed": false},
+  {"time": 10, "key": "W", "pressed": true},
+  {"time": 13, "key": "W", "pressed": false},
+  {"time": 17, "key": "W", "pressed": true},
+  {"time": 21, "key": "W", "pressed": false}
+]

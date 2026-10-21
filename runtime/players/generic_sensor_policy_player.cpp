@@ -1,4 +1,5 @@
 #include "action_go/runtime/policy_contract.h"
+#include "action_go/runtime/generic_policy_runtime.h"
 #include "action_go/runtime/event_logger.h"
 
 #include <yaml-cpp/yaml.h>
@@ -67,6 +68,7 @@ Cli parse_cli(int argc, char** argv) {
       const bool takes_value =
           k == "--net" || k == "--cmd-topic" || k == "--state-topic" ||
           k == "--ready-file" || k == "--start-file" ||
+          k == "--trace-file" || k == "--depth-shm-name" ||
           k == "--preview-file" || k == "--commit-file" ||
           k == "--depth-model" || k == "--actor-model" || k == "--variant" ||
           k == "--trace-file" || k == "--command-file" || k == "--command-index" ||
@@ -360,6 +362,10 @@ int main(int argc, char** argv) {
     tmpl = lower(scalar_or<std::string>(y["runtime"], "template", ""));
     variant = lower(scalar_or<std::string>(y["runtime"], "variant", ""));
     const PolicyContract* contract = validate_contract(tmpl, variant, spec);
+    if (variant == "pbfm") {
+      return action_go::runtime::run_generic_policy_runtime(
+          argc, argv, action_go::runtime::GenericPolicyRuntimeScope::kSensor);
+    }
     const std::string canonical_template = contract ? contract->template_name : "";
     event_log.log("spec_loaded",
                   {event_string("player", "generic_sensor_policy_player"),

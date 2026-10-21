@@ -1,6 +1,7 @@
 #include "action_go/runtime/onnx_runner.h"
 #include "action_go/runtime/policy_contract.h"
 #include "action_go/runtime/policy_protocol.h"
+#include "action_go/runtime/pbfm_policy.h"
 #include "action_go/runtime/yaml_contract.h"
 
 #include <yaml-cpp/yaml.h>
@@ -349,7 +350,8 @@ void validate_model(const fs::path& spec,
     }
   }
 
-  if (contract.id == PolicyTemplateId::kDepthConditionedActor) {
+  if (contract.id == PolicyTemplateId::kDepthConditionedActor &&
+      yamlc::required_scalar<std::string>(y, "runtime.variant") != "pbfm") {
     require_existing_path(spec, yamlc::required_scalar<std::string>(model, "logdir"), "model.logdir", true);
     if (present(yamlc::optional_node(model, "standdir"))) {
       require_existing_path(spec, yamlc::required_scalar<std::string>(model, "standdir"), "model.standdir", true);
@@ -482,7 +484,7 @@ void validate_params(const YAML::Node& y,
     require_matching_int(params, {"robot.motor_count"}, motor_count, "params robot.motor_count");
   }
 
-  if (variant == "bfm_zero") {
+  if (variant == "bfm_zero" || variant == "pbfm") {
     validate_standard_robot_vectors(params, motor_count, true, true);
     require_matching_int(params, {"policy.actor_obs_dim", "actor_obs_dim"}, obs_dim, "BFM-Zero actor obs dim");
     require_matching_int(y, {"observation.latent_dim"}, protocol.latent_dim, "BFM-Zero latent dim");
@@ -679,6 +681,17 @@ void check_spec(const fs::path& raw_spec, bool strict_onnx) {
   const fs::path params = require_existing_path(spec, yamlc::required_scalar<std::string>(y, "robot.params"), "robot.params");
   validate_model(spec, y, strict_onnx, *contract, *protocol);
   validate_source_sections(spec, y, *contract, *protocol);
+  if (variant == "pbfm") {
+    action_go::runtime::PbfmSpec::load(y, spec);
+    if (strict_onnx) {
+      const auto model = resolve_relative(spec, yamlc::required_scalar<std::string>(y, "model.path"));
+      if (fs::exists(model)) {
+        OnnxRunner runner;
+        runner.load(model, 1);
+        action_go::runtime::PbfmPolicy::validate_model(runner);
+      }
+    }
+  }
   validate_params(y, YAML::LoadFile(params.string()), variant, motor_count, obs_dim, action_dim, *protocol);
 
   std::cout << "[schema] OK " << spec.string() << "\n"

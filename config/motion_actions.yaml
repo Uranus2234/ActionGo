@@ -120,6 +120,7 @@ type_defaults:
 # 在对应 action 下写 safety_enable: false。
 action_files:
   php: actions/php/php.yaml
+  pbfm: actions/pbfm/pbfm.yaml
   beyondmimic: actions/beyondmimic/beyondmimic.yaml                    # generic_policy: kick_right / hlqk / wbst / lie_down_beyondmimic
   bfm_zero: actions/bfm0/bfm_zero.yaml                                 # generic_policy: bfm_zero_stand
   ufo: actions/ufo/ufo.yaml                                            # generic_policy: fixed prompts / tracking / recovery

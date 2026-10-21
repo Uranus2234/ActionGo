@@ -1,0 +1,16 @@
+[
+  {"time": 2.0, "key": "W", "pressed": true},
+  {"time": 2.3, "key": "W", "pressed": false},
+  {"time": 4.0, "key": "W", "pressed": true},
+  {"time": 4.7, "key": "W", "pressed": false},
+  {"time": 7.0, "key": "W", "pressed": true},
+  {"time": 10.0, "key": "W", "pressed": false},
+  {"time": 12.0, "key": "A", "pressed": true},
+  {"time": 12.4, "key": "A", "pressed": false},
+  {"time": 14.0, "key": "W", "pressed": true},
+  {"time": 17.0, "key": "W", "pressed": false},
+  {"time": 19.0, "key": "D", "pressed": true},
+  {"time": 19.4, "key": "D", "pressed": false},
+  {"time": 21.0, "key": "W", "pressed": true},
+  {"time": 24.0, "key": "W", "pressed": false}
+]

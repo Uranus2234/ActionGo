@@ -100,7 +100,9 @@ void GenericPolicyPlayer::load_bfm_params() {
     bfm_latent_sequence_.clear();
     bfm_latent_sequence_frames_ = 0;
     bfm_latent_sequence_index_ = 0;
-    if (!bfm_latent_sequence_file_.empty()) {
+    if (variant_ == "pbfm") {
+      bfm_z_ = pbfm_spec_.context.latent;
+    } else if (!bfm_latent_sequence_file_.empty()) {
       const fs::path sequence_path = resolve_relative(params_path_, bfm_latent_sequence_file_);
       const auto sequence_bytes = read_binary_file(sequence_path);
       const auto sequence_meta = action_go::runtime::npy::parse_header(sequence_bytes);
@@ -121,11 +123,7 @@ void GenericPolicyPlayer::load_bfm_params() {
     }
     last_action_ = std::vector<float>(motor_count_, 0.f);
     bfm_last_action_scaled_.assign(motor_count_, 0.f);
-    bfm_hist_prev_actions_.assign(bfm_history_steps_ * motor_count_, 0.f);
-    bfm_hist_base_ang_vel_.assign(bfm_history_steps_ * 3, 0.f);
-    bfm_hist_dof_pos_.assign(bfm_history_steps_ * motor_count_, 0.f);
-    bfm_hist_dof_vel_.assign(bfm_history_steps_ * motor_count_, 0.f);
-    bfm_hist_projected_gravity_.assign(bfm_history_steps_ * 3, 0.f);
+    bfm_history_.reset(motor_count_, bfm_history_steps_);
   }
 
 void GenericPolicyPlayer::load_unitree_params() {
@@ -187,21 +185,10 @@ std::vector<float> GenericPolicyPlayer::bfm_infer(const std::vector<float>& obs)
 
 bool GenericPolicyPlayer::build_bfm_target(const GenericPolicyPlayer::RobotState& s, std::vector<float>& q, std::vector<float>& kp, std::vector<float>& kd,
                         std::vector<float>& action_out) {
-    if (s.q.size() < motor_count_ || s.dq.size() < motor_count_) throw std::runtime_error("lowstate motor count too small");
-    std::vector<float> dof_pos(motor_count_), dof_vel(motor_count_), base_ang_vel_scaled(3);
-    for (int i = 0; i < motor_count_; ++i) {
-      dof_pos[i] = s.q[i] - default_q_[i];
-      dof_vel[i] = s.dq[i];
-    }
-    for (int i = 0; i < 3; ++i) base_ang_vel_scaled[i] = s.gyro[i] * 0.25f;
-    const auto projected_gravity_arr = projected_gravity_from_quat(s.quat);
-    const std::vector<float> projected_gravity(projected_gravity_arr.begin(), projected_gravity_arr.end());
-
-    push_history(bfm_hist_prev_actions_, bfm_last_action_scaled_, motor_count_, bfm_history_steps_);
-    push_history(bfm_hist_base_ang_vel_, base_ang_vel_scaled, 3, bfm_history_steps_);
-    push_history(bfm_hist_dof_pos_, dof_pos, motor_count_, bfm_history_steps_);
-    push_history(bfm_hist_dof_vel_, dof_vel, motor_count_, bfm_history_steps_);
-    push_history(bfm_hist_projected_gravity_, projected_gravity, 3, bfm_history_steps_);
+    const auto observation = bfm_history_.build(
+        s.q, s.dq, default_q_, projected_gravity_from_quat(s.quat), s.gyro,
+        bfm_last_action_scaled_, variant_ == "pbfm" ? BfmHistoryTiming::kPreviousOnly :
+                                                    BfmHistoryTiming::kIncludeCurrent);
 
     if (policy_counter_ < bfm_warmup_steps_) {
       hold_current_pose(s, q, kp, kd);
@@ -216,30 +203,15 @@ bool GenericPolicyPlayer::build_bfm_target(const GenericPolicyPlayer::RobotState
                   bfm_z_dim_, bfm_z_.begin());
     }
 
-    std::vector<float> obs;
-    obs.reserve(static_cast<size_t>(bfm_actor_obs_dim_));
-    append(obs, dof_pos);
-    append(obs, dof_vel);
-    append(obs, projected_gravity_arr);
-    append(obs, base_ang_vel_scaled);
-    append(obs, bfm_last_action_scaled_);
-    append(obs, bfm_hist_prev_actions_);
-    append(obs, bfm_hist_base_ang_vel_);
-    append(obs, bfm_hist_dof_pos_);
-    append(obs, bfm_hist_dof_vel_);
-    append(obs, bfm_hist_projected_gravity_);
-    append(obs, bfm_z_);
-    auto action = bfm_infer(obs);
+    auto action = variant_ == "pbfm" ? infer_pbfm(s, observation) :
+                                      bfm_infer(observation.actor_input(bfm_z_));
     action_out = action;
-    q.assign(motor_count_, 0.f);
     kp = kp_;
     kd = kd_;
-    for (int i = 0; i < motor_count_; ++i) {
-      const float clipped = std::clamp(action[i], -1.f, 1.f);
-      bfm_last_action_scaled_[i] = bfm_action_rescale_ * clipped;
-      q[i] = default_q_[i] + bfm_last_action_scaled_[i] * action_scale_[i];
-      q[i] = std::clamp(q[i], lower_limits_[i], upper_limits_[i]);
-    }
+    auto decoded = decode_bfm_action(action, bfm_action_rescale_, default_q_, action_scale_,
+                                     lower_limits_, upper_limits_);
+    bfm_last_action_scaled_ = std::move(decoded.scaled_action);
+    q = std::move(decoded.target_position);
     if (bfm_latent_sequence_frames_ > 0) {
       if (bfm_latent_sequence_index_ + 1 < bfm_latent_sequence_frames_) {
         ++bfm_latent_sequence_index_;
@@ -258,6 +230,38 @@ void GenericPolicyPlayer::control_loop_single_bfm() {
     const auto publish_dt = std::chrono::duration_cast<std::chrono::steady_clock::duration>(
         std::chrono::duration<double>(1.0 / publish_hz));
     auto s = snapshot();
+    if (variant_ == "pbfm") {
+      if (pbfm_spec_.context_source == "realtime_udp") {
+        pbfm_context_stream_ = std::make_unique<BfmContextStream>(pbfm_spec_.context_udp_bind,
+            pbfm_spec_.context_udp_port, pbfm_spec_.context_timeout_sec, bfm_z_dim_);
+        const auto deadline = std::chrono::steady_clock::now() +
+            std::chrono::duration<double>(pbfm_spec_.context_startup_timeout_sec);
+        while (!g_stop_requested.load()) {
+          pbfm_context_stream_->poll();
+          if (pbfm_context_stream_->has_sample()) break;
+          if (std::chrono::steady_clock::now() >= deadline) {
+            throw std::runtime_error("P-BFM realtime context missing before ready");
+          }
+          std::vector<float> hold_q, hold_kp, hold_kd;
+          s = snapshot();
+          hold_current_pose(s, hold_q, hold_kp, hold_kd);
+          publish(hold_q, hold_kp, hold_kd, s.mode_machine, false, CommandPhase::kHold);
+          std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        }
+        if (g_stop_requested.load()) return;
+        pbfm_spec_.context = pbfm_context_stream_->current();
+      }
+      pbfm_initial_yaw_ = quat_yaw(s.quat);
+      auto history = bfm_history_;
+      const auto observation = history.build(
+          s.q, s.dq, default_q_, projected_gravity_from_quat(s.quat), s.gyro,
+          bfm_last_action_scaled_, BfmHistoryTiming::kPreviousOnly);
+      PbfmPolicy::infer(onnx_, observation, pbfm_spec_.context,
+                       pbfm_spec_.context.heading_input(pbfm_initial_yaw_, pbfm_initial_yaw_),
+                       pbfm_depth_observation());
+      if (pbfm_context_stream_) pbfm_context_stream_->current();
+      s = snapshot();
+    }
     std::vector<float> q, kp, kd;
     hold_current_pose(s, q, kp, kd);
     publish(q, kp, kd, s.mode_machine, false, CommandPhase::kHold);
@@ -275,21 +279,13 @@ void GenericPolicyPlayer::control_loop_single_bfm() {
       const auto saved_latent_index = bfm_latent_sequence_index_;
       const auto saved_z = bfm_z_;
       const auto saved_last_action_scaled = bfm_last_action_scaled_;
-      const auto saved_hist_prev_actions = bfm_hist_prev_actions_;
-      const auto saved_hist_base_ang_vel = bfm_hist_base_ang_vel_;
-      const auto saved_hist_dof_pos = bfm_hist_dof_pos_;
-      const auto saved_hist_dof_vel = bfm_hist_dof_vel_;
-      const auto saved_hist_projected_gravity = bfm_hist_projected_gravity_;
+      const auto saved_history = bfm_history_;
       auto restore_preview_state = [&]() {
         policy_counter_ = saved_policy_counter;
         bfm_latent_sequence_index_ = saved_latent_index;
         bfm_z_ = saved_z;
         bfm_last_action_scaled_ = saved_last_action_scaled;
-        bfm_hist_prev_actions_ = saved_hist_prev_actions;
-        bfm_hist_base_ang_vel_ = saved_hist_base_ang_vel;
-        bfm_hist_dof_pos_ = saved_hist_dof_pos;
-        bfm_hist_dof_vel_ = saved_hist_dof_vel;
-        bfm_hist_projected_gravity_ = saved_hist_projected_gravity;
+        bfm_history_ = saved_history;
       };
 
       for (int step = 0; step <= bfm_warmup_steps_; ++step) {
@@ -310,8 +306,26 @@ void GenericPolicyPlayer::control_loop_single_bfm() {
       }
       preview_committed = true;
     } else {
-      wait_start_file(q, kp, kd, publish_hz);
+      wait_start_file(q, kp, kd, publish_hz, [this]() {
+        if (variant_ == "pbfm") {
+          pbfm_depth_observation();
+          if (pbfm_context_stream_) pbfm_context_stream_->current();
+        }
+      }, variant_ == "pbfm");
       if (g_stop_requested.load()) return;
+    }
+
+    if (variant_ == "pbfm") {
+      pbfm_initial_yaw_ = quat_yaw(snapshot().quat);
+      if (pbfm_context_stream_) {
+        const auto context = pbfm_context_stream_->current();
+        pbfm_reference_start_yaw_ = std::atan2(context.heading_relative[1], context.heading_relative[0]);
+      }
+      pbfm_command_yaw_ = pbfm_initial_yaw_;
+      pbfm_heading_controller_.reset(pbfm_initial_yaw_);
+      pbfm_reference_step_ = 0;
+      pbfm_depth_history_ = PbfmDepthHistory{};
+      pbfm_depth_observation();
     }
 
     auto start = std::chrono::steady_clock::now();
@@ -386,7 +400,8 @@ void GenericPolicyPlayer::control_loop_single_bfm() {
     int64_t steps = 0;
     int64_t policy_deadline_miss = 0;
     double avg_ms = 0.0, max_ms = 0.0;
-    std::cout << player_log_prefix() << " start single_actor_state/bfm_zero model=" << runtime_model_path_.string()
+    std::cout << player_log_prefix() << " start " << template_ << "/" << variant_
+              << " model=" << runtime_model_path_.string()
               << " hz=" << inference_hz_ << " publish_hz=" << publish_hz
               << " target_interp_sec=" << target_interp_sec_ << "\n";
     std::exception_ptr inference_error;
@@ -398,6 +413,9 @@ void GenericPolicyPlayer::control_loop_single_bfm() {
       if (now >= next_policy) {
         policy_deadline_miss += advance_deadline(next_policy, policy_dt, now);
         s = snapshot();
+        if (variant_ == "pbfm" && !pbfm_spec_.context_sequence.frames.empty() &&
+            pbfm_spec_.idle_context_path.empty() &&
+            static_cast<size_t>(policy_counter_) >= pbfm_spec_.context_sequence.frames.size()) break;
         std::vector<float> new_goal, new_kp, new_kd;
         const auto t0 = std::chrono::steady_clock::now();
         build_bfm_target(s, new_goal, new_kp, new_kd, last_action);
@@ -459,6 +477,7 @@ void GenericPolicyPlayer::control_loop_single_bfm() {
       if (publisher_error) std::rethrow_exception(publisher_error);
     }
     if (inference_error) std::rethrow_exception(inference_error);
+    wait_postrun_handoff(publish_hz);
     if (g_stop_requested.load() && damping_on_stop_) publish_damping_for_stop();
     event_log_.log("runtime_metrics",
                    {event_string("player", player_label()),
@@ -470,7 +489,7 @@ void GenericPolicyPlayer::control_loop_single_bfm() {
                     event_int("policy_deadline_miss", policy_deadline_miss),
                     event_int("publish_deadline_miss", publish_deadline_miss.load()),
                     event_number("max_publish_interval_ms", max_publish_interval_ms.load())});
-    std::cout << player_log_prefix() << " completed bfm_zero\n";
+    std::cout << player_log_prefix() << " completed " << variant_ << "\n";
   }
 
 GenericPolicyPlayer::Command GenericPolicyPlayer::unitree_command_from_remote(const std::array<uint8_t, 40>& remote) const {

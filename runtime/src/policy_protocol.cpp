@@ -7,6 +7,20 @@ namespace {
 
 const std::vector<PolicyProtocolConstraint>& constraints() {
   static const std::vector<PolicyProtocolConstraint> kConstraints{
+      {"pbfm",
+       "Unitree G1 29DoF",
+       true,
+       false,
+       "",
+       kUnitreeG1ProtocolMotorCount,
+       kPbfmProtocolObsDim,
+       kUnitreeG1ProtocolMotorCount,
+       {"state", "last_action", "history_actor", "heading", "velocity_command", "depth_image", "z"},
+       {"action", "estimated_velocity"},
+       {},
+       kBfmProtocolLatentDim,
+       kBfmProtocolHistorySteps,
+       kBfmProtocolStateDim},
       {"bfm_zero",
        "Unitree G1 29DoF",
        true,
@@ -390,6 +404,17 @@ std::vector<std::string> protocol_names(const std::vector<const char*>& names) {
 }
 
 std::vector<PolicyNamedDim> protocol_named_dims_for_variant(const std::string& variant_name) {
+  if (variant_name == "pbfm") {
+    return {{"state_dim", kBfmProtocolStateDim},
+            {"history_dim", kBfmProtocolHistoryDim},
+            {"history_steps", kBfmProtocolHistorySteps},
+            {"latent_dim", kBfmProtocolLatentDim},
+            {"heading_dim", kPbfmProtocolHeadingDim},
+            {"velocity_dim", kPbfmProtocolVelocityDim},
+            {"depth_frames", kPbfmProtocolDepthFrames},
+            {"depth_height", kPbfmProtocolDepthHeight},
+            {"depth_width", kPbfmProtocolDepthWidth}};
+  }
   if (variant_name == "bfm_zero") {
     return {{"latent_dim", kBfmProtocolLatentDim},
             {"history_steps", kBfmProtocolHistorySteps}};
@@ -457,6 +482,19 @@ std::vector<PolicyYamlDimRule> protocol_yaml_dim_rules_for_variant(const std::st
             {"observation.depth_latent_dim", kPhpProtocolDepthLatentDim, "PHP depth latent dim"},
             {"observation.command_dim", kPhpProtocolCommandDim, "PHP command dim"},
             {"observation.history_len", 1, "PHP history len"}};
+  }
+  if (variant_name == "pbfm") {
+    return {{"observation.state_dim", kBfmProtocolStateDim, "P-BFM state dim"},
+            {"observation.last_action_dim", kUnitreeG1ProtocolMotorCount, "P-BFM previous action dim"},
+            {"observation.history_dim", kBfmProtocolHistoryDim, "P-BFM history dim"},
+            {"observation.history_steps", kBfmProtocolHistorySteps, "P-BFM history steps"},
+            {"observation.latent_dim", kBfmProtocolLatentDim, "P-BFM latent dim"},
+            {"observation.heading_dim", kPbfmProtocolHeadingDim, "P-BFM heading dim"},
+            {"observation.velocity_command_dim", kPbfmProtocolVelocityDim, "P-BFM velocity command dim"},
+            {"sensor.frames", kPbfmProtocolDepthFrames, "P-BFM depth frames"},
+            {"sensor.height", kPbfmProtocolDepthHeight, "P-BFM depth height"},
+            {"sensor.width", kPbfmProtocolDepthWidth, "P-BFM depth width"},
+            {"sensor.history_length", kPbfmProtocolDepthHistoryLength, "P-BFM depth history length"}};
   }
   if (variant_name == "bfm_zero") {
     return {{"observation.latent_dim", kBfmProtocolLatentDim, "BFM-Zero latent dim"},

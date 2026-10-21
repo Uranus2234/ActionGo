@@ -14,6 +14,17 @@ inline constexpr int kBfmProtocolHistorySteps = 4;
 inline constexpr int kBfmProtocolObsDim =
     kBfmProtocolStateDim + kUnitreeG1ProtocolMotorCount + kBfmProtocolHistoryDim + kBfmProtocolLatentDim;
 
+inline constexpr int kPbfmProtocolHeadingDim = 2;
+inline constexpr int kPbfmProtocolVelocityDim = 3;
+inline constexpr int kPbfmProtocolDepthFrames = 8;
+inline constexpr int kPbfmProtocolDepthHeight = 18;
+inline constexpr int kPbfmProtocolDepthWidth = 32;
+inline constexpr int kPbfmProtocolDepthSourceHeight = 36;
+inline constexpr int kPbfmProtocolDepthSourceWidth = 64;
+inline constexpr int kPbfmProtocolDepthHistoryLength = 37;
+inline constexpr int kPbfmProtocolObsDim = kBfmProtocolObsDim + kPbfmProtocolHeadingDim +
+    kPbfmProtocolVelocityDim + kPbfmProtocolDepthFrames * kPbfmProtocolDepthHeight * kPbfmProtocolDepthWidth;
+
 inline constexpr int kEmbeddedMimicProtocolObsDim = 154;
 inline constexpr int kBeyondMimicProtocolRefBodyCount = 14;
 inline constexpr int kBeyondMimicProtocolRefAnchorIndex = 7;

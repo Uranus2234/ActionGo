@@ -7,7 +7,14 @@ GenericPolicyPlayer::GenericPolicyPlayer(Args args) : args_(std::move(args)) {
     event_log_.log("process_start",
                    {event_string("player", player_label()),
                     event_string("spec", args_.spec),
-                    event_string("scope", is_motion_tracking_player() ? "motion_tracking" : "policy")});
+                    event_string("scope", player_kind() == GenericPlayerKind::kSensor ? "sensor" :
+                                           is_motion_tracking_player() ? "motion_tracking" : "policy")});
+  }
+
+GenericPolicyPlayer::~GenericPolicyPlayer() {
+    pbfm_realsense_.reset();
+    subscriber_.reset();
+    publisher_.reset();
   }
 
 void GenericPolicyPlayer::run() {
@@ -97,6 +104,10 @@ void GenericPolicyPlayer::log_process_exit(bool ok, const std::string& reason) n
   }
 
 void GenericPolicyPlayer::emergency_stop_after_error() noexcept {
+    if (variant_ == "pbfm" && !ready_file_.empty()) {
+      std::error_code error;
+      fs::remove(ready_file_, error);
+    }
     try {
       if (preview_mode_enabled()) {
         event_log_.log("candidate_fault_isolated",
@@ -150,6 +161,13 @@ void GenericPolicyPlayer::validate_player_scope() const {
 
 const GenericPolicyPlayer::PolicyRuntimeModule& GenericPolicyPlayer::runtime_module() const {
     static const PolicyRuntimeModule kModules[] = {
+        {"pbfm", GenericPlayerKind::kSensor,
+         &GenericPolicyPlayer::load_spec_pbfm,
+         &GenericPolicyPlayer::load_bfm_params,
+         &GenericPolicyPlayer::post_load_pbfm,
+         &GenericPolicyPlayer::schema_summary_bfm,
+         &GenericPolicyPlayer::check_only_pbfm,
+         &GenericPolicyPlayer::control_loop_single_bfm},
         {"bfm_zero", GenericPlayerKind::kPolicy,
          &GenericPolicyPlayer::load_spec_bfm,
          &GenericPolicyPlayer::load_bfm_params,
@@ -898,6 +916,33 @@ void GenericPolicyPlayer::hold_current_pose(const GenericPolicyPlayer::RobotStat
     kp.assign(motor_count_, hold_kp);
     kd.assign(motor_count_, hold_kd);
     for (int i = 0; i < motor_count_; ++i) q[i] = i < static_cast<int>(s.q.size()) ? s.q[i] : 0.f;
+  }
+
+void GenericPolicyPlayer::wait_postrun_handoff(int publish_hz) {
+    if (g_stop_requested.load() || handoff_complete_file_.empty()) return;
+    const auto target_q = last_published_q_;
+    const auto target_kp = last_published_kp_;
+    const auto target_kd = last_published_kd_;
+    if (!args_.dry_run && target_q.size() != static_cast<size_t>(motor_count_))
+      throw std::runtime_error("postrun handoff requires a published target");
+    const auto interval = std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+        std::chrono::duration<double>(1.0 / std::max(1, publish_hz)));
+    event_log_.log("handoff_hold_started",
+                   {event_string("player", player_label()), event_string("template", template_),
+                    event_string("variant", variant_), event_string("complete_file", handoff_complete_file_),
+                    event_string("release_file", handoff_release_file_)});
+    publish(target_q, target_kp, target_kd, snapshot().mode_machine, false, CommandPhase::kHold);
+    touch_file(handoff_complete_file_);
+    auto next = std::chrono::steady_clock::now();
+    while (!g_stop_requested.load() && !fs::exists(handoff_release_file_)) {
+      publish(target_q, target_kp, target_kd, snapshot().mode_machine, false, CommandPhase::kHold);
+      advance_deadline(next, interval, std::chrono::steady_clock::now());
+      std::this_thread::sleep_until(next);
+    }
+    event_log_.log("handoff_hold_stopped",
+                   {event_string("player", player_label()), event_string("template", template_),
+                    event_string("variant", variant_), event_bool("released", fs::exists(handoff_release_file_)),
+                    event_string("reason", g_stop_requested.load() ? "signal" : "release_file")});
   }
 
 void GenericPolicyPlayer::wait_start_file(std::vector<float>& hold_q,

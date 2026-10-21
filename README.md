@@ -49,7 +49,7 @@ OpenCV and ZeroMQ are required to build `generic_sensor_policy_player`. RealSens
 
 Policy weights, motion files, tags, and datasets are not distributed in the code-only release unless their asset-specific redistribution rights are verified. A source-code license does not automatically license a checkpoint or dataset.
 
-The [asset acquisition guide](docs/model_assets.md) and [MODEL_ASSETS.json](MODEL_ASSETS.json) inventory 71 files from the local policy packages, including current BeyondMimic `paoxiao`, PHP, mjlab, original SONIC, SONIC v1.1, and motion/reference data. Download third-party assets from their upstream provider or supply your own matching exports; unresolved checkpoint origins remain explicitly recorded. The optional HandoffGuard risk model was not found locally and remains separately supplied. `blocked_pending_review` means **bring your own weights/data**, not permission to redistribute it. Validate the packages you install:
+The [asset acquisition guide](docs/model_assets.md) and [MODEL_ASSETS.json](MODEL_ASSETS.json) inventory 72 files from the local policy packages, including current BeyondMimic `paoxiao`, PHP, P-BFM, mjlab, original SONIC, SONIC v1.1, and motion/reference data. Download third-party assets from their upstream provider or supply your own matching exports; unresolved checkpoint origins remain explicitly recorded. The optional HandoffGuard risk model was not found locally and remains separately supplied. `blocked_pending_review` means **bring your own weights/data**, not permission to redistribute it. Validate the packages you install:
 
 ```bash
 python3 tools/assets/check_model_assets.py --policy bfm0
@@ -135,6 +135,9 @@ Arm first with `Start` or `Left+B`, then use an action binding. The checked-in d
 | `Up+A` | `reverse_vault_terrain_mjlab` |
 | `Up+Y` | `g1_parkour` |
 | `Up+B` | `php_locomotion` |
+| `Down+A` | `pbfm_loco` |
+| `Down+B` | `pbfm_tracking_dance` |
+| `Down+X` | `pbfm_pico_teleop` |
 | `Right+X` | `proto_walk` |
 | `Right+Y` | `proto_dance` |
 | `R1+F1` | `holosoma_dance` |
@@ -171,6 +174,7 @@ This table reports repository evidence, not marketing-level “support.” The p
 | Humanoid-GPT | BYOW; upstream repository recorded, exact asset revision pending | Motion cache; optional MuJoCo FK | Yes | No dedicated viewer documented | Not documented | On | High |
 | SONIC | BYOW; original and v1.1 inventoried, exact asset revision pending | CSV or local G1/PICO ZMQ input | Yes | ActionGo MuJoCo bridge and synthetic PICO input | v1.1 acceptance pending | On | High |
 | PHP | BYOW; package acquisition instructions | RealSense + torso IMU or SHM depth | Yes; camera checks separate | Official Holosoma/ActionGo bridge | Stair acceptance pending | On | High |
+| [P-BFM](actions/pbfm/README.md) | BYOW; pinned public-demo checkpoint, CC-BY-NC-4.0 | RealSense or SHM depth; context, joystick, or Pico UDP | Yes; camera checks separate | C++ actor / MuJoCo bridge | Hardware acceptance pending | On | High |
 | mjlab | BYOW/local export; package source notes | Embedded reference | Yes | C++ Unitree SDK2 MuJoCo bridge | Not documented | On | High |
 
 Read the adapter README under `actions/<adapter>/` before use. SONIC action names currently select v1.1; the original `generic_sonic.yaml` remains available for fallback, with separate TensorRT caches. Official v1.1 replay and board-side acceptance remain pending. PHP real-robot stair acceptance is also pending; check-only and local simulation do not establish it.

@@ -3,6 +3,11 @@
 #include "action_go/runtime/generic_policy_runtime.h"
 #include "action_go/runtime/activation_blend.h"
 #include "action_go/runtime/async_command_publisher.h"
+#include "action_go/runtime/bfm_action.h"
+#include "action_go/runtime/bfm_observation.h"
+#include "action_go/runtime/pbfm_policy.h"
+#include "action_go/runtime/bfm_context_stream.h"
+#include "action_go/runtime/shared_memory_depth_stream.h"
 #include "action_go/runtime/command_safety_filter.h"
 #include "action_go/runtime/event_logger.h"
 #include "action_go/runtime/input_freshness.h"
@@ -139,6 +144,7 @@ inline bool is_motion_tracking_player() {
 }
 
 inline GenericPlayerKind player_kind() {
+  if (g_runtime_scope == GenericPolicyRuntimeScope::kSensor) return GenericPlayerKind::kSensor;
   return is_motion_tracking_player() ? GenericPlayerKind::kMotionTracking : GenericPlayerKind::kPolicy;
 }
 
@@ -147,6 +153,7 @@ inline std::string player_label() {
 }
 
 inline const char* player_log_prefix() {
+  if (g_runtime_scope == GenericPolicyRuntimeScope::kSensor) return "[generic_sensor_policy_player]";
   return is_motion_tracking_player() ? "[generic_motion_tracking_player]" : "[generic_policy_player]";
 }
 
@@ -1037,6 +1044,9 @@ struct Args {
   std::string discard_file;
   std::string cmd_topic;
   std::string state_topic;
+  std::string depth_source_override;
+  std::string depth_shm_override;
+  std::string trace_file;
   int inference_hz{0};
   int publish_hz{0};
   int sim_lowstate_decimation{0};
@@ -1083,6 +1093,9 @@ inline Args parse_args(int argc, char** argv) {
     else if (k == "--domain-id") a.domain_id = std::stoi(need_arg(i, argc, argv, k));
     else if (k == "--model") a.model_override = need_arg(i, argc, argv, k);
     else if (k == "--params") a.params_override = need_arg(i, argc, argv, k);
+    else if (k == "--depth-source") a.depth_source_override = need_arg(i, argc, argv, k);
+    else if (k == "--depth-shm-name") a.depth_shm_override = need_arg(i, argc, argv, k);
+    else if (k == "--trace-file") a.trace_file = need_arg(i, argc, argv, k);
     else if (k == "--trajectory" || k == "--motion") a.trajectory_override = need_arg(i, argc, argv, k);
     else if (k == "--latent-file" || k == "--z") a.latent_file_override = need_arg(i, argc, argv, k);
     else if (k == "--input") a.input_override = lower(need_arg(i, argc, argv, k));
@@ -2292,6 +2305,7 @@ class TwistRedisReceiver {
 class GenericPolicyPlayer {
  public:
   explicit GenericPolicyPlayer(Args args);
+  ~GenericPolicyPlayer();
 
   void run();
 
@@ -2377,6 +2391,16 @@ class GenericPolicyPlayer {
   void validate_spec_against_protocol() const;
 
   void load_spec_bfm(const YAML::Node& y);
+
+  void load_spec_pbfm(const YAML::Node& y);
+
+  void post_load_pbfm();
+
+  void check_only_pbfm();
+
+  std::vector<float> pbfm_depth_observation();
+
+  std::vector<float> infer_pbfm(const RobotState& state, const BfmObservation& observation);
 
   void load_spec_unitree(const YAML::Node& y);
 
@@ -2509,6 +2533,7 @@ class GenericPolicyPlayer {
                CommandPhase phase = CommandPhase::kActive);
 
   void publish_damping_for_stop(bool allow_stale_state = false);
+  void wait_postrun_handoff(int publish_hz);
 
   void hold_current_pose(const RobotState& s, std::vector<float>& q, std::vector<float>& kp, std::vector<float>& kd,
                          float hold_kp = 20.f, float hold_kd = 1.f) const;
@@ -2689,7 +2714,24 @@ class GenericPolicyPlayer {
   size_t bfm_latent_sequence_frames_{0};
   size_t bfm_latent_sequence_index_{0};
   std::vector<float> bfm_latent_sequence_;
-  std::vector<float> bfm_z_, bfm_last_action_scaled_, bfm_hist_prev_actions_, bfm_hist_base_ang_vel_, bfm_hist_dof_pos_, bfm_hist_dof_vel_, bfm_hist_projected_gravity_;
+  std::vector<float> bfm_z_, bfm_last_action_scaled_;
+  BfmObservationHistory bfm_history_;
+  PbfmSpec pbfm_spec_;
+  std::unique_ptr<BfmContextStream> pbfm_context_stream_;
+  float pbfm_reference_start_yaw_{0.f};
+  std::unique_ptr<RealSenseDepthStream> pbfm_realsense_;
+  PbfmDepthHistory pbfm_depth_history_;
+#ifdef ACTION_GO_HAS_ZMQ
+  std::unique_ptr<SharedMemoryDepthStream> pbfm_depth_stream_;
+#endif
+  std::vector<float> pbfm_file_depth_;
+  std::vector<float> pbfm_estimated_velocity_;
+  std::ofstream pbfm_trace_;
+  float pbfm_initial_yaw_{0.f};
+  float pbfm_command_yaw_{0.f};
+  size_t pbfm_reference_step_{0};
+  std::string pbfm_last_motion_state_;
+  PbfmHeadingController pbfm_heading_controller_;
 
   int unitree_base_obs_dim_{0};
   int unitree_obs_dim_{0};
@@ -2842,10 +2884,10 @@ class GenericPolicyPlayer {
   std::shared_ptr<unitree::robot::ChannelSubscriber<LowState>> subscriber_;
   mutable std::mutex state_mtx_;
   RobotState state_;
-  std::atomic<bool> connected_{false};
   std::atomic<int64_t> active_publish_count_{0};
   std::atomic<int64_t> last_active_publish_ns_{0};
   std::atomic<double> max_active_publish_interval_ms_{0.0};
+  std::atomic<bool> connected_{false};
   bool first_command_logged_{false};
   bool first_hold_logged_{false};
   bool first_active_command_logged_{false};

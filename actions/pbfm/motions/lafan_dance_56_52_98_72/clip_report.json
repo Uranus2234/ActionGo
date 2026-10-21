@@ -1,0 +1,13 @@
+{
+  "source_seconds": [
+    56.52,
+    98.72
+  ],
+  "frames": 2110,
+  "reference_end_xy_m": [
+    -3.072370224507736,
+    2.002935708622138
+  ],
+  "reference_max_side_m": 2.0073106630828166,
+  "latent_values_preserved": true
+}

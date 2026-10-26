@@ -14,15 +14,17 @@ ActionGo 是面向 Unitree G1 的模板化全身策略运行时：用 YAML 描�
 sudo apt install libeigen3-dev libyaml-cpp-dev zlib1g-dev libssl-dev nlohmann-json3-dev
 ```
 
-CPU ONNX Runtime 不随源码仓库打包，使用固定版本和 SHA256 的下载器安装：
+CPU ONNX Runtime 1.22.0 的 x86_64 和 aarch64 SDK 已通过普通 Git 放入 `thirdparty/`，
+CMake 按架构自动选择，无需另行下载或使用 Git LFS。直接构建：
 
 ```bash
-tools/deps/fetch_onnxruntime.sh
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON \
   -DACTION_GO_CODE_ONLY=ON
 cmake --build build --parallel
 ctest --test-dir build --output-on-failure
 ```
+
+需要恢复 SDK 时，可运行 `tools/deps/fetch_onnxruntime.sh`，它校验固定版本和 SHA256。
 
 OpenCV 和 libzmq 用于构建 sensor player；RealSense、AprilTag、MuJoCo、Redis 和 TensorRT 为对应 adapter 所需依赖。真机深度构建应启用 `-DACTION_GO_REQUIRE_REALSENSE=ON`。
 

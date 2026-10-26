@@ -37,7 +37,7 @@ ActionGo is **not an automatic model adapter**. Before adding a policy, recover 
 - Ubuntu 22.04 reference environment, GCC 11+, CMake 3.22+, and C++17.
 - Unitree SDK2 at the revision listed in [DEPENDENCIES.md](DEPENDENCIES.md).
 - Eigen3, yaml-cpp, zlib, OpenSSL, and nlohmann/json development packages.
-- ONNX Runtime 1.22.0; install the pinned official archive with:
+- ONNX Runtime CPU 1.22.0 is bundled for x86_64 and aarch64 under `thirdparty/` as regular Git files. CMake selects the matching architecture automatically. To restore either SDK from its pinned official archive:
 
 ```bash
 tools/deps/fetch_onnxruntime.sh

@@ -2,7 +2,9 @@
 
 ## ONNX Runtime
 
-Install the pinned CPU release for the current architecture:
+The x86_64 and aarch64 CPU SDKs are included in `thirdparty/` as regular Git
+files. A normal checkout provides their headers and shared libraries. If an SDK
+is missing or damaged, restore the pinned CPU release for the current architecture:
 
 ```bash
 tools/deps/fetch_onnxruntime.sh

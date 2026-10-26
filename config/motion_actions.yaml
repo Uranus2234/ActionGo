@@ -119,6 +119,8 @@ type_defaults:
 # 每个动作默认继承 defaults.safety_enable=true；如需禁用某个动作的 IMU safety，
 # 在对应 action 下写 safety_enable: false。
 action_files:
+  uni_supermimic: actions/uni_supermimic/uni_supermimic.yaml
+  supermimic: actions/supermimic/supermimic.yaml
   php: actions/php/php.yaml
   pbfm: actions/pbfm/pbfm.yaml
   beyondmimic: actions/beyondmimic/beyondmimic.yaml                    # generic_policy: kick_right / hlqk / wbst / lie_down_beyondmimic

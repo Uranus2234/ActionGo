@@ -1,0 +1,380 @@
+{
+  "schema_version": 1,
+  "format": "action_go_supermimic_v1",
+  "policy": {
+    "input": {
+      "name": "obs",
+      "shape": [
+        1,
+        1720
+      ],
+      "dtype": "float32"
+    },
+    "output": {
+      "name": "actions",
+      "shape": [
+        1,
+        29
+      ],
+      "dtype": "float32"
+    },
+    "history": {
+      "shape": [
+        10,
+        99
+      ],
+      "order": "oldest_to_newest"
+    },
+    "goal": {
+      "shape": [
+        10,
+        73
+      ],
+      "future_offsets": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10
+      ]
+    },
+    "normalization": "checkpoint obs_norm and goal_norm embedded in ONNX; do not normalize externally"
+  },
+  "provenance": {
+    "training_repo": "/root/epfs/program/wbc/Uni-SuperMimic",
+    "training_repo_commit": "bc0f0f3499a12019ec0ea313ff37bbd0a70a6a04",
+    "training_repo_dirty": true,
+    "training_files_sha256": {
+      "src/unisupermimic/rl/algos/supermimic/networks.py": "af84dc3a31502eed607b8934aa4b08f4ff881d1ba7ed97121fbb9a4652bd5717",
+      "src/unisupermimic/tasks/motion_tracking/g1/supermimic/mdp.py": "43e5bc6ecab6e21e57e9615eeb6642ff11c30e50b7b6a4a292f46db6266438dc",
+      "src/unisupermimic/tasks/motion_tracking/g1/supermimic/motion.py": "da835da1f8e6b28401c430b311f0344d1f4dc38f35a17e12eb79ad487151b81d",
+      "src/unisupermimic/tasks/motion_tracking/g1/supermimic/robot.py": "559a1bfb6a6811400e63a4f19ae96e65419d5fc8d125cda9ae2d3eecbafa4e1a",
+      "src/unisupermimic/tasks/motion_tracking/g1/supermimic/manager_terms.py": "4c08405fed1629fd306b87b40fe9f6db548d4f1d05a6eae8a77e6f09f93397b1",
+      "src/unisupermimic/assets/robots/g1/supermimic.xml": "027a003d238ddba3dc7c6e608f3a392212a960fc390ba33d38c794ad919ece8d",
+      "src/unisupermimic/assets/robots/g1/scene_supermimic.xml": "c4760f6ab06709401bdb1d593b9ebb6281fdb5c3e8fa0808996ae2b3c5abc92c"
+    },
+    "checkpoint": {
+      "path": "/root/epfs/program/wbc/Uni-SuperMimic-local/experiments/20261024-dual/gpu1/ckpt_200000.pt",
+      "name": "ckpt_200000.pt",
+      "sha256": "bc7e98200e7d7adc8e731a17218bd6da6e00f071b1bea68683b03fd92d413369",
+      "iteration": 200000
+    },
+    "training_config": {
+      "goal_frames": 10,
+      "hist": 10,
+      "z_dim": 32,
+      "policy_hidden": [
+        2048,
+        1024,
+        512,
+        256
+      ],
+      "amp": "bf16",
+      "seed": 1
+    },
+    "training_run_config": "/root/epfs/program/wbc/Uni-SuperMimic-local/experiments/20261024-dual/gpu1/run_config.json",
+    "motion": {
+      "path": "/root/epfs/program/wbc/Uni-SuperMimic-local/experiments/20261024-dual/data/omni/3_back_hand_flip.csv",
+      "name": "3_back_hand_flip.csv",
+      "sha256": "3c5d7bad904502aef213ac1357c41c25dd1ef6ce5826328d816cd9e291201ece",
+      "source_fps": 50.0
+    },
+    "versions": {
+      "torch": "2.14.1+cu126",
+      "onnx": "1.23.2",
+      "numpy": "2.4.6"
+    },
+    "export_precision": "cpu_float32",
+    "training_amp": "bf16"
+  },
+  "robot_contract": {
+    "joint_names": [
+      "left_hip_pitch_joint",
+      "left_hip_roll_joint",
+      "left_hip_yaw_joint",
+      "left_knee_joint",
+      "left_ankle_pitch_joint",
+      "left_ankle_roll_joint",
+      "right_hip_pitch_joint",
+      "right_hip_roll_joint",
+      "right_hip_yaw_joint",
+      "right_knee_joint",
+      "right_ankle_pitch_joint",
+      "right_ankle_roll_joint",
+      "waist_yaw_joint",
+      "waist_roll_joint",
+      "waist_pitch_joint",
+      "left_shoulder_pitch_joint",
+      "left_shoulder_roll_joint",
+      "left_shoulder_yaw_joint",
+      "left_elbow_joint",
+      "left_wrist_roll_joint",
+      "left_wrist_pitch_joint",
+      "left_wrist_yaw_joint",
+      "right_shoulder_pitch_joint",
+      "right_shoulder_roll_joint",
+      "right_shoulder_yaw_joint",
+      "right_elbow_joint",
+      "right_wrist_roll_joint",
+      "right_wrist_pitch_joint",
+      "right_wrist_yaw_joint"
+    ],
+    "control_dt": 0.02,
+    "physics_dt": 0.005,
+    "default_q": [
+      -0.312,
+      0.0,
+      0.0,
+      0.669,
+      -0.363,
+      0.0,
+      -0.312,
+      0.0,
+      0.0,
+      0.669,
+      -0.363,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.2,
+      0.2,
+      0.0,
+      0.6,
+      0.0,
+      0.0,
+      0.0,
+      0.2,
+      -0.2,
+      0.0,
+      0.6,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "action_scale": [
+      0.5475464652142303,
+      0.3506614663788243,
+      0.5475464652142303,
+      0.3506614663788243,
+      0.43857731392336724,
+      0.43857731392336724,
+      0.5475464652142303,
+      0.3506614663788243,
+      0.5475464652142303,
+      0.3506614663788243,
+      0.43857731392336724,
+      0.43857731392336724,
+      0.5475464652142303,
+      0.43857731392336724,
+      0.43857731392336724,
+      0.43857731392336724,
+      0.43857731392336724,
+      0.43857731392336724,
+      0.43857731392336724,
+      0.43857731392336724,
+      0.07450087032950714,
+      0.07450087032950714,
+      0.43857731392336724,
+      0.43857731392336724,
+      0.43857731392336724,
+      0.43857731392336724,
+      0.43857731392336724,
+      0.07450087032950714,
+      0.07450087032950714
+    ],
+    "xml_path": "src/unisupermimic/assets/robots/g1/scene_supermimic.xml",
+    "qpos_addresses": [
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16,
+      17,
+      18,
+      19,
+      20,
+      21,
+      22,
+      23,
+      24,
+      25,
+      26,
+      27,
+      28,
+      29,
+      30,
+      31,
+      32,
+      33,
+      34,
+      35
+    ]
+  },
+  "reference": {
+    "clip": "3_back_hand_flip",
+    "num_frames": 394,
+    "fps": 50,
+    "last_frame_time_sec": 7.86,
+    "end_behavior": "hold_last_reference_and_continue_inference"
+  },
+  "initial_state": {
+    "root_position": [
+      -4.173233509063721,
+      4.923308849334717,
+      0.7799999713897705
+    ],
+    "root_quaternion_wxyz": [
+      0.7588846683502197,
+      -3.5953835395008404e-12,
+      -4.592283584653467e-12,
+      -0.6512250304222107
+    ],
+    "root_linear_velocity_world": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "root_angular_velocity_world": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "joint_position": [
+      -0.10000000149011612,
+      0.0,
+      0.0,
+      0.30000001192092896,
+      -0.20000000298023224,
+      0.0,
+      -0.10000000149011612,
+      0.0,
+      0.0,
+      0.30000001192092896,
+      -0.20000000298023224,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.4000000059604645,
+      0.10000000149011612,
+      0.0,
+      0.30000001192092896,
+      0.0,
+      0.0,
+      0.0,
+      0.4000000059604645,
+      -0.10000000149011612,
+      0.0,
+      0.30000001192092896,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "joint_velocity": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ]
+  },
+  "runtime": {
+    "inference_hz": 50,
+    "calibration": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "yaw_alignment": "none",
+    "end_behavior": "hold",
+    "policy_step_source": "lowstate_tick",
+    "history_initialization": "repeat_first_observation_10_times; previous_action_zero",
+    "action_decode": "default_angles + calibration + action_scale * actions",
+    "automatic_fall_reset": false,
+    "automatic_fall_pause": false
+  },
+  "validation": {
+    "onnx_checker": "passed",
+    "backend": "onnxruntime_cpu",
+    "sample_count": 4,
+    "samples": "first/middle/final training-reference frames plus seeded normalized random input",
+    "max_abs_error": 1.6689300537109375e-06,
+    "atol": 1e-05,
+    "rtol": 0.0001
+  },
+  "artifacts": {
+    "policy.onnx": {
+      "sha256": "d9f018ba29c733016ae195bf286b28e2825967634fbce250094d6b3bdc070932",
+      "bytes": 36478649
+    },
+    "reference.csv": {
+      "sha256": "939e9c19742bc4436b55cd51cb7f50771a3d09afce7a2915c669b3b3023982d9",
+      "bytes": 2923790
+    },
+    "SuperMimic.yaml": {
+      "sha256": "95e67ce25f368e03687519d0a61b64191b64b25b9f64dbc88ec0891447316f6a",
+      "bytes": 4387
+    }
+  }
+}

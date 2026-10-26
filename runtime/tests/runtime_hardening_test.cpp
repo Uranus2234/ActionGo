@@ -11,6 +11,7 @@
 #include "action_go/runtime/reference_endpoint.h"
 #include "action_go/runtime/sonic_planner.h"
 #include "action_go/runtime/sonic_policy.h"
+#include "action_go/runtime/supermimic_policy.h"
 
 #include <chrono>
 #include <cmath>
@@ -579,7 +580,7 @@ void test_policy_protocol_constraints() {
   const std::vector<std::string> variants{
       "bfm_zero", "unitree_rl_mjlab", "beyondmimic", "holosoma",
       "protomotions", "twist", "humanoid_gpt", "instinct_parkour",
-      "sonic", "instinct", "php", "steadytray", "omnixtreme"};
+      "sonic", "instinct", "php", "pbfm", "steadytray", "omnixtreme", "supermimic", "uni_supermimic"};
   for (const std::string& variant : variants) {
     const auto* contract = variant_contract(variant);
     const auto* protocol = protocol_constraint_for_variant(variant);
@@ -616,6 +617,67 @@ void test_policy_protocol_constraints() {
     expect_true("sonic decoder obs dim", sonic->obs_dim == kSonicDecoderObsDim);
     expect_true("sonic has three sessions", sonic->sessions.size() == 3);
   }
+}
+
+void test_supermimic_policy_helpers() {
+  using namespace action_go::runtime;
+  expect_true("Uni-SuperMimic uses motion tracking player",
+              variant_allowed_for_player("uni_supermimic", GenericPlayerKind::kMotionTracking));
+  expect_true("Uni-SuperMimic rejects state-only template",
+              !variant_allowed_for_template("single_actor_state", "uni_supermimic"));
+  const auto* protocol = protocol_constraint_for_variant("uni_supermimic");
+  expect_true("Uni-SuperMimic packed input contract", protocol && protocol->obs_dim == 1720);
+  expect_true("Uni-SuperMimic output contract", protocol && protocol->action_dim == 29);
+  const auto rules = protocol_yaml_dim_rules_for_variant("uni_supermimic");
+  expect_true("Uni-SuperMimic validates history and goal dimensions", rules.size() == 4);
+  SuperMimicController controller;
+  controller.configure(std::vector<float>(29, 0.25f), std::vector<float>(29, 0.5f));
+  SuperMimicReferenceFrame first, last;
+  first.goal[0] = 10.f;
+  last.goal[0] = 20.f;
+  controller.set_reference_frames({first, last});
+  SuperMimicRobotFrame robot;
+  robot.q.fill(0.5f);
+  robot.dq[0] = 3.f;
+  robot.gyro = {1.f, 2.f, 3.f};
+  const auto initial = controller.build_input(robot);
+  expect_true("supermimic packed dimension", initial.size() == 1720);
+  expect_near("supermimic raw joint velocity", initial[29], 3.f);
+  expect_near("supermimic pelvis gyro", initial[59], 2.f);
+  expect_near("supermimic gravity", initial[63], -1.f);
+  expect_near("supermimic relative rotation first column", initial[93], 1.f);
+  expect_near("supermimic interleaved rotation second column", initial[96], 1.f);
+  for (std::size_t frame = 0; frame < 10; ++frame) {
+    expect_near("supermimic fills initial history", initial[99 * frame], 0.25f);
+  }
+  expect_near("supermimic first reference", initial[990], 10.f);
+  std::vector<float> action(29, 4.f);
+  const auto target = controller.decode_action(action);
+  expect_near("supermimic unbounded raw action decoding", target[0], 2.25f);
+  controller.accept_action(action);
+  robot.q[0] = 1.f;
+  const auto advanced = controller.build_input(robot);
+  expect_near("supermimic oldest history remains", advanced[0], 0.25f);
+  expect_near("supermimic newest history appended", advanced[891], 0.75f);
+  expect_near("supermimic previous raw action", advanced[891 + 64], 4.f);
+  expect_near("supermimic advances reference", advanced[990], 20.f);
+  controller.accept_action(action);
+  controller.accept_action(action);
+  expect_true("supermimic reference clamps at end", controller.reference_index() == 1);
+  expect_near("supermimic continues inference after end", controller.build_input(robot)[990], 20.f);
+  robot.quat = {0.70710678f, 0.f, 0.f, 0.70710678f};
+  controller.reset(robot.quat, true);
+  const auto aligned = controller.build_input(robot);
+  expect_near("supermimic initial yaw alignment", aligned[93], 1.f);
+  expect_near("supermimic reset clears previous actions", aligned[64], 0.f);
+  robot.quat.fill(0.f);
+  expect_throw("supermimic rejects zero quaternion", [&] { controller.build_input(robot); });
+  action[0] = std::numeric_limits<float>::quiet_NaN();
+  expect_throw("supermimic rejects nonfinite actions", [&] { controller.accept_action(action); });
+  std::istringstream malformed("0,1,2\n");
+  expect_throw("supermimic rejects incomplete reference", [&] {
+    SuperMimicController::read_reference_csv(malformed);
+  });
 }
 
 void test_sonic_policy_helpers() {
@@ -961,6 +1023,7 @@ int main() {
     test_onnx_runner();
     test_realtime_input_stale_gate();
     test_sonic_policy_helpers();
+    test_supermimic_policy_helpers();
     test_sonic_planner_helpers();
   } catch (const std::exception& e) {
     fail("uncaught exception", e.what());

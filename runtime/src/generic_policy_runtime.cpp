@@ -217,6 +217,20 @@ const GenericPolicyPlayer::PolicyRuntimeModule& GenericPolicyPlayer::runtime_mod
          &GenericPolicyPlayer::schema_summary_humanoid_gpt,
          &GenericPolicyPlayer::check_only_humanoid_gpt,
          &GenericPolicyPlayer::control_loop_humanoid_gpt},
+        {"uni_supermimic", GenericPlayerKind::kMotionTracking,
+         &GenericPolicyPlayer::load_spec_supermimic,
+         &GenericPolicyPlayer::load_supermimic_params,
+         &GenericPolicyPlayer::post_load_supermimic,
+         &GenericPolicyPlayer::schema_summary_supermimic,
+         &GenericPolicyPlayer::check_only_supermimic,
+         &GenericPolicyPlayer::control_loop_supermimic},
+        {"supermimic", GenericPlayerKind::kMotionTracking,
+         &GenericPolicyPlayer::load_spec_supermimic,
+         &GenericPolicyPlayer::load_supermimic_params,
+         &GenericPolicyPlayer::post_load_supermimic,
+         &GenericPolicyPlayer::schema_summary_supermimic,
+         &GenericPolicyPlayer::check_only_supermimic,
+         &GenericPolicyPlayer::control_loop_supermimic},
         {"sonic", GenericPlayerKind::kMotionTracking,
          &GenericPolicyPlayer::load_spec_sonic,
          &GenericPolicyPlayer::load_sonic_params,
@@ -791,6 +805,10 @@ void GenericPolicyPlayer::publish(const std::vector<float>& q,
       cmd.reserve()[0] = static_cast<uint32_t>(policy_counter_);
       cmd.reserve()[1] = phase == CommandPhase::kActive
           ? kActionGoLockstepMagic : 0u;
+    }
+    if (supermimic_sim_lockstep_sequence_) {
+      cmd.reserve()[0] = supermimic_command_sequence_.load();
+      cmd.reserve()[1] = phase == CommandPhase::kActive ? 0x41474c53u : 0u;
     }
     cmd.crc() = crc32_core((uint32_t*)&cmd, (sizeof(cmd) >> 2) - 1);
     publisher_->Write(cmd);

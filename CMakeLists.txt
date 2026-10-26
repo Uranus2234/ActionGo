@@ -419,6 +419,7 @@ if(DEFINED ACTION_GO_ONNXRUNTIME_LIB AND DEFINED ACTION_GO_ONNXRUNTIME_INCLUDE_D
     runtime/src/generic_policy_module_self.cpp
     runtime/src/generic_policy_module_mimic.cpp
     runtime/src/generic_policy_module_motion.cpp
+    runtime/src/generic_policy_module_supermimic.cpp
     runtime/src/policy_contract.cpp
     runtime/src/handoff_protocol.cpp
     runtime/src/policy_protocol.cpp
@@ -461,6 +462,7 @@ if(DEFINED ACTION_GO_ONNXRUNTIME_LIB AND DEFINED ACTION_GO_ONNXRUNTIME_INCLUDE_D
     runtime/src/generic_policy_module_self.cpp
     runtime/src/generic_policy_module_mimic.cpp
     runtime/src/generic_policy_module_motion.cpp
+    runtime/src/generic_policy_module_supermimic.cpp
     runtime/src/policy_contract.cpp
     runtime/src/handoff_protocol.cpp
     runtime/src/policy_protocol.cpp
@@ -691,6 +693,7 @@ if(DEFINED ACTION_GO_ONNXRUNTIME_LIB AND DEFINED ACTION_GO_ONNXRUNTIME_INCLUDE_D
       runtime/src/generic_policy_module_pbfm.cpp
       runtime/src/generic_policy_module_mimic.cpp
       runtime/src/generic_policy_module_motion.cpp
+      runtime/src/generic_policy_module_supermimic.cpp
       runtime/src/handoff_protocol.cpp
       runtime/src/input_freshness.cpp
       runtime/src/onnx_runner.cpp

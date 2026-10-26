@@ -388,7 +388,13 @@ void validate_source_sections(const fs::path& spec,
       break;
     case PolicyTemplateId::kMotionConditionedTracking: {
       const std::string variant = lower(yamlc::required_scalar<std::string>(y, "runtime.variant"));
-      if (variant == "protomotions") {
+      if (variant == "supermimic" || variant == "uni_supermimic") {
+        require_existing_path(spec, yamlc::required_scalar<std::string>(y, "reference.path"), "reference.path", true);
+        if (yamlc::required_scalar<std::string>(y, "reference.type") != "supermimic_csv_v1") {
+          throw std::runtime_error("SuperMimic requires reference.type=supermimic_csv_v1");
+        }
+        require_matching_int(y, {"runtime.inference_hz"}, 50, "SuperMimic inference Hz");
+      } else if (variant == "protomotions") {
         require_existing_path(spec, yamlc::required_scalar<std::string>(y, "reference.path"), "reference.path", true);
         yamlc::required_scalar<std::string>(y, "reference.anchor_source");
       } else if (variant == "twist") {
@@ -498,7 +504,7 @@ void validate_params(const YAML::Node& y,
       throw std::runtime_error("unitree allowed obs dims mismatch");
     }
     yamlc::required_scalar<double>(params, "observation.phase_period");
-  } else if (variant == "beyondmimic") {
+  } else if (variant == "beyondmimic" || variant == "supermimic" || variant == "uni_supermimic") {
     validate_standard_robot_vectors(params, motor_count, true, true, "robot.policy_joint_order");
     require_matching_int(params, {"policy.num_actions", "num_actions"}, action_dim, "BeyondMimic action dim");
     require_matching_int(params, {"policy.num_obs", "num_obs"}, obs_dim, "BeyondMimic obs dim");

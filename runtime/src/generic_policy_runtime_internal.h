@@ -18,6 +18,7 @@
 #include "action_go/runtime/reference_endpoint.h"
 #include "action_go/runtime/sonic_planner.h"
 #include "action_go/runtime/sonic_policy.h"
+#include "action_go/runtime/supermimic_policy.h"
 #include "action_go/runtime/yaml_contract.h"
 
 #include <yaml-cpp/yaml.h>
@@ -2406,6 +2407,18 @@ class GenericPolicyPlayer {
 
   void load_spec_beyondmimic(const YAML::Node& y);
 
+  void load_spec_supermimic(const YAML::Node& y);
+
+  void load_supermimic_params();
+
+  void post_load_supermimic();
+
+  void schema_summary_supermimic();
+
+  void check_only_supermimic();
+
+  void control_loop_supermimic();
+
   void load_spec_holosoma(const YAML::Node& y);
 
   void load_spec_protomotions(const YAML::Node& y);
@@ -2750,6 +2763,13 @@ class GenericPolicyPlayer {
   double unitree_phase_period_{0.6}, unitree_phase_time_{0.0};
 
   std::vector<float> beyond_action_, beyond_ref_joint_pos_, beyond_ref_joint_vel_, beyond_ref_body_quat_w_;
+  action_go::runtime::SuperMimicController supermimic_controller_;
+  bool supermimic_use_lowstate_tick_{false};
+  bool supermimic_sim_lockstep_sequence_{false};
+  bool supermimic_align_initial_yaw_{true};
+  bool supermimic_stop_at_end_{false};
+  bool supermimic_trace_{false};
+  std::atomic<uint32_t> supermimic_command_sequence_{0};
   int beyond_ref_body_count_{0};
   int beyond_ref_anchor_idx_{0};
   int beyond_warmup_steps_{2};

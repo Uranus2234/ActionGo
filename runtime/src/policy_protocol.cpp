@@ -135,6 +135,38 @@ const std::vector<PolicyProtocolConstraint>& constraints() {
        0,
        0,
        0},
+      {"supermimic",
+       "Unitree G1 29DoF",
+       true,
+       false,
+       "",
+       kUnitreeG1ProtocolMotorCount,
+       kSuperMimicProtocolObsDim,
+       kUnitreeG1ProtocolMotorCount,
+       {"obs"},
+       {"actions"},
+       {},
+       32,
+       kSuperMimicProtocolHistoryLen,
+       kSuperMimicProtocolObsFrameDim,
+       {},
+       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+      {"uni_supermimic",
+       "Unitree G1 29DoF",
+       true,
+       false,
+       "",
+       kUnitreeG1ProtocolMotorCount,
+       kSuperMimicProtocolObsDim,
+       kUnitreeG1ProtocolMotorCount,
+       {"obs"},
+       {"actions"},
+       {},
+       32,
+       kSuperMimicProtocolHistoryLen,
+       kSuperMimicProtocolObsFrameDim,
+       {},
+       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
       {"protomotions",
        "Unitree G1 29DoF",
        true,
@@ -415,6 +447,12 @@ std::vector<PolicyNamedDim> protocol_named_dims_for_variant(const std::string& v
             {"depth_height", kPbfmProtocolDepthHeight},
             {"depth_width", kPbfmProtocolDepthWidth}};
   }
+  if (variant_name == "supermimic" || variant_name == "uni_supermimic") {
+    return {{"obs_frame_dim", kSuperMimicProtocolObsFrameDim},
+            {"history_len", kSuperMimicProtocolHistoryLen},
+            {"goal_frames", kSuperMimicProtocolGoalFrames},
+            {"goal_dim", kSuperMimicProtocolGoalDim}};
+  }
   if (variant_name == "bfm_zero") {
     return {{"latent_dim", kBfmProtocolLatentDim},
             {"history_steps", kBfmProtocolHistorySteps}};
@@ -477,6 +515,12 @@ std::vector<PolicyNamedDim> protocol_named_dims_for_variant(const std::string& v
 }
 
 std::vector<PolicyYamlDimRule> protocol_yaml_dim_rules_for_variant(const std::string& variant_name) {
+  if (variant_name == "supermimic" || variant_name == "uni_supermimic") {
+    return {{"observation.obs_frame_dim", kSuperMimicProtocolObsFrameDim, "SuperMimic obs frame dim"},
+            {"observation.history_len", kSuperMimicProtocolHistoryLen, "SuperMimic history len"},
+            {"reference.goal_frames", kSuperMimicProtocolGoalFrames, "SuperMimic goal frames"},
+            {"reference.goal_dim", kSuperMimicProtocolGoalDim, "SuperMimic goal dim"}};
+  }
   if (variant_name == "php") {
     return {{"observation.proprio_dim", 108, "PHP proprio and command dim"},
             {"observation.depth_latent_dim", kPhpProtocolDepthLatentDim, "PHP depth latent dim"},

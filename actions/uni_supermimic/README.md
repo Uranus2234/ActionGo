@@ -69,6 +69,13 @@ G 切换参考；无跌倒自动暂停或重置，动作结束后保持参考末
 两者使用同一 Actor，分别加载 `config/generic_uni_supermimic_paoxiao.yaml` 与
 `config/generic_uni_supermimic_wbst_motive.yaml`，对应缓存为 `motions/paoxiao.csv` 与
 `motions/wbst_motive.csv`，来源清单与缓存一起保存在仓库中。
+这两个真机入口使用 `reference.end_behavior: stop`：开始时 player 发布当前姿态 hold 并
+发出 ready，supervisor 成功切入 UserCtrl 后发出 start；参考播放完成后 player 保持
+最后发布的安全命令并发出 complete，supervisor 成功请求官方 walkrun 后重叠保持
+0.30 秒，再发出 release，player 才退出。若返回官方控制失败，则保持 hold 并进入
+`SwitchBackBlocked`，不会先退出造成命令空窗。这里的握手确认是进程协调及 RPC 返回，
+不等于固件物理控制权切换已独立验证。MuJoCo 桥接器仍覆盖为 `hold`，参考结束后持续推理；
+默认 `uni_supermimic_tracking` 入口也保留 `hold`。
 两段完整 ActionGo/DDS/MuJoCo 仿真共 1957 步，均通过训练 MDP/Actor 对照。
 paoxiao 存在全局位置漂移；双视窗视频的相机分别跟随各自骨盆，位置指标不做平移对齐。
 

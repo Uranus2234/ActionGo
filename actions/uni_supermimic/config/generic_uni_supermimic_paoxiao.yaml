@@ -21,7 +21,7 @@ reference:
   path: ../motions/paoxiao.csv
   goal_frames: 10
   goal_dim: 730
-  end_behavior: hold
+  end_behavior: stop
   yaw_alignment: initial
   policy_step_source: wall_clock
 observation:

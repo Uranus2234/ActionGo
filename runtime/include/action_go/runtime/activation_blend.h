@@ -1,6 +1,7 @@
 #pragma once
 
 #include <chrono>
+#include <cstdint>
 #include <vector>
 
 namespace action_go::runtime {
@@ -9,6 +10,7 @@ struct JointCommand {
   std::vector<float> q;
   std::vector<float> kp;
   std::vector<float> kd;
+  uint64_t sequence{0};
 };
 
 struct ActivationBlendResult {

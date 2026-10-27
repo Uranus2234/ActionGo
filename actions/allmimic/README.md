@@ -114,6 +114,53 @@ done
 ACTION_GO_NET=enP8p1s0 tools/launch/start_safe.sh
 ```
 
+## Dry run 延迟测量
+
+在接收机器人 LowState 的机器上，编译更新后的 player，然后运行：
+
+```bash
+cmake --build build --target generic_motion_tracking_player -j4
+python3 tools/runtime/allmimic_dry_run.py \
+  --net enP8p1s0 --model both --duration-sec 10
+```
+
+将网卡名改为实际接收 LowState 的接口。脚本依次测试 →+A 的带 Omni 模型和 →+B 的
+不带 Omni 模型，使用各自部署 spec，保持 50 Hz 推理、500 Hz 命令处理和默认 2 个
+ONNX 线程。无需启动 remote supervisor 或切换 UserCtrl；该脚本不发 RPC，不创建
+LowCmd publisher。Python 脚本仅依赖标准库。
+
+测量链路为 LowState 回调入口 → 状态等待 → 观测构建 → ONNX → 动作解码 → 发布线程等待
+→ 切入混合 / 安全过滤 / LowCmd 打包及 CRC。执行完命令生成后跳过 DDS Write，
+因此这里的 E2E 不含传感器采样、回调前的 DDS / 网络传输、命令网络发送和电机响应。
+`pipeline_ms` 从观测构建开始，不含输入状态年龄；`e2e_ms` 包含输入状态年龄。
+
+每次推理只记录其命令的首次处理，避免把 500 Hz 重复处理计作独立样本。若发布线程
+没来得及处理某次推理的目标，该次计入 `unmeasured_count`，不会伪造延迟样本。
+默认剔除前 25 个推理步的预热样本，同时单独保留首步数据。输出每阶段的平均值、
+P50/P95/P99/最大值、超过 20 ms 的次数和 deadline miss。
+原始 JSONL、player 日志和 `latency.json` 位于
+`outputs/allmimic_dry_run/<时间戳>/{omni,no-omni}/`，总表为 `summary.json`。
+
+可用 `--model omni` / `--model no-omni` 单独测试；`--onnx-threads 1` 对照线程配置；
+`--player /path/to/generic_motion_tracking_player` 指定构建目录；`--domain-id` 指定 DDS 域；
+`--log-dir` 指定新的结果目录。
+直接使用 C++ 时，增加 `--dry-run --dry-run-latency --event-log /path/to/events.jsonl`
+和 `--duration-sec 10`。该延迟开关仅支持 AllMimic / SuperMimic，并要求 dry run，
+普通 `--dry-run` 仍保持原行为。离线合成状态只用于短时功能测试，不代表 DDS E2E。
+
+2026-10-27 本地测试使用 AMD EPYC 9374F、CPU ONNX Runtime、2 个线程，
+以 500 Hz 经独立 DDS 域的 loopback 回放参考状态。各模型运行 10 秒，剔除前 25 步后
+各有 475 个样本；最终测量如下，单位 ms：
+
+| 模型 | ONNX 平均 | E2E 平均 | E2E P95 | E2E P99 | E2E 最大 |
+| --- | --- | --- | --- | --- | --- |
+| 带 Omni | 1.334 | 3.375 | 4.397 | 6.218 | 13.809 |
+| 不带 Omni | 1.382 | 3.381 | 4.450 | 6.140 | 12.610 |
+
+此次无漏测、无 E2E 超过 20 ms，`rt/user_lowcmd` 和 `rt/lowcmd` 均监测到零条命令。
+前一次同环境测量曾出现约 28 / 43 ms 的 E2E 长尾，因此这些短时结果不能保证调度上界。
+以上不是机器人板端或完整网络往返延迟；板端需使用同一脚本实测。
+
 ## MuJoCo 验证
 
 实时可交互窗口复用原生 viewer，使用已导出包，不需要训练源码：

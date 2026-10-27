@@ -19,6 +19,12 @@ GenericPolicyPlayer::~GenericPolicyPlayer() {
 
 void GenericPolicyPlayer::run() {
     load_spec();
+    if (args_.dry_run_latency &&
+        (!args_.dry_run || args_.event_log.empty() || args_.check_only ||
+         (variant_ != "allmimic" && variant_ != "supermimic" && variant_ != "uni_supermimic") ||
+         preview_mode_enabled())) {
+      throw std::runtime_error("--dry-run-latency requires --dry-run --event-log and an AllMimic/SuperMimic spec without preview or --check-only");
+    }
     event_log_.log("spec_loaded",
                    {event_string("player", player_label()),
                     event_string("template", template_),
@@ -582,6 +588,7 @@ int GenericPolicyPlayer::advance_deadline(std::chrono::steady_clock::time_point&
   }
 
 void GenericPolicyPlayer::on_low_state(const void* message) {
+    const auto received_at = std::chrono::steady_clock::now();
     const auto low = *(const LowState*)message;
     if (low.motor_state().size() < motor_count_) return;
     const auto quat = low.imu_state().quaternion();
@@ -590,7 +597,7 @@ void GenericPolicyPlayer::on_low_state(const void* message) {
     if (!std::all_of(quat.begin(), quat.end(), finite) ||
         !std::all_of(gyro.begin(), gyro.end(), finite)) return;
     RobotState s;
-    s.stamp = std::chrono::steady_clock::now();
+    s.stamp = received_at;
     s.connected = true;
     s.mode_machine = static_cast<int>(low.mode_machine());
     s.source_tick_ms = low.tick();
@@ -747,7 +754,7 @@ void GenericPolicyPlayer::publish(const std::vector<float>& q,
                int mode_machine,
                bool allow_stale_state,
                CommandPhase phase) {
-    if (args_.dry_run || !publisher_) return;
+    if (!args_.dry_run_latency && (args_.dry_run || !publisher_)) return;
     if (phase == CommandPhase::kHold && args_.experimental_no_prestart_hold) {
       if (!prestart_hold_suppressed_logged_) {
         prestart_hold_suppressed_logged_ = true;
@@ -823,6 +830,16 @@ void GenericPolicyPlayer::publish(const std::vector<float>& q,
       cmd.reserve()[1] = phase == CommandPhase::kActive ? 0x41474c53u : 0u;
     }
     cmd.crc() = crc32_core((uint32_t*)&cmd, (sizeof(cmd) >> 2) - 1);
+    if (args_.dry_run) {
+      dry_run_command_crc_ = cmd.crc();
+      last_published_q_ = filtered.q;
+      last_published_kp_ = filtered.kp;
+      last_published_kd_ = filtered.kd;
+      if (phase == CommandPhase::kHold) {
+        activation_blend_.observe_hold({filtered.q, filtered.kp, filtered.kd});
+      }
+      return;
+    }
     publisher_->Write(cmd);
     if (phase == CommandPhase::kActive) {
       const int64_t now_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(

@@ -1073,6 +1073,7 @@ struct Args {
   bool zmq_bind{true};
   bool zmq_bind_set{false};
   bool dry_run{false};
+  bool dry_run_latency{false};
   bool check_only{false};
   bool damping_on_stop{true};
   bool experimental_no_prestart_hold{false};
@@ -1151,6 +1152,7 @@ inline Args parse_args(int argc, char** argv) {
     else if (k == "--max-frames" || k == "--max-time-step" || k == "--motion-end-step") a.max_frames = std::stoi(need_arg(i, argc, argv, k));
     else if (k == "--duration-sec") a.duration_sec = std::stod(need_arg(i, argc, argv, k));
     else if (k == "--dry-run") a.dry_run = true;
+    else if (k == "--dry-run-latency") a.dry_run_latency = true;
     else if (k == "--check-only") a.check_only = true;
     else if (k == "--damping-on-stop") a.damping_on_stop = true;
     else if (k == "--no-damping-on-stop") a.damping_on_stop = false;
@@ -1168,6 +1170,7 @@ inline Args parse_args(int argc, char** argv) {
       std::cout
                 << "  --check-only loads spec/params/ONNX and runs a zero-input IO check without DDS.\n"
                 << "  --dry-run subscribes LowState and runs inference, but does not publish LowCmd.\n"
+                << "  --dry-run-latency measures AllMimic/SuperMimic receive-to-command latency; requires --dry-run --event-log.\n"
                 << "  --lowstate-timeout-sec SEC overrides the spec safety timeout.\n"
                 << "  --activation-blend-sec SEC blends q/kp/kd from the final hold command.\n"
                 << "  --sim-lowstate-decimation N advances embedded mimic after N fresh simulation states.\n"
@@ -2912,6 +2915,7 @@ class GenericPolicyPlayer {
   std::shared_ptr<unitree::robot::ChannelSubscriber<LowState>> subscriber_;
   mutable std::mutex state_mtx_;
   RobotState state_;
+  uint32_t dry_run_command_crc_{0};
   std::atomic<int64_t> active_publish_count_{0};
   std::atomic<int64_t> last_active_publish_ns_{0};
   std::atomic<double> max_active_publish_interval_ms_{0.0};

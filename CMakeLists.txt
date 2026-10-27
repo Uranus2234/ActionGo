@@ -592,6 +592,14 @@ if(DEFINED ACTION_GO_ONNXRUNTIME_LIB AND DEFINED ACTION_GO_ONNXRUNTIME_INCLUDE_D
     set_tests_properties(policy_spec_schema_check_adapters PROPERTIES
       WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
     )
+    if(NOT ACTION_GO_CODE_ONLY AND
+       EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/actions/allmimic/model/policy.onnx" AND
+       EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/actions/allmimic/model/policy_no_omni.onnx")
+      add_test(NAME allmimic_dry_run_test COMMAND ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/runtime/tests/allmimic_dry_run_test.py
+        --player $<TARGET_FILE:generic_motion_tracking_player>)
+      set_tests_properties(allmimic_dry_run_test PROPERTIES TIMEOUT 60)
+    endif()
     if(NOT ACTION_GO_CODE_ONLY AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/actions/bfm0/model/FBcprAuxModel.onnx")
       add_test(
         NAME policy_spec_schema_check_all

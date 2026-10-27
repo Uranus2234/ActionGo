@@ -89,6 +89,7 @@ void test_async_command_publisher() {
       [&](const JointCommand& command, bool active) {
         std::lock_guard<std::mutex> lock(samples_mutex);
         expect_near("async publisher callback command", command.q[0], active ? 1.f : 0.f);
+        expect_true("async publisher preserves command sequence", command.sequence == (active ? 42u : 0u));
         active_samples.push_back(active);
         publish_times.push_back(std::chrono::steady_clock::now());
       });
@@ -103,7 +104,7 @@ void test_async_command_publisher() {
                 std::none_of(active_samples.begin(), active_samples.end(),
                              [](bool active) { return active; }));
   }
-  publisher.update({{1.f}, {30.f}, {2.f}});
+  publisher.update({{1.f}, {30.f}, {2.f}, 42});
   std::this_thread::sleep_for(std::chrono::milliseconds(12));
   publisher.stop_and_join();
   publisher.rethrow_if_failed();

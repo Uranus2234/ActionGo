@@ -195,13 +195,56 @@ void GenericPolicyPlayer::control_loop_motion_controller(Controller& controller)
   int64_t inference_count = 0;
   uint32_t last_policy_tick_ms = state.source_tick_ms;
   uint64_t last_policy_state_seq = state.seq;
+  struct LatencySample {
+    uint64_t state_seq;
+    Clock::time_point received_at, started_at, input_ready_at, action_ready_at, target_ready_at;
+  };
+  std::mutex latency_mutex;
+  std::vector<LatencySample> latency_samples;
+  uint64_t target_sequence = 0;
+  uint64_t last_recorded_sequence = 0;
+  int64_t latency_count = 0;
+  auto record_latency = [&](uint64_t sequence, Clock::time_point command_started_at,
+                            Clock::time_point command_ready_at) {
+    if (!args_.dry_run_latency || sequence == 0 || sequence <= last_recorded_sequence) return;
+    LatencySample sample;
+    {
+      std::lock_guard<std::mutex> lock(latency_mutex);
+      sample = latency_samples.at(sequence - 1);
+    }
+    const auto elapsed_ms = [](Clock::time_point begin, Clock::time_point end) {
+      return std::chrono::duration<double, std::milli>(end - begin).count();
+    };
+    event_log_.log("dry_run_latency",
+                   {event_string("variant", variant_), event_int("sequence", sequence),
+                    event_int("state_seq", sample.state_seq), event_bool("lowcmd_sent", false),
+                    event_int("command_crc", dry_run_command_crc_),
+                    event_bool("synthetic_state", args_.offline_dry_run_state),
+                    event_number("state_age_ms", elapsed_ms(sample.received_at, sample.started_at)),
+                    event_number("preprocess_ms", elapsed_ms(sample.started_at, sample.input_ready_at)),
+                    event_number("onnx_ms", elapsed_ms(sample.input_ready_at, sample.action_ready_at)),
+                    event_number("postprocess_ms", elapsed_ms(sample.action_ready_at, sample.target_ready_at)),
+                    event_number("publish_wait_ms", elapsed_ms(sample.target_ready_at, command_started_at)),
+                    event_number("command_ms", elapsed_ms(command_started_at, command_ready_at)),
+                    event_number("pipeline_ms", elapsed_ms(sample.started_at, command_ready_at)),
+                    event_number("e2e_ms", elapsed_ms(sample.received_at, command_ready_at))});
+    last_recorded_sequence = sequence;
+    ++latency_count;
+  };
+  if (args_.dry_run_latency) {
+    event_log_.log("dry_run_latency_started",
+                   {event_string("variant", variant_), event_bool("lowcmd_sent", false),
+                    event_int("onnx_threads", onnx_threads_), event_int("publish_hz", publish_hz)});
+  }
   auto infer = [&](const RobotState& policy_state) {
+    const auto pipeline_start = Clock::now();
     require_fresh(policy_state);
     const auto reference_frame = controller.reference_index();
     const auto input = controller.build_input(robot_frame(policy_state));
     const auto inference_start = Clock::now();
     const auto action = onnx_.run_single(input, obs_input_name_, action_output_name_, 29);
-    const double inference_ms = std::chrono::duration<double, std::milli>(Clock::now() - inference_start).count();
+    const auto action_ready = Clock::now();
+    const double inference_ms = std::chrono::duration<double, std::milli>(action_ready - inference_start).count();
     inference_ms_last = inference_ms;
     inference_ms_total += inference_ms;
     inference_ms_max = std::max(inference_ms_max, inference_ms);
@@ -214,6 +257,13 @@ void GenericPolicyPlayer::control_loop_motion_controller(Controller& controller)
     policy_counter_ = static_cast<int64_t>(controller.policy_step());
     last_policy_tick_ms = policy_state.source_tick_ms;
     last_policy_state_seq = policy_state.seq;
+    if (args_.dry_run_latency) {
+      const auto target_ready = Clock::now();
+      std::lock_guard<std::mutex> lock(latency_mutex);
+      latency_samples.push_back({policy_state.seq, policy_state.stamp, pipeline_start,
+                                 inference_start, action_ready, target_ready});
+      target_sequence = latency_samples.size();
+    }
     if (supermimic_trace_) {
       event_log_.log(variant_ == "allmimic" ? "allmimic_inference" : "supermimic_inference",
                      {event_string("player", player_label()), event_string("variant", variant_),
@@ -269,8 +319,10 @@ void GenericPolicyPlayer::control_loop_motion_controller(Controller& controller)
   Clock::time_point previous_sync_publish{};
   auto synchronous_publish = [&]() {
     supermimic_command_sequence_.store(static_cast<uint32_t>(policy_counter_));
+    const auto command_started_at = Clock::now();
     publish(target, target_kp, target_kd, snapshot().mode_machine, false, CommandPhase::kActive);
     const auto now = Clock::now();
+    record_latency(target_sequence, command_started_at, now);
     if (previous_sync_publish != Clock::time_point{}) {
       sync_max_publish_interval_ms = std::max(sync_max_publish_interval_ms,
           std::chrono::duration<double, std::milli>(now - previous_sync_publish).count());
@@ -284,10 +336,13 @@ void GenericPolicyPlayer::control_loop_motion_controller(Controller& controller)
   } else {
     async_publisher = std::make_unique<AsyncCommandPublisher>(
         publish_hz, 0.0, JointCommand{target, target_kp, target_kd},
-        [this](const JointCommand& command, bool active) {
+        [&, this](const JointCommand& command, bool active) {
+          const auto command_started_at = Clock::now();
           const auto current_state = snapshot();
           publish(command.q, command.kp, command.kd, current_state.mode_machine, false,
                   active ? CommandPhase::kActive : CommandPhase::kHold);
+          const auto command_ready_at = Clock::now();
+          if (active) record_latency(command.sequence, command_started_at, command_ready_at);
         }, preview_committed);
   }
   std::cout << player_log_prefix() << " start motion_conditioned_tracking/" << variant_
@@ -329,7 +384,7 @@ void GenericPolicyPlayer::control_loop_motion_controller(Controller& controller)
           synchronous_publish();
           next_publish = Clock::now() + publish_dt;
         } else {
-          async_publisher->update({target, target_kp, target_kd});
+          async_publisher->update({target, target_kp, target_kd, target_sequence});
         }
         if (stats_interval_ > 0 && policy_counter_ % stats_interval_ == 0) {
           event_log_.log("runtime_metrics",
@@ -361,6 +416,13 @@ void GenericPolicyPlayer::control_loop_motion_controller(Controller& controller)
     async_publisher->rethrow_if_failed();
   }
   if (inference_error) std::rethrow_exception(inference_error);
+  if (args_.dry_run_latency) {
+    event_log_.log("dry_run_latency_finished",
+                   {event_int("inference_count", inference_count),
+                    event_int("latency_count", latency_count),
+                    event_int("unmeasured_count", inference_count - latency_count),
+                    event_bool("lowcmd_sent", false)});
+  }
   if (finished && !g_stop_requested.load() && !handoff_complete_file_.empty()) {
     if (!command_safety_config_.preserve_pd_torque &&
         last_published_q_.size() == static_cast<std::size_t>(motor_count_)) {

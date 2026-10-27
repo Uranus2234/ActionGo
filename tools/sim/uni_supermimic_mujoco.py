@@ -46,6 +46,7 @@ def parse_args(argv=None):
     parser.add_argument("--sdk-root", type=Path)
     parser.add_argument("--python-deps", type=Path, default=LOCAL_ROOT / "python")
     parser.add_argument("--reference", choices=("beside", "ghost", "off"), default="beside")
+    parser.add_argument("--safety-profile", choices=("simulation_parity", "hardware"), default="simulation_parity")
     parser.add_argument("--gpu", action="store_true")
     parser.add_argument("--vglrun", type=Path)
     parser.add_argument("--fps", type=float, default=60.0)
@@ -278,8 +279,10 @@ def main(argv=None):
                              trace=args.trace)
     spec["handoff"].update(activation_blend_sec=0.0, damping_on_stop=False,
                            cmd_topic="rt/user_lowcmd", state_topic="rt/lowstate")
-    spec["safety"] = {"profile": "simulation_parity", "enabled": True, "finite_check": True,
-                      "joint_limit_enabled": False, "max_position_step_enabled": False,
+    spec["safety"] = {"profile": args.safety_profile, "enabled": True, "finite_check": True,
+                      "joint_limit_enabled": args.safety_profile == "hardware",
+                      "preserve_pd_torque": args.variant == "allmimic" and args.safety_profile == "hardware",
+                      "max_position_step_enabled": False,
                       "lowstate_timeout_sec": 5.0}
     spec_path = log_dir / "simulation_spec.yaml"
     spec_path.write_text(yaml.safe_dump(spec, sort_keys=False))
@@ -329,7 +332,8 @@ def main(argv=None):
              "control_dt": 0.02, "physics_dt": float(model.opt.timestep),
              "inference_backend": "ActionGo C++ ONNX Runtime via loopback Unitree DDS",
              "player_command": command, "checkpoint": checkpoint,
-             "trace_enabled": args.trace, "reference_end_behavior": "hold"}
+             "trace_enabled": args.trace, "reference_end_behavior": "hold",
+             "safety_profile": args.safety_profile}
 
     reference_data = mujoco.MjData(model)
     if not args.headless:

@@ -16,7 +16,7 @@ bindings:
   Down+B: pbfm_tracking_dance
   Down+X: pbfm_pico_teleop
   Right+A: allmimic_paoxiao
-  Right+B: allmimic_wbst_motive
+  Right+B: allmimic_paoxiao_no_omni
   Right+X: proto_walk
   Right+Y: proto_dance
   R1+F1: holosoma_dance

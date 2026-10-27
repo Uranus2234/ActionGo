@@ -98,7 +98,7 @@ Up+Y          -> g1_parkour
 Right+X       -> proto_walk
 Right+Y       -> proto_dance
 Right+A       -> allmimic_paoxiao，159000 轮 AllMimic Omni 混合模型
-Right+B       -> allmimic_wbst_motive，同一 AllMimic 策略
+Right+B       -> allmimic_paoxiao_no_omni，159000 轮 AllMimic 不带 Omni 模型跟踪 paoxiao
 Down+A        -> pbfm_loco，真实深度摇杆行走
 Down+B        -> pbfm_tracking_dance，LaFAN dance 56.52–98.72 秒
 Down+X        -> pbfm_pico_teleop，XRoboToolkit 实时全身遥操

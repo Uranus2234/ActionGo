@@ -139,7 +139,7 @@ Arm first with `Start` or `Left+B`, then use an action binding. The checked-in d
 | `Down+B` | `pbfm_tracking_dance` |
 | `Down+X` | `pbfm_pico_teleop` |
 | `Right+A` | `allmimic_paoxiao` using the 159000-iteration AllMimic Omni-mix actor |
-| `Right+B` | `allmimic_wbst_motive` using the same AllMimic actor |
+| `Right+B` | `allmimic_paoxiao_no_omni` using the 159000-iteration AllMimic actor trained without Omni |
 | `Right+X` | `proto_walk` |
 | `Right+Y` | `proto_dance` |
 | `R1+F1` | `holosoma_dance` |
@@ -178,7 +178,7 @@ This table reports repository evidence, not marketing-level “support.” The p
 | PHP | BYOW; package acquisition instructions | RealSense + torso IMU or SHM depth | Yes; camera checks separate | Official Holosoma/ActionGo bridge | Stair acceptance pending | On | High |
 | [P-BFM](actions/pbfm/README.md) | BYOW; pinned public-demo checkpoint, CC-BY-NC-4.0 | RealSense or SHM depth; context, joystick, or Pico UDP | Yes; camera checks separate | C++ actor / MuJoCo bridge | Hardware acceptance pending | On | High |
 | [Uni-SuperMimic](actions/uni_supermimic/README.md) | Local Uni-SuperMimic export; 200000-iteration checkpoint | Packaged future-reference CSV | Yes | C++ actor / DDS / native MuJoCo | Not verified | On | High |
-| [AllMimic](actions/allmimic/README.md) | Local AllMimic Omni-mix export; 159000-iteration checkpoint | IMU-relative future rotations and mixed residual targets | Yes | C++ actor / DDS / native MuJoCo | Not verified | On | High |
+| [AllMimic](actions/allmimic/README.md) | Local AllMimic exports with / without Omni; both iteration 159000 | IMU-relative future rotations and mixed residual targets | Yes | C++ actor / DDS / native MuJoCo | Not verified | On | High |
 | mjlab | BYOW/local export; package source notes | Embedded reference | Yes | C++ Unitree SDK2 MuJoCo bridge | Not documented | On | High |
 
 Read the adapter README under `actions/<adapter>/` before use. SONIC action names currently select v1.1; the original `generic_sonic.yaml` remains available for fallback, with separate TensorRT caches. Official v1.1 replay and board-side acceptance remain pending. PHP real-robot stair acceptance is also pending; check-only and local simulation do not establish it.

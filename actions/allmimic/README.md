@@ -6,9 +6,20 @@
 
 ## 模型来源
 
-当前包导出自本地 AllMimic 的 `20261026-wostate4096/gpu1/ckpt_0159000.pt`，实际轮次
-**159000**，Omni 混合采样比例为 30%。用户提及的 158.7k 没有对应的 158700 存档；
-该实验每 1000 轮存档，当前包使用最接近的 159000，不能当作精确的 158700 权重。
+当前包同时保留带 Omni 和不带 Omni 的两份模型，均来自
+`20261026-wostate4096` 实验的 **159000** 轮存档：
+
+| 按键 | 动作 | 模型 | 训练来源 |
+| --- | --- | --- | --- |
+| →+A | `allmimic_paoxiao` | `model/policy.onnx` | `gpu1/ckpt_0159000.pt`，Omni 采样占 30%，seed 1 |
+| →+B | `allmimic_paoxiao_no_omni` | `model/policy_no_omni.onnx` | `gpu0/ckpt_0159000.pt`，无 Omni 动作，seed 0 |
+
+两者均跟踪 paoxiao，部署参数和参考 CSV 经逐字节核对一致，直接共用
+`config/AllMimic.yaml` 和 `motions/paoxiao.csv`。观测归一化随各自权重嵌入 ONNX。
+两个实验种子也不同，因此该对比不能将效果差异全部归因于 Omni 数据。
+无 Omni 版的 PyTorch / ONNX Runtime 导出对照最大绝对误差为 2.03e-6。
+用户提及的 158.7k 没有对应的 158700 存档；该实验每 1000 轮存档，使用最接近的
+159000，不能当作精确的 158700 权重。
 每段动作的 `motions/*.manifest.json` 记录 checkpoint SHA256、真实轮次、完整训练配置、
 训练实现哈希、参考库及导出校验结果。模型与 CSV 使用仓库已有的 Git LFS 资产规则。
 
@@ -23,14 +34,15 @@
 
 ## 按键和交接
 
-`config/remote_actions.yaml` 的 →+A / →+B 当前分别绑定 `allmimic_paoxiao` /
-`allmimic_wbst_motive`。Uni-SuperMimic 的原动作和模型仍保留，可修改按键映射切回。
+`config/remote_actions.yaml` 的 →+A / →+B 当前分别绑定带 Omni 的 `allmimic_paoxiao` /
+不带 Omni 的 `allmimic_paoxiao_no_omni`。原来的带 Omni 动作 `allmimic_wbst_motive`
+仍保留在动作清单中，目前未绑定 →+B。Uni-SuperMimic 的原动作和模型也保留。
 
-两个真机入口均采用 `reference.end_behavior: stop`。先发布当前姿态 hold 并通知 ready，
+这些真机入口均采用 `reference.end_behavior: stop`。先发布当前姿态 hold 并通知 ready，
 supervisor 成功切入 UserCtrl 后通知 start；动作完成后保持最后安全命令并通知 complete，
 supervisor 成功请求 walkrun 后重叠保持 0.30 秒，再通知 release 退出。失败时进入
 `SwitchBackBlocked` 并保留 hold。握手与 RPC 返回不能替代真机物理控制权验证。
-这两个动作执行期间设置 `safety_enable: false`，与 OmniXtreme 的高动态动作一致。
+这些动作执行期间设置 `safety_enable: false`，与 OmniXtreme 的高动态动作一致。
 原始 paoxiao 在约 9.08–9.48 秒倾斜超过 57.3°，wbst 在约 6.46–7.02 秒越过该阈值，
 最高约 177.6°；默认持续 60 ms 的倾倒判断会把正常动作误判为跌倒并进入阻尼。
 此设置仅豁免当前动作的 IMU 倾倒判断；因此动作期间真实跌倒也不会按该阈值自动阻尼。
@@ -73,13 +85,17 @@ python tools/export/allmimic_export_policy_onnx.py \
 ```
 
 导出器严格检查任务编码、latent、历史和未来偏移，严格加载 Actor 和归一化权重，
-使用 FP32 / ONNX opset 17。对首、中、末参考状态及固定随机输入进行 PyTorch/ORT 对照，
+使用 FP32 / ONNX opset 17。无 Omni 版导出时将 checkpoint 改为 `gpu0/ckpt_0159000.pt`、
+library 改为 `data/mixed/gpu0.npz`，仅保留 `--clip user/paoxiao.csv`；输出的
+`policy.onnx` 在部署包中命名为 `policy_no_omni.onnx`，来源记录在
+`motions/paoxiao_no_omni.manifest.json`。
+对首、中、末参考状态及固定随机输入进行 PyTorch/ORT 对照，
 并检查 CSV 的 FP32 写回一致性。导出目录同时包含供本机闭环验证的 `scene.mjb` 与每段
 `motion.npz`，部署 C++ player 只需要 ONNX、参数 YAML 和对应 CSV。
 
 ```bash
 python3 tools/assets/check_model_assets.py --policy allmimic
-for motion in paoxiao wbst_motive; do
+for motion in paoxiao paoxiao_no_omni wbst_motive; do
   spec="actions/allmimic/config/generic_allmimic_${motion}.yaml"
   ./build/policy_spec_schema_check --spec "$spec" || break
   ./build/generic_motion_tracking_player --spec "$spec" --check-only || break
@@ -102,6 +118,9 @@ python tools/sim/uni_supermimic_mujoco.py --variant allmimic \
 G 切换旁边参考/重叠参考/关闭；默认 1 倍速，参考结束后持续推理末帧，无倒地自动暂停或重置。
 支持 MuJoCo 原生鼠标选择与扰动。安装 VirtualGL 后可加 `--gpu --vglrun /path/to/vglrun`
 进行 GPU 渲染；策略推理继续使用 C++ ONNX Runtime CPU。
+增加 `--safety-profile hardware` 可在交互窗口启用真机的位置限位和 PD 力矩补偿；
+默认 `simulation_parity` 用于对照训练。窗口仍使用逐步同步仿真和末帧持续推理，
+完整真机配置的异步频率和结束握手请用下文的 deployment check 验证。
 
 ```bash
 python tools/sim/allmimic_mujoco.py \
@@ -173,3 +192,10 @@ python tools/sim/allmimic_deployment_check.py \
 测试器现已增加交接余量，但运行环境的调度延迟仍会影响跟踪，不能由延长等待解决。
 修正等待后重跑完整 paoxiao，1385 次推理并完成交接；按策略进度对齐的关节 RMSE
 为 0.1093 rad、高度 RMSE 为 0.0101 m，记录到 1 次 policy deadline miss。
+
+无 Omni 的 159000 轮模型另行通过完整 paoxiao 检查：逐步同步验证 1384 步、27.68 秒，
+关节 RMSE 0.1051 rad；训练 Task/Actor 对照最大误差为观测 9.54e-7、原始动作
+1.38e-5、残差目标 2.38e-7，DDS 目标误差为零。站姿启动的真机过滤 / 显式 PD 异步
+仿真完成 1385 次推理，complete/release 均成功并由 player 确认；关节目标在限位内，
+按策略进度对齐的关节 RMSE 0.1127 rad、高度 RMSE 0.0096 m，记录到 1 次 policy
+deadline miss。这些测试未包含真机。

@@ -22,6 +22,20 @@
     },
     {
       "paths": [
+        "actions/allmimic/model/policy_no_omni.onnx"
+      ],
+      "sha256": [
+        "ee6972988e1b98433c4ccf2151bcdd44d6ff99216878305233e682a9ba4767cd"
+      ],
+      "source": "https://github.com/Shimingyi/allmimic",
+      "upstream_revision": "cb334ff674b2f57248f33f8c21b7fb526fbdf8cc",
+      "upstream_code_license": "unverified; upstream LICENSE is a placeholder",
+      "weight_license": "local training export; dataset terms apply separately",
+      "redistribution": "blocked_pending_review",
+      "notes": "Locally trained WoStateEstimation checkpoint 20261026-wostate4096/gpu0/ckpt_0159000.pt, iteration 159000, SHA256 7672e9b93eff081f5f847103feace4b284d9c8088801514ebe7da6104852ab21. Training library gpu0.npz contains no Omni clips. Shares byte-identical robot parameters and paoxiao reference with the Omni-mix export."
+    },
+    {
+      "paths": [
         "actions/pbfm/model/policy.onnx"
       ],
       "sha256": [

@@ -48,7 +48,8 @@ ACTION_GO_NET=lo tools/launch/start_dry_run.sh
 Uni-SuperMimic 使用独立的 `uni_supermimic` variant，动作名为 `uni_supermimic_tracking`。
 20 万轮模型的本地导出、MuJoCo 推理与接口说明见 [Uni-SuperMimic 适配](actions/uni_supermimic/README.md)。
 当前 `Right+A/B` 已切换为 [AllMimic](actions/allmimic/README.md) 的
-`allmimic_paoxiao` / `allmimic_wbst_motive`，使用 Omni 混合训练的 159000 轮权重。
+`allmimic_paoxiao` / `allmimic_paoxiao_no_omni`，分别使用带 Omni / 不带 Omni 的
+159000 轮权重，均跟踪 paoxiao。
 Uni-SuperMimic 动作保留，可修改映射切回。
 
 ```bash
@@ -82,7 +83,7 @@ ACTION_GO_NET=<机器人网卡> tools/launch/start_safe.sh
 | `Down+B` | `pbfm_tracking_dance` |
 | `Down+X` | `pbfm_pico_teleop` |
 | `Right+A` | `allmimic_paoxiao`，159000 轮 AllMimic Omni 混合模型跟踪 paoxiao |
-| `Right+B` | `allmimic_wbst_motive`，同一 AllMimic 策略跟踪 wbst motive |
+| `Right+B` | `allmimic_paoxiao_no_omni`，159000 轮 AllMimic 不带 Omni 模型跟踪 paoxiao |
 | `Right+X` | `proto_walk` |
 | `Right+Y` | `proto_dance` |
 | `R1+F1` | `holosoma_dance` |

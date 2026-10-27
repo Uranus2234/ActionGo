@@ -30,7 +30,34 @@
 supervisor 成功切入 UserCtrl 后通知 start；动作完成后保持最后安全命令并通知 complete，
 supervisor 成功请求 walkrun 后重叠保持 0.30 秒，再通知 release 退出。失败时进入
 `SwitchBackBlocked` 并保留 hold。握手与 RPC 返回不能替代真机物理控制权验证。
-IMU safety 默认开启，`R2+A` 回 walkrun，`Select+Start` 进入阻尼。
+这两个动作执行期间设置 `safety_enable: false`，与 OmniXtreme 的高动态动作一致。
+原始 paoxiao 在约 9.08–9.48 秒倾斜超过 57.3°，wbst 在约 6.46–7.02 秒越过该阈值，
+最高约 177.6°；默认持续 60 ms 的倾倒判断会把正常动作误判为跌倒并进入阻尼。
+此设置仅豁免当前动作的 IMU 倾倒判断；因此动作期间真实跌倒也不会按该阈值自动阻尼。
+`R2+A` 回 walkrun、`Select+Start` 手动阻尼仍有效，结束回到 walkrun 后恢复普通倾倒判断。
+命令有限值、LowState 超时、位置限位和 PD 力矩限制仍由 player 检查。
+
+部署启用 `safety.preserve_pd_torque: true`，复用 Instinct 的 PD 力矩补偿过滤器。
+训练策略可输出超出物理位置限位的虚拟 PD 目标，直接裁剪会改变控制力矩。
+过滤器先按当前 q/dq 计算并限幅期望力矩，再限制发布的位置目标，通过 LowCmd 的
+`tau` 补回差额；总力矩在当前反馈状态下与限幅后的训练 PD 一致。反馈延迟和执行器
+动态仍需真机核实。历史继续记录原始 action，不能换成过滤后的目标或补偿力矩。
+
+与现有策略对照的检查结果：
+
+| 环节 | 对照结果 |
+| --- | --- |
+| 关节顺序、SDK 映射、PD、action scale | 与 Uni-SuperMimic 的 G1 29DoF 配置一致，未发现错位 |
+| IMU | 使用 LowState 主 IMU 的骨盆姿态/角速度；不使用躯干 IMU 代替根姿态 |
+| 观测与动作 | AllMimic 独立 1660 维观测、按列编码旋转、上身参考残差；不能复用 Uni 的 1720 维契约 |
+| 频率 | 50 Hz 推理、500 Hz 命令发布；板端实际耗时需查看 runtime_metrics |
+| 切入与切回 | 与 Uni 共用 ready/start、complete/release，0.10 秒切入混合、0.30 秒切回重叠 |
+| 位置目标过滤 | AllMimic 开启上述 PD 力矩补偿，其余 generic variant 默认保持原行为 |
+| 倾倒判断 | 与 OmniXtreme 的高动态动作一样按动作豁免，避免正常前倾/倒立触发阻尼 |
+
+站姿启动的仿真已覆盖切入过程，但不能据此排除真机切入抖动：当前混合仅 0.10 秒，
+`activation_blend_started.max_q_delta` 可检查当时姿态与策略目标的差距。尚未在机器人
+板端检查推理时延、电机反馈延迟或物理控制权交接。
 
 ## 导出和预检
 
@@ -62,6 +89,20 @@ ACTION_GO_NET=enP8p1s0 tools/launch/start_safe.sh
 
 ## MuJoCo 验证
 
+实时可交互窗口复用原生 viewer，使用已导出包，不需要训练源码：
+
+```bash
+python tools/sim/uni_supermimic_mujoco.py --variant allmimic \
+  --package /path/to/export --clip paoxiao \
+  --player ./build/generic_motion_tracking_player \
+  --sdk-root /path/to/unitree_sdk2_python --python-deps /path/to/dds/python/packages
+```
+
+`--clip 12_wbst_motive` 切到 wbst motive。空格暂停/继续，Backspace 手动重置，
+G 切换旁边参考/重叠参考/关闭；默认 1 倍速，参考结束后持续推理末帧，无倒地自动暂停或重置。
+支持 MuJoCo 原生鼠标选择与扰动。安装 VirtualGL 后可加 `--gpu --vglrun /path/to/vglrun`
+进行 GPU 渲染；策略推理继续使用 C++ ONNX Runtime CPU。
+
 ```bash
 python tools/sim/allmimic_mujoco.py \
   --training-repo /path/to/allmimic --checkpoint /path/to/ckpt_0159000.pt \
@@ -90,3 +131,45 @@ python tools/sim/allmimic_mujoco.py \
 
 另将 wbst motive 延长到 650 步（13 秒）验证末帧持续推理：全部通过逐步对照，
 状态保持有限，没有自动重置或暂停。真机入口仍按上面的 stop 与握手机制结束。
+
+### 真机配置的异步仿真检查
+
+上述逐步对照采用仿真配置。以下入口直接读取本目录的真机 spec，在独立 DDS domain
+与 `lo` 上以 500 Hz 异步发布命令，从站姿启动、初始 yaw 为 0.8 rad，执行完整动作，
+收到 complete 后等待 0.30 秒再发送 release。它检查 player 和文件握手，不调用真机
+UserCtrl / walkrun RPC，也不模拟 remote supervisor 的 IMU 判断。
+
+```bash
+python tools/sim/allmimic_deployment_check.py \
+  --package /path/to/export --clip 12_wbst_motive \
+  --player ./build/generic_motion_tracking_player \
+  --log-dir /path/to/new/deployment-check
+```
+
+可用 `--pd explicit` 改为按 LowCmd 的 q/dq/kp/kd/tau 显式计算力矩，
+或用 `--no-preserve-pd-torque` 复现原来直接裁剪位置目标的部署行为。
+输出 `metrics.json`、`trace.npz` 和 player 日志；误差同时报告按固定 50 Hz 时间轴和
+按 player 实际参考帧对齐的 `policy_phase_*`，避免把调度延迟全部算作姿态误差。
+完整动作允许额外 10 秒完成交接；未收到 complete/release 或出现 safety_stop 时返回失败。
+完整动作检查应有 `complete_seen: true`、`release_sent: true`、
+`release_acknowledged: true`，目标关节角在限位内。
+
+本机完整动作、站姿启动的对照结果（MuJoCo CPU，无噪声或外力）：
+
+| 动作 / PD 模式 | 原关节 RMSE | 补偿后关节 RMSE | 原高度 RMSE | 补偿后高度 RMSE |
+| --- | --- | --- | --- | --- |
+| paoxiao / implicit | 0.1155 rad | 0.1086 rad | 0.0161 m | 0.0098 m |
+| wbst motive / implicit | 0.1634 rad | 0.1346 rad | 0.0375 m | 0.0191 m |
+| wbst motive / explicit | 0.1668 rad | 0.1372 rad | 0.0411 m | 0.0208 m |
+
+三个完整动作均完成 complete/release 握手，发布位置目标均在限位内。wbst 自带倒立与
+贴地段，不能仅凭最小根高度或最大倾角认定摔倒。这里的改进是部署链路的仿真结果，
+不代表模型或真实电机已经过硬件验证。player 的 `runtime_metrics` 额外记录推理平均/
+最大耗时及 deadline miss，板端应确认推理是否能持续满足 20 ms 周期。
+最后一次 wbst 显式 PD 运行的本机平均推理约 1.27 ms，但出现一次约 40.8 ms 的峰值，
+记录到 1 次 policy deadline miss；因此这些测试也不能证明板端或本机始终满足实时周期。
+另一次 paoxiao 运行记录到 40 次 policy deadline miss，最大相邻推理间隔约 353 ms，
+动作完成延迟约 0.8 秒，并使原先仅留 1 秒余量的测试器提前退出 release 等待。
+测试器现已增加交接余量，但运行环境的调度延迟仍会影响跟踪，不能由延长等待解决。
+修正等待后重跑完整 paoxiao，1385 次推理并完成交接；按策略进度对齐的关节 RMSE
+为 0.1093 rad、高度 RMSE 为 0.0101 m，记录到 1 次 policy deadline miss。

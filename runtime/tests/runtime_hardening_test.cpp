@@ -266,6 +266,21 @@ void test_pd_torque_filter() {
   expect_throw("PD compensation requires torque limits", [&] {
     filter.filter(requested, {20.f, 20.f, 20.f, 0.f}, {1.f, 1.f, 1.f, 1.f}, state, {}, 4);
   });
+  CommandSafetyState knee_state;
+  knee_state.connected = true;
+  knee_state.stamp = std::chrono::steady_clock::now();
+  knee_state.q = {0.3f};
+  knee_state.dq = {0.2f};
+  CommandSafetyLimits knee_limits;
+  knee_limits.lower = {-0.087267f};
+  knee_limits.upper = {2.879793f};
+  knee_limits.torque = {139.f};
+  const auto knee = filter.filter({-0.6f}, {99.f}, {6.3f}, knee_state, knee_limits, 1);
+  expect_near("AllMimic virtual knee setpoint remains within physical limits", knee.q[0], knee_limits.lower[0]);
+  const float knee_torque = knee.kp[0] * (knee.q[0] - knee_state.q[0]) -
+      knee.kd[0] * knee_state.dq[0] + knee.tau[0];
+  expect_near("AllMimic virtual knee preserves training PD effort", knee_torque,
+              99.f * (-0.6f - 0.3f) - 6.3f * 0.2f, 1e-4f);
 }
 
 void test_prearm_command() {

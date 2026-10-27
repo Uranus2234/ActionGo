@@ -443,6 +443,10 @@ void GenericPolicyPlayer::load_spec() {
     command_safety_config_.finite_check = scalar_or<bool>(safety, "finite_check", true);
     command_safety_config_.joint_limit_enabled =
         scalar_or<bool>(safety, "joint_limit_enabled", !simulation_parity);
+    command_safety_config_.preserve_pd_torque = scalar_or<bool>(safety, "preserve_pd_torque", false);
+    if (command_safety_config_.preserve_pd_torque && variant_ != "allmimic") {
+      throw std::runtime_error("generic safety.preserve_pd_torque is currently supported only for allmimic");
+    }
     command_safety_config_.lowstate_timeout_enabled = scalar_or<bool>(safety, "lowstate_timeout_enabled", true);
     command_safety_config_.lowstate_timeout_sec = args_.lowstate_timeout_sec > 0.0
         ? args_.lowstate_timeout_sec : scalar_or<double>(safety, "lowstate_timeout_sec", 0.2);
@@ -638,6 +642,7 @@ CommandSafetyState GenericPolicyPlayer::command_safety_state(const GenericPolicy
     out.stamp = s.stamp;
     out.seq = s.seq;
     out.q = s.q;
+    out.dq = s.dq;
     return out;
   }
 
@@ -803,7 +808,7 @@ void GenericPolicyPlayer::publish(const std::vector<float>& q,
       cmd.motor_cmd()[i].mode() = 1;
       cmd.motor_cmd()[i].q() = filtered.q[i];
       cmd.motor_cmd()[i].dq() = 0.f;
-      cmd.motor_cmd()[i].tau() = 0.f;
+      cmd.motor_cmd()[i].tau() = filtered.tau[i];
       cmd.motor_cmd()[i].kp() = filtered.kp[i];
       cmd.motor_cmd()[i].kd() = filtered.kd[i];
     }

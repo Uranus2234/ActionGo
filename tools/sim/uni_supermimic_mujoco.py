@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the Uni-SuperMimic ActionGo C++ actor in its native MuJoCo scene."""
+"""Run a Uni-SuperMimic or AllMimic ActionGo C++ actor in its native MuJoCo scene."""
 
 from __future__ import annotations
 
@@ -18,6 +18,7 @@ import subprocess
 import sys
 import threading
 import time
+from types import SimpleNamespace
 
 import numpy as np
 
@@ -32,8 +33,10 @@ HELPER_SPEC.loader.exec_module(HELPERS)
 
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--variant", choices=("uni_supermimic", "allmimic"), default="uni_supermimic")
+    parser.add_argument("--clip", default="paoxiao")
     parser.add_argument("--training-repo", type=Path, default=ACTION_GO_ROOT.parent / "Uni-SuperMimic")
-    parser.add_argument("--motion", type=Path, required=True)
+    parser.add_argument("--motion", type=Path)
     parser.add_argument("--package", type=Path, required=True)
     parser.add_argument("--player", type=Path, default=LOCAL_ROOT / "build/generic_motion_tracking_player")
     parser.add_argument("--headless", action="store_true")
@@ -50,6 +53,8 @@ def parse_args(argv=None):
     parser.add_argument("--trace", action="store_true")
     parser.add_argument("--control-file", type=Path)
     args = parser.parse_args(argv)
+    if args.variant == "uni_supermimic" and args.motion is None:
+        parser.error("--motion is required for Uni-SuperMimic")
     if not math.isfinite(args.duration_sec) or args.duration_sec < 0:
         parser.error("--duration-sec must be finite and nonnegative")
     if not math.isfinite(args.fps) or args.fps <= 0:
@@ -141,6 +146,43 @@ def set_motion_state(mujoco, torch, mat_to_quat, model, data, indices, motion, f
     mujoco.mj_forward(model, data)
 
 
+def load_allmimic(package, clip):
+    import hashlib
+    import mujoco
+    import torch
+
+    clip_dir = package / clip
+    manifest = json.loads((clip_dir / "manifest.json").read_text())
+    for path, expected in ((package / "policy.onnx", manifest["policy"]["sha256"]),
+                           (clip_dir / "reference.csv", manifest["reference"]["csv_sha256"])):
+        if hashlib.sha256(path.read_bytes()).hexdigest() != expected:
+            raise ValueError(f"AllMimic asset hash mismatch: {path}")
+    model = mujoco.MjModel.from_binary_path(str(package / "scene.mjb"))
+    data = mujoco.MjData(model)
+    with np.load(clip_dir / "motion.npz") as archive:
+        qpos, qvel = archive["qpos"].copy(), archive["qvel"].copy()
+    if qpos.shape != (manifest["reference"]["num_frames"], 36) or qvel.shape != (len(qpos), 35):
+        raise ValueError("AllMimic motion has unexpected dimensions")
+    rotations = np.empty((len(qpos), 9))
+    for frame, quat in enumerate(qpos[:, 3:7]):
+        mujoco.mju_quat2Mat(rotations[frame], quat.astype(np.float64))
+    motion = SimpleNamespace(names=[manifest["reference"]["clip"]], num_frames=len(qpos),
+        root_p=torch.from_numpy(qpos[:, :3]), root_R=torch.from_numpy(rotations.reshape(-1, 3, 3)).float(),
+        q=torch.from_numpy(qpos[:, 7:]), root_v=torch.from_numpy(qvel[:, :3]),
+        root_w=torch.from_numpy(qvel[:, 3:6]), qd=torch.from_numpy(qvel[:, 6:]))
+
+    def mat_to_quat(rotation):
+        quat = np.empty(4)
+        mujoco.mju_mat2Quat(quat, rotation.numpy().astype(np.float64).reshape(9))
+        return torch.from_numpy(quat)
+
+    indices = {"q": np.arange(7, 36), "v": np.arange(6, 35), "root_q": 0, "root_v": 0,
+               "actuators": np.array([np.flatnonzero(model.actuator_trnid[:, 0] == joint)[0]
+                                       for joint in range(1, 30)]),
+               "robot_geoms": np.flatnonzero(model.body_rootid[model.geom_bodyid] == model.jnt_bodyid[0])}
+    return mujoco, torch, mat_to_quat, motion, model, data, indices, manifest
+
+
 def stop_process(process):
     if process is None or process.poll() is not None:
         return
@@ -179,23 +221,31 @@ def main(argv=None):
 
     training_repo = args.training_repo.expanduser().resolve()
     package = args.package.expanduser().resolve()
-    motion_path = args.motion.expanduser().resolve()
-    manifest = json.loads((package / "manifest.json").read_text())
-    source_fps = float(manifest["provenance"]["motion"]["source_fps"])
+    if args.variant == "allmimic":
+        mujoco, torch, mat_to_quat, motion, model, data, indices, manifest = load_allmimic(package, args.clip)
+        reference_dir = package / args.clip
+        params_path = package / "AllMimic.yaml"
+        checkpoint = manifest["checkpoint"]
+    else:
+        motion_path = args.motion.expanduser().resolve()
+        manifest = json.loads((package / "manifest.json").read_text())
+        source_fps = float(manifest["provenance"]["motion"]["source_fps"])
+        if not motion_path.is_file() or motion_path.name != manifest["provenance"]["motion"]["name"]:
+            raise ValueError("The motion must match the clip packaged with the policy")
+        mujoco, torch, mat_to_quat, motion, model, data, indices = load_training(training_repo, motion_path, source_fps)
+        reference_dir = package
+        params_path = package / "SuperMimic.yaml"
+        checkpoint = manifest["provenance"]["checkpoint"]
     clip = str(manifest["reference"]["clip"])
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
-    log_dir = (args.log_dir or LOCAL_ROOT / "runs" / f"uni-supermimic-200000-{timestamp}-{os.getpid()}").resolve()
+    log_dir = (args.log_dir or LOCAL_ROOT / "runs" / f"{args.variant}-{timestamp}-{os.getpid()}").resolve()
     log_dir.mkdir(parents=True, exist_ok=False)
     player = args.player.expanduser().resolve()
     if not player.is_file():
         raise FileNotFoundError(f"ActionGo C++ player not found: {player}")
-    if not motion_path.is_file() or motion_path.name != manifest["provenance"]["motion"]["name"]:
-        raise ValueError("The motion must match the clip packaged with the policy")
-
-    mujoco, torch, mat_to_quat, motion, model, data, indices = load_training(training_repo, motion_path, source_fps)
     if motion.names != [clip] or motion.num_frames != int(manifest["reference"]["num_frames"]):
         raise ValueError("Training MotionLib output does not match the exported reference package")
-    reference_cache = np.loadtxt(package / "reference.csv", delimiter=",", dtype=np.float32, ndmin=2)
+    reference_cache = np.loadtxt(reference_dir / "reference.csv", delimiter=",", dtype=np.float32, ndmin=2)
     if reference_cache.shape != (motion.num_frames, 739):
         raise ValueError("Packed reference cache has an unexpected shape")
     if not np.allclose(reference_cache[:, 730:], motion.root_R.numpy().reshape(-1, 9), atol=2e-5):
@@ -216,12 +266,14 @@ def main(argv=None):
     initializer(domain, "lo")
     bridge = HELPERS.DDSBridge(model, data, indices)
 
-    spec_source = ACTION_GO_ROOT / "actions/uni_supermimic/config/generic_uni_supermimic.yaml"
+    spec_source = ACTION_GO_ROOT / ("actions/allmimic/config/generic_allmimic_paoxiao.yaml"
+                                   if args.variant == "allmimic" else
+                                   "actions/uni_supermimic/config/generic_uni_supermimic.yaml")
     spec = yaml.safe_load(spec_source.read_text())
     spec.setdefault("runtime", {}).update(duration_sec=0, publish_hz=500)
-    spec["robot"]["params"] = str(package / "SuperMimic.yaml")
+    spec["robot"]["params"] = str(params_path)
     spec["model"]["path"] = str(package / "policy.onnx")
-    spec["reference"].update(path=str(package / "reference.csv"), policy_step_source="lowstate_tick",
+    spec["reference"].update(path=str(reference_dir / "reference.csv"), policy_step_source="lowstate_tick",
                              sim_lockstep_sequence=True, end_behavior="hold", yaw_alignment="none",
                              trace=args.trace)
     spec["handoff"].update(activation_blend_sec=0.0, damping_on_stop=False,
@@ -233,8 +285,8 @@ def main(argv=None):
     spec_path.write_text(yaml.safe_dump(spec, sort_keys=False))
     ready_path, start_path = log_dir / "ready", log_dir / "start"
     command = [str(player), "--net", "lo", "--domain-id", str(domain), "--spec", str(spec_path),
-               "--params", str(package / "SuperMimic.yaml"), "--model", str(package / "policy.onnx"),
-               "--trajectory", str(package / "reference.csv"), "--hz", "50", "--publish-hz", "500",
+               "--params", str(params_path), "--model", str(package / "policy.onnx"),
+               "--trajectory", str(reference_dir / "reference.csv"), "--hz", "50", "--publish-hz", "500",
                "--activation-blend-sec", "0", "--ready-file", str(ready_path),
                "--start-file", str(start_path), "--no-damping-on-stop"]
 
@@ -276,7 +328,7 @@ def main(argv=None):
              "automatic_pause": False, "clip": clip, "clip_frames": motion.num_frames,
              "control_dt": 0.02, "physics_dt": float(model.opt.timestep),
              "inference_backend": "ActionGo C++ ONNX Runtime via loopback Unitree DDS",
-             "player_command": command, "checkpoint": manifest["provenance"]["checkpoint"],
+             "player_command": command, "checkpoint": checkpoint,
              "trace_enabled": args.trace, "reference_end_behavior": "hold"}
 
     reference_data = mujoco.MjData(model)
@@ -397,6 +449,9 @@ def main(argv=None):
                             print("Paused" if paused else "Playing", flush=True)
                         elif key == 259:
                             restart()
+                            if viewer:
+                                viewer.perturb.active = 0
+                                viewer.perturb.active2 = 0
                             stats["manual_resets"] += 1
                         elif key in (ord("G"), ord("g")):
                             modes = ("beside", "ghost", "off")
@@ -466,6 +521,9 @@ def main(argv=None):
                     if not paused and now - wait_since > 10.0:
                         raise TimeoutError(f"Timed out waiting for ActionGo command; inspect {player_log.name}")
                     if render_due:
+                        if paused:
+                            mujoco.mjv_applyPerturbPose(model, data, viewer.perturb, 1)
+                            mujoco.mj_forward(model, data)
                         update_reference(viewer)
                         next_sync = now + 1.0 / args.fps
                 if render_due:

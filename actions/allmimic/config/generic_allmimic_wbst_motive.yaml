@@ -40,4 +40,5 @@ handoff:
   mode_machine: 5
   activation_blend_sec: 0.10
   damping_on_stop: false
-safety: {}
+safety:
+  preserve_pd_torque: true

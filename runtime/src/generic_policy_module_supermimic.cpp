@@ -89,6 +89,7 @@ void GenericPolicyPlayer::load_supermimic_params() {
     }
   }
   if (variant_ == "allmimic") {
+    safety_limits_.torque = torque_limits_;
     allmimic_controller_.configure(default_q_, action_scale_,
         yamlc::required_vector_size<float>(y, "action.residual_scale", motor_count_),
         yamlc::required_vector_size<float>(y, "action.residual_reference", motor_count_));
@@ -124,6 +125,7 @@ void GenericPolicyPlayer::schema_summary_supermimic() {
             << " reference=" << trajectory_path_.string()
             << " yaw_alignment=" << (supermimic_align_initial_yaw_ ? "initial" : "none")
             << " end_behavior=" << (supermimic_stop_at_end_ ? "stop" : "hold")
+            << " preserve_pd_torque=" << command_safety_config_.preserve_pd_torque
             << " policy_step_source=" << (supermimic_use_lowstate_tick_ ? "lowstate_tick" : "wall_clock")
             << " policy_tick_ms=20 sim_lowstate_decimation=" << sim_lowstate_decimation_
             << " sim_lockstep_sequence=" << supermimic_sim_lockstep_sequence_ << "\n";
@@ -187,6 +189,10 @@ void GenericPolicyPlayer::control_loop_motion_controller(Controller& controller)
   if (!ready_file_.empty()) touch_file(ready_file_);
 
   bool preview_committed = false;
+  double inference_ms_last = 0.0;
+  double inference_ms_total = 0.0;
+  double inference_ms_max = 0.0;
+  int64_t inference_count = 0;
   uint32_t last_policy_tick_ms = state.source_tick_ms;
   uint64_t last_policy_state_seq = state.seq;
   auto infer = [&](const RobotState& policy_state) {
@@ -196,6 +202,10 @@ void GenericPolicyPlayer::control_loop_motion_controller(Controller& controller)
     const auto inference_start = Clock::now();
     const auto action = onnx_.run_single(input, obs_input_name_, action_output_name_, 29);
     const double inference_ms = std::chrono::duration<double, std::milli>(Clock::now() - inference_start).count();
+    inference_ms_last = inference_ms;
+    inference_ms_total += inference_ms;
+    inference_ms_max = std::max(inference_ms_max, inference_ms);
+    ++inference_count;
     auto next_target = controller.decode_action(action);
     controller.accept_action(action);
     target = std::move(next_target);
@@ -284,6 +294,7 @@ void GenericPolicyPlayer::control_loop_motion_controller(Controller& controller)
             << " hz=50 publish_hz=" << publish_hz
             << " reference_frames=" << controller.frame_limit()
             << " end_behavior=" << (supermimic_stop_at_end_ ? "stop" : "hold")
+            << " preserve_pd_torque=" << command_safety_config_.preserve_pd_torque
             << " sim_lockstep_sequence=" << supermimic_sim_lockstep_sequence_ << "\n";
   std::exception_ptr inference_error;
   bool finished = false;
@@ -325,6 +336,8 @@ void GenericPolicyPlayer::control_loop_motion_controller(Controller& controller)
                          {event_string("player", player_label()), event_string("variant", variant_),
                           event_int("step", policy_counter_),
                           event_int("reference_frame", controller.reference_index()),
+                          event_number("inference_ms_last", inference_ms_last),
+                          event_number("inference_ms_max", inference_ms_max),
                           event_int("policy_deadline_miss", policy_deadline_miss)});
         }
       }
@@ -349,7 +362,8 @@ void GenericPolicyPlayer::control_loop_motion_controller(Controller& controller)
   }
   if (inference_error) std::rethrow_exception(inference_error);
   if (finished && !g_stop_requested.load() && !handoff_complete_file_.empty()) {
-    if (last_published_q_.size() == static_cast<std::size_t>(motor_count_)) {
+    if (!command_safety_config_.preserve_pd_torque &&
+        last_published_q_.size() == static_cast<std::size_t>(motor_count_)) {
       target = last_published_q_;
       target_kp = last_published_kp_;
       target_kd = last_published_kd_;
@@ -377,6 +391,8 @@ void GenericPolicyPlayer::control_loop_motion_controller(Controller& controller)
   event_log_.log("runtime_metrics",
                  {event_string("player", player_label()), event_string("variant", variant_),
                   event_int("step", policy_counter_), event_int("publish_count", metrics.publish_count),
+                  event_number("inference_ms_avg", inference_count > 0 ? inference_ms_total / inference_count : 0.0),
+                  event_number("inference_ms_max", inference_ms_max),
                   event_int("policy_deadline_miss", policy_deadline_miss),
                   event_int("publish_deadline_miss", metrics.deadline_miss),
                   event_number("max_publish_interval_ms", metrics.max_publish_interval_ms),

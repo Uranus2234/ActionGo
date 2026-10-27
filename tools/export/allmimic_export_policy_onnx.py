@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 from pathlib import Path
 import re
 import subprocess
@@ -147,6 +148,12 @@ def export(args):
     library = MotionLibrary(str(args.library), "cpu")
     if not set(args.clip).issubset(library.names) or library.fps != 50:
         raise ValueError("All requested clips must exist in the 50 Hz training library")
+    trim_frames = round(args.trim_start_sec * library.fps)
+    if not math.isclose(trim_frames / library.fps, args.trim_start_sec, abs_tol=1e-9):
+        raise ValueError("trim-start-sec must align with the 50 Hz reference frames")
+    for clip_index, clip_name in enumerate(library.names):
+        if clip_name in args.clip and trim_frames >= int(library.lengths[clip_index]):
+            raise ValueError(f"Trimming would remove the entire clip: {clip_name}")
     args.output_dir.mkdir(parents=True, exist_ok=True)
     (args.output_dir / "AllMimic.yaml").write_text(yaml.safe_dump(params, sort_keys=False))
     mujoco.mj_saveModel(model, str(args.output_dir / "scene.mjb"))
@@ -158,6 +165,9 @@ def export(args):
         clip_dir = args.output_dir / Path(clip_name).stem
         clip_dir.mkdir(exist_ok=True)
         start, length = int(library.starts[clip_index]), int(library.lengths[clip_index])
+        source_length = length
+        start += trim_frames
+        length -= trim_frames
         frames = torch.arange(start, start + length)
         future = (frames[:, None] + torch.tensor(config.offsets)).clamp(max=start + length - 1)
         state, reference = library.frame(frames), library.frame(future)
@@ -191,6 +201,10 @@ def export(args):
                        "future": [10, 73], "normalization": "embedded in ONNX"},
             "robot": params["robot"], "action": params["action"],
         }
+        if trim_frames:
+            manifest["reference"].update(source_num_frames=source_length,
+                                         source_start_frame=trim_frames,
+                                         trim_start_sec=trim_frames / library.fps)
         manifests.append((clip_dir, manifest))
     generator = torch.Generator().manual_seed(0)
     samples.append(torch.cat((policy.obs_norm.mean + policy.obs_norm.std * torch.randn(1, 930, generator=generator),
@@ -211,7 +225,10 @@ def main():
     parser.add_argument("--library", type=Path, required=True)
     parser.add_argument("--clip", action="append", required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
+    parser.add_argument("--trim-start-sec", type=float, default=0.0)
     args = parser.parse_args()
+    if not math.isfinite(args.trim_start_sec) or args.trim_start_sec < 0:
+        parser.error("trim-start-sec must be finite and nonnegative")
     args.training_repo = args.training_repo.resolve()
     sys.path.insert(0, str(args.training_repo))
     torch.set_num_threads(2)

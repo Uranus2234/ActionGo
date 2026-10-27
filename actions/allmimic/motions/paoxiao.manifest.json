@@ -90,11 +90,14 @@
   },
   "reference": {
     "clip": "user/paoxiao.csv",
-    "num_frames": 1385,
+    "num_frames": 1360,
     "fps": 50,
-    "last_frame_time_sec": 27.68,
+    "last_frame_time_sec": 27.18,
     "library_sha256": "672315d0ca6cb82978791eefa6cdd9007360721a3bf640927e55f592664df842",
-    "csv_sha256": "6cac4495e57bd02c18f2501756d8b58ab7be960abed9d4bd056412353b226427"
+    "csv_sha256": "130479c20903736a4c66f22422434930f79a45a1c3e8068f6bf064210c87b6fe",
+    "source_num_frames": 1385,
+    "source_start_frame": 25,
+    "trim_start_sec": 0.5
   },
   "policy": {
     "input": [
@@ -465,9 +468,9 @@
   "validation": {
     "onnx_checker": "passed",
     "backend": "onnxruntime_cpu",
-    "sample_count": 7,
-    "max_abs_error": 2.384185791015625e-06,
-    "atol": 2e-05,
+    "sample_count": 4,
+    "max_abs_error": 0.0000011324882507324219,
+    "atol": 0.00002,
     "rtol": 0.0001
   }
 }

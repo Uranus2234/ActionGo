@@ -16,8 +16,13 @@
 
 两者均跟踪 paoxiao，部署参数和参考 CSV 经逐字节核对一致，直接共用
 `config/AllMimic.yaml` 和 `motions/paoxiao.csv`。观测归一化随各自权重嵌入 ONNX。
+当前两版 paoxiao 均去掉源动作前 0.5 秒的抬手段：50 Hz 下删除前 25 帧，
+从原第 25 帧（零起始编号）开始，剩余 1360 帧，末帧时间为 27.18 秒。
+参考 CSV、仿真 motion.npz 与两份 manifest 同步裁剪；训练库及 159000 轮权重不变。
+`source_start_frame` 和 `trim_start_sec` 记录裁剪来源。wbst motive 不裁剪。
 两个实验种子也不同，因此该对比不能将效果差异全部归因于 Omni 数据。
-无 Omni 版的 PyTorch / ONNX Runtime 导出对照最大绝对误差为 2.03e-6。
+裁剪版参考状态的 PyTorch / ONNX Runtime 导出对照最大绝对误差分别为：
+带 Omni 1.13e-6、无 Omni 1.61e-6。
 用户提及的 158.7k 没有对应的 158700 存档；该实验每 1000 轮存档，使用最接近的
 159000，不能当作精确的 158700 权重。
 每段动作的 `motions/*.manifest.json` 记录 checkpoint SHA256、真实轮次、完整训练配置、
@@ -43,7 +48,8 @@ supervisor 成功切入 UserCtrl 后通知 start；动作完成后保持最后�
 supervisor 成功请求 walkrun 后重叠保持 0.30 秒，再通知 release 退出。失败时进入
 `SwitchBackBlocked` 并保留 hold。握手与 RPC 返回不能替代真机物理控制权验证。
 这些动作执行期间设置 `safety_enable: false`，与 OmniXtreme 的高动态动作一致。
-原始 paoxiao 在约 9.08–9.48 秒倾斜超过 57.3°，wbst 在约 6.46–7.02 秒越过该阈值，
+原始 paoxiao 在约 9.08–9.48 秒倾斜超过 57.3°（裁剪后约 8.58–8.98 秒），
+wbst 在约 6.46–7.02 秒越过该阈值，
 最高约 177.6°；默认持续 60 ms 的倾倒判断会把正常动作误判为跌倒并进入阻尼。
 此设置仅豁免当前动作的 IMU 倾倒判断；因此动作期间真实跌倒也不会按该阈值自动阻尼。
 `R2+A` 回 walkrun、`Select+Start` 手动阻尼仍有效，结束回到 walkrun 后恢复普通倾倒判断。
@@ -80,9 +86,12 @@ python tools/export/allmimic_export_policy_onnx.py \
   --training-repo /path/to/allmimic \
   --checkpoint /path/to/ckpt_0159000.pt \
   --library /path/to/data/mixed/gpu1.npz \
-  --clip user/paoxiao.csv --clip omni/12_wbst_motive.csv \
+  --clip user/paoxiao.csv --trim-start-sec 0.5 \
   --output-dir /path/to/export
 ```
+
+`--trim-start-sec` 作用于本次导出的所有 `--clip`，且必须对齐 50 Hz 的整帧。
+单独导出 wbst motive 时使用 `--clip omni/12_wbst_motive.csv` 并省略裁剪参数。
 
 导出器严格检查任务编码、latent、历史和未来偏移，严格加载 Actor 和归一化权重，
 使用 FP32 / ONNX opset 17。无 Omni 版导出时将 checkpoint 改为 `gpu0/ckpt_0159000.pt`、
@@ -136,7 +145,8 @@ python tools/sim/allmimic_mujoco.py \
 对 C++ 实际观测、原始动作、残差解码和 DDS 目标逐步调用训练 Task/Actor 对照，输出
 `metrics.json`、`parity.json`、`trace.npz` 和 player 日志。此 variant 尚未经过真机验证。
 
-159000 轮模型的本地完整闭环结果如下，位置误差为世界坐标误差，未做平移对齐。
+以下为裁剪前参考的历史验证记录；裁剪后的结果见文末。159000 轮模型的本地完整闭环
+结果如下，位置误差为世界坐标误差，未做平移对齐。
 无噪声、无 push，原生 mjlab 模型在 MuJoCo CPU 中运行；这些结果不代表真机性能。
 
 | 动作 | 控制步数 | 时长 | 关节 RMSE | 平均根位置误差 |
@@ -199,3 +209,11 @@ python tools/sim/allmimic_deployment_check.py \
 仿真完成 1385 次推理，complete/release 均成功并由 player 确认；关节目标在限位内，
 按策略进度对齐的关节 RMSE 0.1127 rad、高度 RMSE 0.0096 m，记录到 1 次 policy
 deadline miss。这些测试未包含真机。
+
+### 裁掉前 0.5 秒后的验证
+
+带 Omni / 不带 Omni 的 paoxiao 均执行 1360 次推理；站姿启动、显式 PD、真机命令过滤
+和异步 DDS 条件下，两个动作均完成 complete/release 握手并确认收到 release，
+关节目标均在限位内。按策略进度对齐的关节 RMSE 分别为 0.1083 / 0.1157 rad，
+高度 RMSE 为 0.0097 / 0.0095 m；各记录到 1 次 policy deadline miss。
+这些结果只验证裁剪后的 MuJoCo 部署链路，尚未经过真机验证。

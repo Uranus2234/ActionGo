@@ -29,6 +29,9 @@ inline constexpr int kEmbeddedMimicProtocolObsDim = 154;
 inline constexpr int kBeyondMimicProtocolRefBodyCount = 14;
 inline constexpr int kBeyondMimicProtocolRefAnchorIndex = 7;
 
+inline constexpr int kAllMimicProtocolObsFrameDim = 93;
+inline constexpr int kAllMimicProtocolObsDim = 1660;
+
 inline constexpr int kSuperMimicProtocolObsFrameDim = 99;
 inline constexpr int kSuperMimicProtocolHistoryLen = 10;
 inline constexpr int kSuperMimicProtocolGoalFrames = 10;

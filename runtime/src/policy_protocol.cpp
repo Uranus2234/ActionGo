@@ -135,6 +135,13 @@ const std::vector<PolicyProtocolConstraint>& constraints() {
        0,
        0,
        0},
+      {"allmimic",
+       "Unitree G1 29DoF",
+       true, false, "",
+       kUnitreeG1ProtocolMotorCount, kAllMimicProtocolObsDim, kUnitreeG1ProtocolMotorCount,
+       {"obs"}, {"actions"}, {}, 128,
+       kSuperMimicProtocolHistoryLen, kAllMimicProtocolObsFrameDim, {},
+       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
       {"supermimic",
        "Unitree G1 29DoF",
        true,
@@ -447,6 +454,10 @@ std::vector<PolicyNamedDim> protocol_named_dims_for_variant(const std::string& v
             {"depth_height", kPbfmProtocolDepthHeight},
             {"depth_width", kPbfmProtocolDepthWidth}};
   }
+  if (variant_name == "allmimic") {
+    return {{"obs_frame_dim", kAllMimicProtocolObsFrameDim}, {"history_len", 10},
+            {"goal_frames", 10}, {"goal_dim", 730}};
+  }
   if (variant_name == "supermimic" || variant_name == "uni_supermimic") {
     return {{"obs_frame_dim", kSuperMimicProtocolObsFrameDim},
             {"history_len", kSuperMimicProtocolHistoryLen},
@@ -515,6 +526,12 @@ std::vector<PolicyNamedDim> protocol_named_dims_for_variant(const std::string& v
 }
 
 std::vector<PolicyYamlDimRule> protocol_yaml_dim_rules_for_variant(const std::string& variant_name) {
+  if (variant_name == "allmimic") {
+    return {{"observation.obs_frame_dim", 93, "AllMimic observation frame"},
+            {"observation.history_len", 10, "AllMimic history"},
+            {"reference.goal_frames", 10, "AllMimic future frames"},
+            {"reference.goal_dim", 730, "AllMimic goal"}};
+  }
   if (variant_name == "supermimic" || variant_name == "uni_supermimic") {
     return {{"observation.obs_frame_dim", kSuperMimicProtocolObsFrameDim, "SuperMimic obs frame dim"},
             {"observation.history_len", kSuperMimicProtocolHistoryLen, "SuperMimic history len"},

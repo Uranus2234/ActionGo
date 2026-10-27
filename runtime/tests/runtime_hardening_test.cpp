@@ -12,6 +12,7 @@
 #include "action_go/runtime/sonic_planner.h"
 #include "action_go/runtime/sonic_policy.h"
 #include "action_go/runtime/supermimic_policy.h"
+#include "action_go/runtime/allmimic_policy.h"
 
 #include <chrono>
 #include <cmath>
@@ -580,7 +581,7 @@ void test_policy_protocol_constraints() {
   const std::vector<std::string> variants{
       "bfm_zero", "unitree_rl_mjlab", "beyondmimic", "holosoma",
       "protomotions", "twist", "humanoid_gpt", "instinct_parkour",
-      "sonic", "instinct", "php", "pbfm", "steadytray", "omnixtreme", "supermimic", "uni_supermimic"};
+      "sonic", "instinct", "php", "pbfm", "steadytray", "omnixtreme", "supermimic", "uni_supermimic", "allmimic"};
   for (const std::string& variant : variants) {
     const auto* contract = variant_contract(variant);
     const auto* protocol = protocol_constraint_for_variant(variant);
@@ -617,6 +618,43 @@ void test_policy_protocol_constraints() {
     expect_true("sonic decoder obs dim", sonic->obs_dim == kSonicDecoderObsDim);
     expect_true("sonic has three sessions", sonic->sessions.size() == 3);
   }
+}
+
+void test_allmimic_policy_helpers() {
+  using namespace action_go::runtime;
+  AllMimicController controller;
+  std::vector<float> reference_weight(29, 1.f);
+  std::fill_n(reference_weight.begin(), 12, 0.f);
+  controller.configure(std::vector<float>(29, 0.25f), std::vector<float>(29, 0.5f),
+                       std::vector<float>(29, 1.f), reference_weight);
+  SuperMimicReferenceFrame reference;
+  for (std::size_t frame = 0; frame < 10; ++frame) {
+    reference.goal[frame * 73 + 3] = 1.f;
+    reference.goal[frame * 73 + 7] = 1.f;
+    for (std::size_t joint = 0; joint < 29; ++joint) reference.goal[frame * 73 + 9 + joint] = 0.75f;
+  }
+  controller.set_reference_frames({reference, reference});
+  SuperMimicRobotFrame robot;
+  robot.q.fill(0.5f);
+  robot.quat = {0.70710678f, 0.f, 0.f, 0.70710678f};
+  auto input = controller.build_input(robot);
+  expect_true("AllMimic packed input dimension", input.size() == 1660);
+  expect_near("AllMimic history uses 93 features", input[9 * 93], 0.25f);
+  expect_near("AllMimic column-major rotated x axis", input[930 + 4], -1.f);
+  expect_near("AllMimic column-major rotated y axis", input[930 + 6], 1.f);
+  const auto target = controller.decode_action(std::vector<float>(29, 2.f));
+  expect_near("AllMimic legs use absolute targets", target[0], 1.25f);
+  expect_near("AllMimic upper body uses next reference residual", target[12], 1.75f);
+  controller.accept_action(std::vector<float>(29, 2.f));
+  input = controller.build_input(robot);
+  expect_near("AllMimic stores raw previous action", input[9 * 93 + 64], 2.f);
+  controller.reset(robot.quat, true);
+  input = controller.build_input(robot);
+  expect_near("AllMimic initial yaw alignment", input[930 + 3], 1.f);
+  expect_near("AllMimic reset clears raw previous action", input[64], 0.f);
+  expect_true("AllMimic supports tracking player", variant_allowed_for_player("allmimic", GenericPlayerKind::kMotionTracking));
+  const auto* protocol = protocol_constraint_for_variant("allmimic");
+  expect_true("AllMimic protocol input", protocol && protocol->obs_dim == 1660);
 }
 
 void test_supermimic_policy_helpers() {
@@ -1024,6 +1062,7 @@ int main() {
     test_realtime_input_stale_gate();
     test_sonic_policy_helpers();
     test_supermimic_policy_helpers();
+    test_allmimic_policy_helpers();
     test_sonic_planner_helpers();
   } catch (const std::exception& e) {
     fail("uncaught exception", e.what());

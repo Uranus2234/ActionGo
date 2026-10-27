@@ -97,8 +97,8 @@ F1+A          -> wbst
 Up+Y          -> g1_parkour
 Right+X       -> proto_walk
 Right+Y       -> proto_dance
-Right+A       -> uni_supermimic_paoxiao，20 万轮 UniSuperMimic
-Right+B       -> uni_supermimic_wbst_motive，同一 UniSuperMimic 策略
+Right+A       -> allmimic_paoxiao，159000 轮 AllMimic Omni 混合模型
+Right+B       -> allmimic_wbst_motive，同一 AllMimic 策略
 Down+A        -> pbfm_loco，真实深度摇杆行走
 Down+B        -> pbfm_tracking_dance，LaFAN dance 56.52–98.72 秒
 Down+X        -> pbfm_pico_teleop，XRoboToolkit 实时全身遥操

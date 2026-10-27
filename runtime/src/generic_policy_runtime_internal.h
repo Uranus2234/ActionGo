@@ -19,6 +19,7 @@
 #include "action_go/runtime/sonic_planner.h"
 #include "action_go/runtime/sonic_policy.h"
 #include "action_go/runtime/supermimic_policy.h"
+#include "action_go/runtime/allmimic_policy.h"
 #include "action_go/runtime/yaml_contract.h"
 
 #include <yaml-cpp/yaml.h>
@@ -2419,6 +2420,12 @@ class GenericPolicyPlayer {
 
   void control_loop_supermimic();
 
+  template <typename Controller>
+  void check_only_motion_controller(Controller& controller);
+
+  template <typename Controller>
+  void control_loop_motion_controller(Controller& controller);
+
   void load_spec_holosoma(const YAML::Node& y);
 
   void load_spec_protomotions(const YAML::Node& y);
@@ -2764,6 +2771,7 @@ class GenericPolicyPlayer {
 
   std::vector<float> beyond_action_, beyond_ref_joint_pos_, beyond_ref_joint_vel_, beyond_ref_body_quat_w_;
   action_go::runtime::SuperMimicController supermimic_controller_;
+  action_go::runtime::AllMimicController allmimic_controller_;
   bool supermimic_use_lowstate_tick_{false};
   bool supermimic_sim_lockstep_sequence_{false};
   bool supermimic_align_initial_yaw_{true};

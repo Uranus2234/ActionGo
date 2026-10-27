@@ -4,6 +4,24 @@
   "assets": [
     {
       "paths": [
+        "actions/allmimic/model/policy.onnx",
+        "actions/allmimic/motions/paoxiao.csv",
+        "actions/allmimic/motions/wbst_motive.csv"
+      ],
+      "sha256": [
+        "ea87a5a45a539a3d0a97a454139a455ab329e9fda82f5b423f3e30343cb3d570",
+        "6cac4495e57bd02c18f2501756d8b58ab7be960abed9d4bd056412353b226427",
+        "42d65aff67437e5a3363fcd03558b30804ebed02c2dc6184d98dde5479da135b"
+      ],
+      "source": "https://github.com/Shimingyi/allmimic",
+      "upstream_revision": "cb334ff674b2f57248f33f8c21b7fb526fbdf8cc",
+      "upstream_code_license": "unverified; upstream LICENSE is a placeholder",
+      "weight_license": "local training export; dataset terms apply separately",
+      "redistribution": "blocked_pending_review",
+      "notes": "Locally trained Omni-mix WoStateEstimation checkpoint iteration 159000, SHA256 b5378b2ca3fb6ffedf4405830d01a1e7eee53dcc81a81967910863d0dd8838e3. Requested 158700 was not archived; exported nearest 159000. Independent 93x10 + 730 observation and upper-body residual targets."
+    },
+    {
+      "paths": [
         "actions/pbfm/model/policy.onnx"
       ],
       "sha256": [

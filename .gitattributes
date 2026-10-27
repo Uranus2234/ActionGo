@@ -1,3 +1,4 @@
 *.onnx filter=lfs diff=lfs merge=lfs -text
 *.onnx.data filter=lfs diff=lfs merge=lfs -text
 actions/uni_supermimic/motions/*.csv filter=lfs diff=lfs merge=lfs -text
+actions/allmimic/motions/*.csv filter=lfs diff=lfs merge=lfs -text

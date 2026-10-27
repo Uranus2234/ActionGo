@@ -388,10 +388,11 @@ void validate_source_sections(const fs::path& spec,
       break;
     case PolicyTemplateId::kMotionConditionedTracking: {
       const std::string variant = lower(yamlc::required_scalar<std::string>(y, "runtime.variant"));
-      if (variant == "supermimic" || variant == "uni_supermimic") {
+      if (variant == "supermimic" || variant == "uni_supermimic" || variant == "allmimic") {
         require_existing_path(spec, yamlc::required_scalar<std::string>(y, "reference.path"), "reference.path", true);
-        if (yamlc::required_scalar<std::string>(y, "reference.type") != "supermimic_csv_v1") {
-          throw std::runtime_error("SuperMimic requires reference.type=supermimic_csv_v1");
+        if (yamlc::required_scalar<std::string>(y, "reference.type") !=
+            (variant == "allmimic" ? "allmimic_csv_v1" : "supermimic_csv_v1")) {
+          throw std::runtime_error(variant + " reference.type does not match its cache format");
         }
         require_matching_int(y, {"runtime.inference_hz"}, 50, "SuperMimic inference Hz");
       } else if (variant == "protomotions") {
@@ -504,11 +505,15 @@ void validate_params(const YAML::Node& y,
       throw std::runtime_error("unitree allowed obs dims mismatch");
     }
     yamlc::required_scalar<double>(params, "observation.phase_period");
-  } else if (variant == "beyondmimic" || variant == "supermimic" || variant == "uni_supermimic") {
+  } else if (variant == "beyondmimic" || variant == "supermimic" || variant == "uni_supermimic" || variant == "allmimic") {
     validate_standard_robot_vectors(params, motor_count, true, true, "robot.policy_joint_order");
     require_matching_int(params, {"policy.num_actions", "num_actions"}, action_dim, "BeyondMimic action dim");
     require_matching_int(params, {"policy.num_obs", "num_obs"}, obs_dim, "BeyondMimic obs dim");
     require_permutation_one_of(params, {"robot.joint_map", "joint_index"}, motor_count, "BeyondMimic joint map");
+    if (variant == "allmimic") {
+      require_vector_one_of<float>(params, {"action.residual_scale"}, motor_count, "AllMimic residual scale");
+      require_vector_one_of<float>(params, {"action.residual_reference"}, motor_count, "AllMimic residual reference");
+    }
   } else if (variant == "holosoma") {
     validate_standard_robot_vectors(params, motor_count, true, true, "robot.policy_joint_order");
     require_matching_int(params, {"policy.num_actions", "num_actions"}, action_dim, "Holosoma action dim");

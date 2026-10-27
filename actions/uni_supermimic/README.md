@@ -59,7 +59,8 @@ G 切换参考；无跌倒自动暂停或重置，动作结束后保持参考末
 参考结束后持续推理，观测最大误差 1.67e-6、动作最大误差 1.29e-5、DDS 目标误差为零。
 运行记录位于本地 `ActionGo-local/runs/feature-uni-supermimic-200000-12s/`。
 
-遥控器绑定由 `config/remote_actions.yaml` 决定：
+以下是 Uni-SuperMimic 原绑定及仿真结果。当前 `config/remote_actions.yaml` 已将
+→+A/B 切换到独立 AllMimic 动作；本目录动作和模型仍保留，可按需改回：
 
 | 按键 | 动作名 | 参考动作 | 源帧率 | 仿真时长 | 关节 RMSE | 平均根位置误差 |
 | --- | --- | --- | --- | --- | --- | --- |

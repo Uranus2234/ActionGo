@@ -24,8 +24,9 @@ std::string supermimic_csv(const Values& values) {
 
 void GenericPolicyPlayer::load_spec_supermimic(const YAML::Node& y) {
   const auto reference = y["reference"];
-  if (yamlc::required_scalar<std::string>(y, "reference.type") != "supermimic_csv_v1") {
-    throw std::runtime_error("SuperMimic requires reference.type=supermimic_csv_v1");
+  const auto expected_reference = variant_ == "allmimic" ? "allmimic_csv_v1" : "supermimic_csv_v1";
+  if (yamlc::required_scalar<std::string>(y, "reference.type") != expected_reference) {
+    throw std::runtime_error(variant_ + " requires reference.type=" + expected_reference);
   }
   const auto yaw = scalar_or<std::string>(reference, "yaw_alignment", "initial");
   if (yaw != "initial" && yaw != "none") {
@@ -60,9 +61,9 @@ void GenericPolicyPlayer::load_supermimic_params() {
   const auto y = YAML::LoadFile(params_path_.string());
   num_actions_ = yamlc::required_scalar<int>(y, "policy.num_actions");
   num_obs_ = yamlc::required_scalar<int>(y, "policy.num_obs");
-  if (motor_count_ != 29 || num_actions_ != 29 || num_obs_ != 1720 ||
-      configured_action_dim_ != 29 || configured_obs_dim_ != 1720) {
-    throw std::runtime_error("SuperMimic requires 29 motors/actions and 1720 packed observations");
+  if (motor_count_ != 29 || num_actions_ != 29 || num_obs_ != (variant_ == "allmimic" ? 1660 : 1720) ||
+      configured_action_dim_ != 29 || configured_obs_dim_ != num_obs_) {
+    throw std::runtime_error(variant_ + " has incompatible motor/action/observation dimensions");
   }
   joint_order_ = yamlc::required_vector_size<std::string>(y, "robot.policy_joint_order", motor_count_);
   joint_index_ = yamlc::required_vector_size<int>(y, "robot.joint_map", motor_count_);
@@ -87,10 +88,19 @@ void GenericPolicyPlayer::load_supermimic_params() {
       throw std::runtime_error("SuperMimic requires finite nonnegative PD gains and positive torque limits");
     }
   }
-  supermimic_controller_.configure(default_q_, action_scale_);
-  supermimic_controller_.load_reference_csv(trajectory_path_.string());
-  if (max_frames_ <= 0) max_frames_ = static_cast<int>(supermimic_controller_.reference_size());
-  supermimic_controller_.set_frame_limit(static_cast<std::size_t>(max_frames_));
+  if (variant_ == "allmimic") {
+    allmimic_controller_.configure(default_q_, action_scale_,
+        yamlc::required_vector_size<float>(y, "action.residual_scale", motor_count_),
+        yamlc::required_vector_size<float>(y, "action.residual_reference", motor_count_));
+    allmimic_controller_.load_reference_csv(trajectory_path_.string());
+    if (max_frames_ <= 0) max_frames_ = static_cast<int>(allmimic_controller_.reference_size());
+    allmimic_controller_.set_frame_limit(static_cast<std::size_t>(max_frames_));
+  } else {
+    supermimic_controller_.configure(default_q_, action_scale_);
+    supermimic_controller_.load_reference_csv(trajectory_path_.string());
+    if (max_frames_ <= 0) max_frames_ = static_cast<int>(supermimic_controller_.reference_size());
+    supermimic_controller_.set_frame_limit(static_cast<std::size_t>(max_frames_));
+  }
 }
 
 void GenericPolicyPlayer::post_load_supermimic() {
@@ -100,15 +110,17 @@ void GenericPolicyPlayer::post_load_supermimic() {
   onnx_.require_outputs({action_output_name_});
   const auto& shapes = onnx_.input_shapes();
   if (shapes.size() != 1 || shapes[0].size() != 2 ||
-      (shapes[0][0] != 1 && shapes[0][0] != -1) || shapes[0][1] != 1720) {
-    throw std::runtime_error("SuperMimic ONNX input must be float obs [1,1720]");
+      (shapes[0][0] != 1 && shapes[0][0] != -1) || shapes[0][1] != num_obs_) {
+    throw std::runtime_error(variant_ + " ONNX input must match the configured packed observation dimension");
   }
-  supermimic_controller_.reset({1.f, 0.f, 0.f, 0.f}, false);
+  if (variant_ == "allmimic") allmimic_controller_.reset({1.f, 0.f, 0.f, 0.f}, false);
+  else supermimic_controller_.reset({1.f, 0.f, 0.f, 0.f}, false);
 }
 
 void GenericPolicyPlayer::schema_summary_supermimic() {
   schema_summary_common();
-  std::cout << "  supermimic_contract packed_obs=1720 obs_frame=99 history=10 goal=730 actions=29"
+  std::cout << "  " << variant_ << "_contract packed_obs=" << num_obs_
+            << " obs_frame=" << (variant_ == "allmimic" ? 93 : 99) << " history=10 goal=730 actions=29"
             << " reference=" << trajectory_path_.string()
             << " yaw_alignment=" << (supermimic_align_initial_yaw_ ? "initial" : "none")
             << " end_behavior=" << (supermimic_stop_at_end_ ? "stop" : "hold")
@@ -118,18 +130,30 @@ void GenericPolicyPlayer::schema_summary_supermimic() {
 }
 
 void GenericPolicyPlayer::check_only_supermimic() {
+  if (variant_ == "allmimic") check_only_motion_controller(allmimic_controller_);
+  else check_only_motion_controller(supermimic_controller_);
+}
+
+template <typename Controller>
+void GenericPolicyPlayer::check_only_motion_controller(Controller& controller) {
   SuperMimicRobotFrame robot;
   std::copy(default_q_.begin(), default_q_.end(), robot.q.begin());
-  const auto input = supermimic_controller_.build_input(robot);
+  const auto input = controller.build_input(robot);
   const auto action = onnx_.run_single(input, obs_input_name_, action_output_name_, 29);
-  supermimic_controller_.decode_action(action);
-  supermimic_controller_.reset(robot.quat, false);
-  std::cout << "  supermimic obs_dim=" << input.size() << " actions=" << action.size()
-            << " reference_frames=" << supermimic_controller_.reference_size()
+  controller.decode_action(action);
+  controller.reset(robot.quat, false);
+  std::cout << "  " << variant_ << " obs_dim=" << input.size() << " actions=" << action.size()
+            << " reference_frames=" << controller.reference_size()
             << " max_frames=" << max_frames_ << " inference_check=passed\n";
 }
 
 void GenericPolicyPlayer::control_loop_supermimic() {
+  if (variant_ == "allmimic") control_loop_motion_controller(allmimic_controller_);
+  else control_loop_motion_controller(supermimic_controller_);
+}
+
+template <typename Controller>
+void GenericPolicyPlayer::control_loop_motion_controller(Controller& controller) {
   using Clock = std::chrono::steady_clock;
   const int publish_hz = std::max(inference_hz_, publish_hz_);
   const auto policy_dt = std::chrono::duration_cast<Clock::duration>(std::chrono::duration<double>(0.02));
@@ -167,21 +191,21 @@ void GenericPolicyPlayer::control_loop_supermimic() {
   uint64_t last_policy_state_seq = state.seq;
   auto infer = [&](const RobotState& policy_state) {
     require_fresh(policy_state);
-    const auto reference_frame = supermimic_controller_.reference_index();
-    const auto input = supermimic_controller_.build_input(robot_frame(policy_state));
+    const auto reference_frame = controller.reference_index();
+    const auto input = controller.build_input(robot_frame(policy_state));
     const auto inference_start = Clock::now();
     const auto action = onnx_.run_single(input, obs_input_name_, action_output_name_, 29);
     const double inference_ms = std::chrono::duration<double, std::milli>(Clock::now() - inference_start).count();
-    auto next_target = supermimic_controller_.decode_action(action);
-    supermimic_controller_.accept_action(action);
+    auto next_target = controller.decode_action(action);
+    controller.accept_action(action);
     target = std::move(next_target);
     target_kp = kp_;
     target_kd = kd_;
-    policy_counter_ = static_cast<int64_t>(supermimic_controller_.policy_step());
+    policy_counter_ = static_cast<int64_t>(controller.policy_step());
     last_policy_tick_ms = policy_state.source_tick_ms;
     last_policy_state_seq = policy_state.seq;
     if (supermimic_trace_) {
-      event_log_.log("supermimic_inference",
+      event_log_.log(variant_ == "allmimic" ? "allmimic_inference" : "supermimic_inference",
                      {event_string("player", player_label()), event_string("variant", variant_),
                       event_int("step", policy_counter_ - 1), event_int("reference_frame", reference_frame),
                       event_int("command_sequence", policy_counter_),
@@ -199,12 +223,12 @@ void GenericPolicyPlayer::control_loop_supermimic() {
   };
 
   if (preview_mode_enabled()) {
-    supermimic_controller_.reset(state.quat, supermimic_align_initial_yaw_);
-    const auto saved_controller = supermimic_controller_;
+    controller.reset(state.quat, supermimic_align_initial_yaw_);
+    const auto saved_controller = controller;
     infer(state);
     const auto decision = wait_preview_decision(target, target_kp, target_kd, state.mode_machine, publish_hz, 0);
     if (decision != PreviewDecision::kCommit) {
-      supermimic_controller_ = saved_controller;
+      controller = saved_controller;
       policy_counter_ = 0;
       event_log_.log("preview_state_restored", {event_string("player", player_label()), event_string("variant", variant_)});
       if (decision == PreviewDecision::kTimeout) {
@@ -219,7 +243,7 @@ void GenericPolicyPlayer::control_loop_supermimic() {
     if (g_stop_requested.load()) return;
     state = snapshot();
     require_fresh(state);
-    supermimic_controller_.reset(state.quat, supermimic_align_initial_yaw_);
+    controller.reset(state.quat, supermimic_align_initial_yaw_);
     hold_current_pose(state, target, target_kp, target_kd);
     last_policy_tick_ms = state.source_tick_ms;
     last_policy_state_seq = state.seq;
@@ -256,9 +280,9 @@ void GenericPolicyPlayer::control_loop_supermimic() {
                   active ? CommandPhase::kActive : CommandPhase::kHold);
         }, preview_committed);
   }
-  std::cout << player_log_prefix() << " start motion_conditioned_tracking/supermimic"
+  std::cout << player_log_prefix() << " start motion_conditioned_tracking/" << variant_
             << " hz=50 publish_hz=" << publish_hz
-            << " reference_frames=" << supermimic_controller_.frame_limit()
+            << " reference_frames=" << controller.frame_limit()
             << " end_behavior=" << (supermimic_stop_at_end_ ? "stop" : "hold")
             << " sim_lockstep_sequence=" << supermimic_sim_lockstep_sequence_ << "\n";
   std::exception_ptr inference_error;
@@ -279,7 +303,7 @@ void GenericPolicyPlayer::control_loop_supermimic() {
       const bool policy_due = states_due && (first_step ||
           (supermimic_use_lowstate_tick_ ? tick_elapsed >= SuperController::kPolicyTickMs : now >= next_policy));
       if (policy_due) {
-        if (supermimic_stop_at_end_ && supermimic_controller_.at_end()) {
+        if (supermimic_stop_at_end_ && controller.at_end()) {
           finished = true;
           break;
         }
@@ -300,7 +324,7 @@ void GenericPolicyPlayer::control_loop_supermimic() {
           event_log_.log("runtime_metrics",
                          {event_string("player", player_label()), event_string("variant", variant_),
                           event_int("step", policy_counter_),
-                          event_int("reference_frame", supermimic_controller_.reference_index()),
+                          event_int("reference_frame", controller.reference_index()),
                           event_int("policy_deadline_miss", policy_deadline_miss)});
         }
       }

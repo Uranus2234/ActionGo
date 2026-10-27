@@ -16,13 +16,15 @@
 
 两者均跟踪 paoxiao，部署参数和参考 CSV 经逐字节核对一致，直接共用
 `config/AllMimic.yaml` 和 `motions/paoxiao.csv`。观测归一化随各自权重嵌入 ONNX。
-当前两版 paoxiao 均去掉源动作前 0.5 秒的抬手段：50 Hz 下删除前 25 帧，
-从原第 25 帧（零起始编号）开始，剩余 1360 帧，末帧时间为 27.18 秒。
+当前两版 paoxiao 均去掉源动作前 1.12 秒的 T-pose 和放手过渡：50 Hz 下删除前 56 帧，
+从原第 56 帧（零起始编号）开始，剩余 1329 帧，末帧时间为 26.56 秒。
+原 0.5 秒处的肩 roll 仍约为 +77.5° / −82.0°；新首帧约为 +15.4° / −16.2°，
+双臂已放下。裁剪起点经参考姿态的 MuJoCo 渲染核对。
 参考 CSV、仿真 motion.npz 与两份 manifest 同步裁剪；训练库及 159000 轮权重不变。
 `source_start_frame` 和 `trim_start_sec` 记录裁剪来源。wbst motive 不裁剪。
 两个实验种子也不同，因此该对比不能将效果差异全部归因于 Omni 数据。
 裁剪版参考状态的 PyTorch / ONNX Runtime 导出对照最大绝对误差分别为：
-带 Omni 1.13e-6、无 Omni 1.61e-6。
+带 Omni 1.13e-6、无 Omni 1.43e-6。
 用户提及的 158.7k 没有对应的 158700 存档；该实验每 1000 轮存档，使用最接近的
 159000，不能当作精确的 158700 权重。
 每段动作的 `motions/*.manifest.json` 记录 checkpoint SHA256、真实轮次、完整训练配置、
@@ -48,7 +50,7 @@ supervisor 成功切入 UserCtrl 后通知 start；动作完成后保持最后�
 supervisor 成功请求 walkrun 后重叠保持 0.30 秒，再通知 release 退出。失败时进入
 `SwitchBackBlocked` 并保留 hold。握手与 RPC 返回不能替代真机物理控制权验证。
 这些动作执行期间设置 `safety_enable: false`，与 OmniXtreme 的高动态动作一致。
-原始 paoxiao 在约 9.08–9.48 秒倾斜超过 57.3°（裁剪后约 8.58–8.98 秒），
+原始 paoxiao 在约 9.08–9.48 秒倾斜超过 57.3°（裁剪后约 7.96–8.36 秒），
 wbst 在约 6.46–7.02 秒越过该阈值，
 最高约 177.6°；默认持续 60 ms 的倾倒判断会把正常动作误判为跌倒并进入阻尼。
 此设置仅豁免当前动作的 IMU 倾倒判断；因此动作期间真实跌倒也不会按该阈值自动阻尼。
@@ -86,7 +88,7 @@ python tools/export/allmimic_export_policy_onnx.py \
   --training-repo /path/to/allmimic \
   --checkpoint /path/to/ckpt_0159000.pt \
   --library /path/to/data/mixed/gpu1.npz \
-  --clip user/paoxiao.csv --trim-start-sec 0.5 \
+  --clip user/paoxiao.csv --trim-start-sec 1.12 \
   --output-dir /path/to/export
 ```
 
@@ -210,10 +212,20 @@ python tools/sim/allmimic_deployment_check.py \
 按策略进度对齐的关节 RMSE 0.1127 rad、高度 RMSE 0.0096 m，记录到 1 次 policy
 deadline miss。这些测试未包含真机。
 
-### 裁掉前 0.5 秒后的验证
+### 历史验证：裁掉前 0.5 秒
 
 带 Omni / 不带 Omni 的 paoxiao 均执行 1360 次推理；站姿启动、显式 PD、真机命令过滤
 和异步 DDS 条件下，两个动作均完成 complete/release 握手并确认收到 release，
 关节目标均在限位内。按策略进度对齐的关节 RMSE 分别为 0.1083 / 0.1157 rad，
 高度 RMSE 为 0.0097 / 0.0095 m；各记录到 1 次 policy deadline miss。
 这些结果只验证裁剪后的 MuJoCo 部署链路，尚未经过真机验证。
+
+### 当前验证：裁掉前 1.12 秒
+
+旧裁剪起点仍是双臂抬起姿态，因此两版参考统一改从原第 56 帧开始。
+带 Omni / 不带 Omni 均通过站姿启动、显式 PD、真机命令过滤和异步 DDS 的完整仿真：
+各完成 1329 次推理，complete/release 均成功并确认收到 release，关节目标均在限位内，
+本次均未记录到 policy deadline miss。按策略进度对齐的关节 RMSE 分别为
+0.1054 / 0.1103 rad，高度 RMSE 为 0.0096 / 0.0093 m。
+新 CSV 与旧裁剪版再删除前 31 行逐字节相同，仿真 qpos/qvel 同步裁剪；
+两份 ONNX 与原部署权重逐字节相同。这些结果尚未经过真机验证。

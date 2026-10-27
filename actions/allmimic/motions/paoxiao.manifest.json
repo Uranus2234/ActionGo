@@ -90,14 +90,14 @@
   },
   "reference": {
     "clip": "user/paoxiao.csv",
-    "num_frames": 1360,
+    "num_frames": 1329,
     "fps": 50,
-    "last_frame_time_sec": 27.18,
+    "last_frame_time_sec": 26.56,
     "library_sha256": "672315d0ca6cb82978791eefa6cdd9007360721a3bf640927e55f592664df842",
-    "csv_sha256": "130479c20903736a4c66f22422434930f79a45a1c3e8068f6bf064210c87b6fe",
+    "csv_sha256": "29d9ee5ec78a782a128f92f3fccc75e7ff8a55e209dc0ce8110934165ea3d405",
     "source_num_frames": 1385,
-    "source_start_frame": 25,
-    "trim_start_sec": 0.5
+    "source_start_frame": 56,
+    "trim_start_sec": 1.12
   },
   "policy": {
     "input": [

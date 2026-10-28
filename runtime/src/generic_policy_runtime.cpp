@@ -450,8 +450,8 @@ void GenericPolicyPlayer::load_spec() {
     command_safety_config_.joint_limit_enabled =
         scalar_or<bool>(safety, "joint_limit_enabled", !simulation_parity);
     command_safety_config_.preserve_pd_torque = scalar_or<bool>(safety, "preserve_pd_torque", false);
-    if (command_safety_config_.preserve_pd_torque && variant_ != "allmimic") {
-      throw std::runtime_error("generic safety.preserve_pd_torque is currently supported only for allmimic");
+    if (command_safety_config_.preserve_pd_torque && variant_ != "allmimic" && variant_ != "supermimic") {
+      throw std::runtime_error("generic safety.preserve_pd_torque requires allmimic or supermimic");
     }
     command_safety_config_.lowstate_timeout_enabled = scalar_or<bool>(safety, "lowstate_timeout_enabled", true);
     command_safety_config_.lowstate_timeout_sec = args_.lowstate_timeout_sec > 0.0

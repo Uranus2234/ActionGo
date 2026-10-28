@@ -593,6 +593,16 @@ if(DEFINED ACTION_GO_ONNXRUNTIME_LIB AND DEFINED ACTION_GO_ONNXRUNTIME_INCLUDE_D
       WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
     )
     if(NOT ACTION_GO_CODE_ONLY AND
+       EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/actions/fighting154k/model/supermimic_omni.onnx" AND
+       EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/actions/fighting154k/model/supermimic_no_omni.onnx" AND
+       EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/actions/fighting154k/model/allmimic_omni.onnx" AND
+       EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/actions/fighting154k/model/allmimic_no_omni.onnx")
+      add_test(NAME fighting154k_deployment_test COMMAND ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/runtime/tests/fighting154k_deployment_test.py
+        --player $<TARGET_FILE:generic_motion_tracking_player>)
+      set_tests_properties(fighting154k_deployment_test PROPERTIES TIMEOUT 120)
+    endif()
+    if(NOT ACTION_GO_CODE_ONLY AND
        EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/actions/allmimic/model/policy.onnx" AND
        EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/actions/allmimic/model/policy_no_omni.onnx")
       add_test(NAME allmimic_dry_run_test COMMAND ${Python3_EXECUTABLE}

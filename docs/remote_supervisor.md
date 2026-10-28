@@ -90,6 +90,10 @@ Left+B        -> ARM，选择备用 ufo_stand；IMU 有效且倾角 >=30° 时�
 R2+A          -> 停止当前模型，切官方 walkrun，回到 SHELL_IDLE/睡眠态，程序不退出
 Select+Start  -> 切官方 passive，回到 SHELL_IDLE，程序不退出
 
+R1+A / Up     -> 154k SuperMimic-Reproduced Omni 15%，051/Ma / 功夫侧踢
+R1+B / Down   -> 154k SuperMimic-Reproduced 不带 Omni，051/Ma / 功夫侧踢
+R1+X / Left   -> 154k AllMimic Omni 15%，051/Ma / 功夫侧踢
+R1+Y / Right  -> 154k AllMimic 不带 Omni，051/Ma / 功夫侧踢
 R2+Down       -> kick_right
 Left+X        -> hlqk
 Left+A        -> ufo_tracking_zs7
@@ -118,6 +122,10 @@ L2+Down       -> lie_down_beyondmimic，结束后回 passive shell
 ```text
 config/remote_actions.yaml
 ```
+
+上述八个 R1 组合均需持续按住 R1 再按第二个键。模型、参考数据和预检步骤见
+[四模型 154k 格斗动作包](../actions/fighting154k/README.md)。正常播完后保持最后命令，
+通过 complete/release 屏障和 0.30 秒重叠交接回官方 walkrun；八个动作均保留 IMU safety。
 
 Instinct Parkour 额外保护：启动 `g1_parkour` 时会先在官方 walkrun 仍接管的状态下初始化 RealSense、`rt/secondary_imu` torso IMU、ONNX/DDS，并发布当前姿态 hold；ready 后才切 UserCtrl。没有检测到 RealSense 深度相机、没有深度帧或没有 torso IMU 时，不会切 UserCtrl，不会启动策略，并请求保持/回到官方 `walkrun`。切入 UserCtrl 后执行 official ColdStartAgent-style 过渡到 `default_joint_pos`，然后默认直接进入 parkour 模型。
 Instinct parkour 保持官方的 `inference_hz=50`、不做策略帧间插值且不限速；LowCmd

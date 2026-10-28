@@ -88,8 +88,8 @@ void GenericPolicyPlayer::load_supermimic_params() {
       throw std::runtime_error("SuperMimic requires finite nonnegative PD gains and positive torque limits");
     }
   }
+  safety_limits_.torque = torque_limits_;
   if (variant_ == "allmimic") {
-    safety_limits_.torque = torque_limits_;
     allmimic_controller_.configure(default_q_, action_scale_,
         yamlc::required_vector_size<float>(y, "action.residual_scale", motor_count_),
         yamlc::required_vector_size<float>(y, "action.residual_reference", motor_count_));

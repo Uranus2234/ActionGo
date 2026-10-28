@@ -30,7 +30,7 @@ OpenCV 和 libzmq 用于构建 sensor player；RealSense、AprilTag、MuJoCo、R
 
 ## 模型与预检
 
-代码版不分发第三方 ONNX、运动数据、标签或预编译二进制。根据 [资产获取说明](docs/model_assets.md) 从上游取得模型或提供匹配的本地导出，再按 [MODEL_ASSETS.json](MODEL_ASSETS.json) 校验。清单已同步本地动作包的 72 个文件，包含 paoxiao、PHP、P-BFM、mjlab、SONIC 原版与 v1.1 及运动数据；来源不明确的 checkpoint 继续标为待补，未在本地找到的 HandoffGuard risk model 需单独提供。`blocked_pending_review` 表示 BYOW，不代表允许再分发。
+代码版不分发第三方 ONNX、运动数据、标签或预编译二进制。根据 [资产获取说明](docs/model_assets.md) 从上游取得模型或提供匹配的本地导出，再按 [MODEL_ASSETS.json](MODEL_ASSETS.json) 校验。清单已同步本地动作包的 84 个文件，包含四模型 154k 格斗动作包、paoxiao、PHP、P-BFM、mjlab、SONIC 原版与 v1.1 及运动数据；来源不明确的 checkpoint 继续标为待补，未在本地找到的 HandoffGuard risk model 需单独提供。`blocked_pending_review` 表示 BYOW，不代表允许再分发。
 
 ```bash
 python3 tools/assets/check_model_assets.py --policy bfm0  # 严格检查已安装的指定动作包
@@ -44,6 +44,12 @@ ACTION_GO_NET=lo tools/launch/start_dry_run.sh
 `--allow-missing-assets` 用于没有第三方资产时审查 adapter 语义；schema 的 `--installed-only` 对已安装模型检查真实 ONNX I/O。资产检查的 `--installed-only` 核对现有文件，缺失项仅报告；`--policy` 可重复指定动作包。真机前对所选包运行严格资产、schema 和 player check-only；全部包均已安装时再运行不带筛选的严格检查。没有安装模型时的通过不代表部署已验证。
 
 ## 真机入口
+
+新增 [四模型 154k 格斗动作包](actions/fighting154k/README.md)：固定使用已播放对比的
+154000 轮 SuperMimic-Reproduced / AllMimic、各自带 Omni 15% / 不带 Omni 四个模型。
+`R1+ABXY` 播放 051/Ma，`R1+上/下/左/右` 播放功夫侧踢，模型顺序相同。
+四个 ONNX 和对应参考数据使用普通 Git 随 `feature` 分支提交。
+八个动作沿用 ready/start/complete/release 握手，正常结束自动回官方 walkrun。
 
 Uni-SuperMimic 使用独立的 `uni_supermimic` variant，动作名为 `uni_supermimic_tracking`。
 20 万轮模型的本地导出、MuJoCo 推理与接口说明见 [Uni-SuperMimic 适配](actions/uni_supermimic/README.md)。
@@ -70,6 +76,10 @@ ACTION_GO_NET=<机器人网卡> tools/launch/start_safe.sh
 | `Left+B` | 使用 `ufo_stand` ARM；IMU 有效且倾角 ≥30° 时立即启动恢复 |
 | `R2+A` | 停止当前动作，回官方 walkrun，进入 `SHELL_IDLE` |
 | `Select+Start` | 停止当前动作，进入官方 passive/damping 和 `SHELL_IDLE` |
+| `R1+A` / `R1+Up` | 154k SuperMimic-Reproduced Omni 15%：051/Ma / 功夫侧踢 |
+| `R1+B` / `R1+Down` | 154k SuperMimic-Reproduced 不带 Omni：051/Ma / 功夫侧踢 |
+| `R1+X` / `R1+Left` | 154k AllMimic Omni 15%：051/Ma / 功夫侧踢 |
+| `R1+Y` / `R1+Right` | 154k AllMimic 不带 Omni：051/Ma / 功夫侧踢 |
 | `R2+Down` | `kick_right` |
 | `Left+X` | `hlqk`，当前模型为 `paoxiao.onnx` |
 | `Left+A` | `ufo_tracking_zs7` |

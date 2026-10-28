@@ -1,0 +1,253 @@
+{
+  "schema_version": 1,
+  "description": "Archived comparison results for the identical deployed ONNX and CSV bytes; simulation_parity, not hardware validation.",
+  "physics": "5 ms substeps, explicit torque-limited PD, reference pose/velocity initialization, DDS loopback domain 213, no reset/pause.",
+  "deployment_differences": [
+    "initial yaw alignment",
+    "0.10 s activation blend",
+    "hardware position filter with PD torque compensation",
+    "supervisor IMU monitoring"
+  ],
+  "runs": {
+    "fighting154k_supermimic_omni_051_ma": {
+      "model_sha256": "46c88ffd007ddb84530b3319ee8422fb0f51354db0e4e0534add6095d24150c5",
+      "reference_sha256": "13ab97c5c86bd96e4f5d29004ea9f14d15b545e0bb3917704970bb55375242a0",
+      "metrics": {
+        "gpu": "gpu0-supermimic-omni15",
+        "case": "zip-sparring-051-ma",
+        "label": "ZIP sparring 051 / Ma",
+        "seconds": 15.98,
+        "frames": 800,
+        "finite": true,
+        "full_duration": true,
+        "joint_rmse_rad": 0.09167333890679275,
+        "height_rmse_m": 0.009953985645616842,
+        "root_rmse_m": 0.11043025114203513,
+        "first_failure_sec": null,
+        "first_sustained_failure_sec": null,
+        "failure_definition": "height difference >0.25m or root Rzz difference >0.8; sustained=0.30s; diagnostic only, no auto reset",
+        "protocol": "ActionGo C++ ONNX, DDS lockstep, explicit torque-limited PD at 5ms physics substeps, configured 500Hz publisher, simulation_parity filter, reference initialization",
+        "checkpoint_sha256": "8427fbb123015c72c2497de83ef87edf249ac4f3f3e2c6333ef5f18c4e102b18"
+      },
+      "native_parity": {
+        "gpu": "gpu0-supermimic-omni15",
+        "case": "zip-sparring-051-ma",
+        "frames": 799,
+        "native_observation_max_abs_error": 6.556510925292969e-07,
+        "native_action_max_abs_error": 6.198883056640625e-06,
+        "target_max_abs_error": 0.0,
+        "passed": true
+      }
+    },
+    "fighting154k_supermimic_omni_side_kick": {
+      "model_sha256": "46c88ffd007ddb84530b3319ee8422fb0f51354db0e4e0534add6095d24150c5",
+      "reference_sha256": "ff10d1c5c72207520c771521bb5d2d721fdf2e16f379787d882a4dbf9d28cf0c",
+      "metrics": {
+        "gpu": "gpu0-supermimic-omni15",
+        "case": "kick-side-kungfu",
+        "label": "TRAIN Kungfu side kick",
+        "seconds": 5.92,
+        "frames": 297,
+        "finite": true,
+        "full_duration": true,
+        "joint_rmse_rad": 0.1322312069703555,
+        "height_rmse_m": 0.012036741453683874,
+        "root_rmse_m": 0.0697462541437006,
+        "first_failure_sec": null,
+        "first_sustained_failure_sec": null,
+        "failure_definition": "height difference >0.25m or root Rzz difference >0.8; sustained=0.30s; diagnostic only, no auto reset",
+        "protocol": "ActionGo C++ ONNX, DDS lockstep, explicit torque-limited PD at 5ms physics substeps, configured 500Hz publisher, simulation_parity filter, reference initialization",
+        "checkpoint_sha256": "8427fbb123015c72c2497de83ef87edf249ac4f3f3e2c6333ef5f18c4e102b18"
+      },
+      "native_parity": {
+        "gpu": "gpu0-supermimic-omni15",
+        "case": "kick-side-kungfu",
+        "frames": 296,
+        "native_observation_max_abs_error": 5.960464477539062e-07,
+        "native_action_max_abs_error": 4.0531158447265625e-06,
+        "target_max_abs_error": 0.0,
+        "passed": true
+      }
+    },
+    "fighting154k_supermimic_no_omni_051_ma": {
+      "model_sha256": "e597657f94233c3e99438f083d0430cd9c4e7cc73b69ef6c62593d94b6664ebe",
+      "reference_sha256": "13ab97c5c86bd96e4f5d29004ea9f14d15b545e0bb3917704970bb55375242a0",
+      "metrics": {
+        "gpu": "gpu1-supermimic-no-omni",
+        "case": "zip-sparring-051-ma",
+        "label": "ZIP sparring 051 / Ma",
+        "seconds": 15.98,
+        "frames": 800,
+        "finite": true,
+        "full_duration": true,
+        "joint_rmse_rad": 0.09593578680417444,
+        "height_rmse_m": 0.009707772350193912,
+        "root_rmse_m": 0.18726953988595776,
+        "first_failure_sec": null,
+        "first_sustained_failure_sec": null,
+        "failure_definition": "height difference >0.25m or root Rzz difference >0.8; sustained=0.30s; diagnostic only, no auto reset",
+        "protocol": "ActionGo C++ ONNX, DDS lockstep, explicit torque-limited PD at 5ms physics substeps, configured 500Hz publisher, simulation_parity filter, reference initialization",
+        "checkpoint_sha256": "2075ae30cd532066ac673e2654869ffc95da8fe6d4b0789784cc0a81e4d1cc3f"
+      },
+      "native_parity": {
+        "gpu": "gpu1-supermimic-no-omni",
+        "case": "zip-sparring-051-ma",
+        "frames": 799,
+        "native_observation_max_abs_error": 6.556510925292969e-07,
+        "native_action_max_abs_error": 4.76837158203125e-06,
+        "target_max_abs_error": 0.0,
+        "passed": true
+      }
+    },
+    "fighting154k_supermimic_no_omni_side_kick": {
+      "model_sha256": "e597657f94233c3e99438f083d0430cd9c4e7cc73b69ef6c62593d94b6664ebe",
+      "reference_sha256": "ff10d1c5c72207520c771521bb5d2d721fdf2e16f379787d882a4dbf9d28cf0c",
+      "metrics": {
+        "gpu": "gpu1-supermimic-no-omni",
+        "case": "kick-side-kungfu",
+        "label": "TRAIN Kungfu side kick",
+        "seconds": 5.92,
+        "frames": 297,
+        "finite": true,
+        "full_duration": true,
+        "joint_rmse_rad": 0.13101914141384333,
+        "height_rmse_m": 0.015764241485609953,
+        "root_rmse_m": 0.12049418068968742,
+        "first_failure_sec": null,
+        "first_sustained_failure_sec": null,
+        "failure_definition": "height difference >0.25m or root Rzz difference >0.8; sustained=0.30s; diagnostic only, no auto reset",
+        "protocol": "ActionGo C++ ONNX, DDS lockstep, explicit torque-limited PD at 5ms physics substeps, configured 500Hz publisher, simulation_parity filter, reference initialization",
+        "checkpoint_sha256": "2075ae30cd532066ac673e2654869ffc95da8fe6d4b0789784cc0a81e4d1cc3f"
+      },
+      "native_parity": {
+        "gpu": "gpu1-supermimic-no-omni",
+        "case": "kick-side-kungfu",
+        "frames": 296,
+        "native_observation_max_abs_error": 5.960464477539062e-07,
+        "native_action_max_abs_error": 4.76837158203125e-06,
+        "target_max_abs_error": 0.0,
+        "passed": true
+      }
+    },
+    "fighting154k_allmimic_omni_051_ma": {
+      "model_sha256": "bb49fc03992939580a1f655ca5a73610ce87d6aea11fba1479eb02ec0242f960",
+      "reference_sha256": "9251ce4c26b2dee5e01947612554d3d5f8d4418758576b096107a013d87ab3db",
+      "metrics": {
+        "gpu": "gpu2-allmimic-omni15",
+        "case": "zip-sparring-051-ma",
+        "label": "ZIP sparring 051 / Ma",
+        "seconds": 15.98,
+        "frames": 800,
+        "finite": true,
+        "full_duration": true,
+        "joint_rmse_rad": 0.0801840015027607,
+        "height_rmse_m": 0.013446910196001341,
+        "root_rmse_m": 0.10425303753016742,
+        "first_failure_sec": null,
+        "first_sustained_failure_sec": null,
+        "failure_definition": "height difference >0.25m or root Rzz difference >0.8; sustained=0.30s; diagnostic only, no auto reset",
+        "protocol": "ActionGo C++ ONNX, DDS lockstep, explicit torque-limited PD at 5ms physics substeps, configured 500Hz publisher, simulation_parity filter, reference initialization",
+        "checkpoint_sha256": "ff1c6cf22eb96233a41a5fb21ca7684516868958e3115b0048fde577f8cc7907"
+      },
+      "native_parity": {
+        "gpu": "gpu2-allmimic-omni15",
+        "case": "zip-sparring-051-ma",
+        "frames": 799,
+        "native_observation_max_abs_error": 9.5367431640625e-07,
+        "native_action_max_abs_error": 1.4841556549072266e-05,
+        "target_max_abs_error": 2.384185791015625e-07,
+        "passed": true
+      }
+    },
+    "fighting154k_allmimic_omni_side_kick": {
+      "model_sha256": "bb49fc03992939580a1f655ca5a73610ce87d6aea11fba1479eb02ec0242f960",
+      "reference_sha256": "6459447b27f036b3933eeaebbd0cd294a4762c9ad7dfaa3b2ec865abaad2bf54",
+      "metrics": {
+        "gpu": "gpu2-allmimic-omni15",
+        "case": "kick-side-kungfu",
+        "label": "TRAIN Kungfu side kick",
+        "seconds": 5.92,
+        "frames": 297,
+        "finite": true,
+        "full_duration": true,
+        "joint_rmse_rad": 0.1477777519564034,
+        "height_rmse_m": 0.01631461667349424,
+        "root_rmse_m": 0.10057707559211056,
+        "first_failure_sec": null,
+        "first_sustained_failure_sec": null,
+        "failure_definition": "height difference >0.25m or root Rzz difference >0.8; sustained=0.30s; diagnostic only, no auto reset",
+        "protocol": "ActionGo C++ ONNX, DDS lockstep, explicit torque-limited PD at 5ms physics substeps, configured 500Hz publisher, simulation_parity filter, reference initialization",
+        "checkpoint_sha256": "ff1c6cf22eb96233a41a5fb21ca7684516868958e3115b0048fde577f8cc7907"
+      },
+      "native_parity": {
+        "gpu": "gpu2-allmimic-omni15",
+        "case": "kick-side-kungfu",
+        "frames": 296,
+        "native_observation_max_abs_error": 1.1920928955078125e-06,
+        "native_action_max_abs_error": 1.5497207641601562e-05,
+        "target_max_abs_error": 1.1920928955078125e-07,
+        "passed": true
+      }
+    },
+    "fighting154k_allmimic_no_omni_051_ma": {
+      "model_sha256": "d91cae7abc52c96ab89bd76242cbaec73e81c63358c1fd145453b1f31e2683be",
+      "reference_sha256": "9251ce4c26b2dee5e01947612554d3d5f8d4418758576b096107a013d87ab3db",
+      "metrics": {
+        "gpu": "gpu3-allmimic-no-omni",
+        "case": "zip-sparring-051-ma",
+        "label": "ZIP sparring 051 / Ma",
+        "seconds": 15.98,
+        "frames": 800,
+        "finite": true,
+        "full_duration": true,
+        "joint_rmse_rad": 0.07894636755663975,
+        "height_rmse_m": 0.008373746995099112,
+        "root_rmse_m": 0.12356524192418138,
+        "first_failure_sec": null,
+        "first_sustained_failure_sec": null,
+        "failure_definition": "height difference >0.25m or root Rzz difference >0.8; sustained=0.30s; diagnostic only, no auto reset",
+        "protocol": "ActionGo C++ ONNX, DDS lockstep, explicit torque-limited PD at 5ms physics substeps, configured 500Hz publisher, simulation_parity filter, reference initialization",
+        "checkpoint_sha256": "b026672a8178cd7769760b5d67afc30148d826c0e33cc0fa7b2f1048027ffaf5"
+      },
+      "native_parity": {
+        "gpu": "gpu3-allmimic-no-omni",
+        "case": "zip-sparring-051-ma",
+        "frames": 799,
+        "native_observation_max_abs_error": 7.152557373046875e-07,
+        "native_action_max_abs_error": 1.5139579772949219e-05,
+        "target_max_abs_error": 2.384185791015625e-07,
+        "passed": true
+      }
+    },
+    "fighting154k_allmimic_no_omni_side_kick": {
+      "model_sha256": "d91cae7abc52c96ab89bd76242cbaec73e81c63358c1fd145453b1f31e2683be",
+      "reference_sha256": "6459447b27f036b3933eeaebbd0cd294a4762c9ad7dfaa3b2ec865abaad2bf54",
+      "metrics": {
+        "gpu": "gpu3-allmimic-no-omni",
+        "case": "kick-side-kungfu",
+        "label": "TRAIN Kungfu side kick",
+        "seconds": 5.92,
+        "frames": 297,
+        "finite": true,
+        "full_duration": true,
+        "joint_rmse_rad": 0.12771814477173332,
+        "height_rmse_m": 0.015939444288899377,
+        "root_rmse_m": 0.08949182822796778,
+        "first_failure_sec": null,
+        "first_sustained_failure_sec": null,
+        "failure_definition": "height difference >0.25m or root Rzz difference >0.8; sustained=0.30s; diagnostic only, no auto reset",
+        "protocol": "ActionGo C++ ONNX, DDS lockstep, explicit torque-limited PD at 5ms physics substeps, configured 500Hz publisher, simulation_parity filter, reference initialization",
+        "checkpoint_sha256": "b026672a8178cd7769760b5d67afc30148d826c0e33cc0fa7b2f1048027ffaf5"
+      },
+      "native_parity": {
+        "gpu": "gpu3-allmimic-no-omni",
+        "case": "kick-side-kungfu",
+        "frames": 296,
+        "native_observation_max_abs_error": 9.5367431640625e-07,
+        "native_action_max_abs_error": 2.2292137145996094e-05,
+        "target_max_abs_error": 1.1920928955078125e-07,
+        "passed": true
+      }
+    }
+  }
+}

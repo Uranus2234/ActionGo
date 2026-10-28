@@ -119,6 +119,7 @@ type_defaults:
 # 每个动作默认继承 defaults.safety_enable=true；如需禁用某个动作的 IMU safety，
 # 在对应 action 下写 safety_enable: false。
 action_files:
+  fighting154k: actions/fighting154k/fighting154k.yaml
   allmimic: actions/allmimic/allmimic.yaml
   uni_supermimic: actions/uni_supermimic/uni_supermimic.yaml
   supermimic: actions/supermimic/supermimic.yaml

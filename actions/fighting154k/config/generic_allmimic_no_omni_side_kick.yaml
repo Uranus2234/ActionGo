@@ -1,0 +1,46 @@
+name: fighting154k_allmimic_no_omni_side_kick
+runtime:
+  template: motion_conditioned_tracking
+  variant: allmimic
+  inference_hz: 50
+  publish_hz: 500
+  onnx_threads: 2
+  stats_interval: 50
+  dry_run_duration_sec: 1.0
+robot:
+  params: AllMimic.yaml
+  motor_count: 29
+model:
+  path: ../model/allmimic_no_omni.onnx
+  input_names:
+  - obs
+  output_names:
+  - actions
+  obs_input: obs
+  action_output: actions
+reference:
+  type: allmimic_csv_v1
+  path: ../motions/allmimic_side_kick.csv
+  goal_frames: 10
+  goal_dim: 730
+  end_behavior: stop
+  yaw_alignment: initial
+  policy_step_source: wall_clock
+observation:
+  builder: allmimic
+  obs_dim: 1660
+  obs_frame_dim: 93
+  history_len: 10
+action:
+  type: residual_tracking_target
+  action_dim: 29
+  add_default: true
+  scale_from_params: action_scale
+handoff:
+  cmd_topic: rt/user_lowcmd
+  state_topic: rt/lowstate
+  mode_machine: 5
+  activation_blend_sec: 0.1
+  damping_on_stop: false
+safety:
+  preserve_pd_torque: true

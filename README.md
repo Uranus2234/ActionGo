@@ -49,7 +49,7 @@ OpenCV and ZeroMQ are required to build `generic_sensor_policy_player`. RealSens
 
 Policy weights, motion files, tags, and datasets are not distributed in the code-only release unless their asset-specific redistribution rights are verified. A source-code license does not automatically license a checkpoint or dataset.
 
-The [asset acquisition guide](docs/model_assets.md) and [MODEL_ASSETS.json](MODEL_ASSETS.json) inventory 72 files from the local policy packages, including current BeyondMimic `paoxiao`, PHP, P-BFM, mjlab, original SONIC, SONIC v1.1, and motion/reference data. Download third-party assets from their upstream provider or supply your own matching exports; unresolved checkpoint origins remain explicitly recorded. The optional HandoffGuard risk model was not found locally and remains separately supplied. `blocked_pending_review` means **bring your own weights/data**, not permission to redistribute it. Validate the packages you install:
+The [asset acquisition guide](docs/model_assets.md) and [MODEL_ASSETS.json](MODEL_ASSETS.json) inventory 84 files from the local policy packages, including the four-policy 154k fighting package, current BeyondMimic `paoxiao`, PHP, P-BFM, mjlab, original SONIC, SONIC v1.1, and motion/reference data. Download third-party assets from their upstream provider or supply your own matching exports; unresolved checkpoint origins remain explicitly recorded. The optional HandoffGuard risk model was not found locally and remains separately supplied. `blocked_pending_review` means **bring your own weights/data**, not permission to redistribute it. Validate the packages you install:
 
 ```bash
 python3 tools/assets/check_model_assets.py --policy bfm0
@@ -106,6 +106,12 @@ package asset check -> schema -> package check-only -> dry-run -> simulation/rep
 
 ## Real-Robot Start
 
+The [four-policy 154k fighting package](actions/fighting154k/README.md) pins the exact
+154000-iteration SuperMimic-Reproduced / AllMimic Omni15% / NoOmni exports from the
+comparison videos. All four ONNX files and family-specific 051/Ma and Kungfu side-kick
+references are included as regular Git files on `feature`. Each finite action uses
+ready/start/complete/release handoff and returns to official walkrun on completion.
+
 Only proceed after the selected package's strict asset and schema checks pass, the action-specific sensor/reference checks pass, and the operator has verified the robot network interface and damping path. An all-package strict check is appropriate when every configured package is installed.
 
 ```bash
@@ -126,6 +132,10 @@ Arm first with `Start` or `Left+B`, then use an action binding. The checked-in d
 | `Left+B` | ARM with `ufo_stand`; valid IMU tilt at or above `30 deg` starts recovery |
 | `R2+A` | Stop the current action, return to official walkrun, enter `SHELL_IDLE` |
 | `Select+Start` | Stop the current action, enter official passive/damping, enter `SHELL_IDLE` |
+| `R1+A` / `R1+Up` | 154k SuperMimic-Reproduced Omni15%: 051/Ma / Kungfu side kick |
+| `R1+B` / `R1+Down` | 154k SuperMimic-Reproduced NoOmni: 051/Ma / Kungfu side kick |
+| `R1+X` / `R1+Left` | 154k AllMimic Omni15%: 051/Ma / Kungfu side kick |
+| `R1+Y` / `R1+Right` | 154k AllMimic NoOmni: 051/Ma / Kungfu side kick |
 | `R2+Down` | `kick_right` |
 | `Left+X` | `hlqk` action using the current `paoxiao.onnx` checkpoint |
 | `Left+A` | `ufo_tracking_zs7` |

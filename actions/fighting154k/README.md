@@ -1,16 +1,23 @@
 # 四模型 154k 格斗动作部署
 
-本包固定使用 2026-10-28 视频对比的四个 `ckpt_0154000.pt` 导出，每个模型配两段动作。
+本包固定使用 2026-10-28 视频对比的四个 `ckpt_0154000.pt` 导出。
 这里的“最新”指这批已看过的 154000 轮导出；训练继续产生的 checkpoint 不会自动替换本包。
-四个 ONNX、四份按模型家族共享的 CSV 和部署配置均随 `feature` 分支提交，使用普通 Git 文件。
+四个 ONNX、六份按模型家族共享的 CSV 和部署配置使用普通 Git 文件。
 本包无需 Git LFS 下载，也无需训练仓库、Python 或 CUDA 才能进行板载推理。
 
 | 模型 | 051 / Ma（约 16 秒） | 功夫侧踢（约 6 秒） |
 |---|---|---|
 | SuperMimic-Reproduced，Omni 15% | R1+Y | R1+Up |
-| SuperMimic-Reproduced，不带 Omni | R1+A | R1+Down |
+| SuperMimic-Reproduced，不带 Omni | 保留动作，未绑定 | 保留动作，未绑定 |
 | AllMimic，Omni 15% | R1+X | R1+Left |
 | AllMimic，不带 Omni | R1+B | R1+Right |
+
+`R1+A` 使用同一份 SuperMimic-Reproduced Omni 15% 的 154k 模型播放 **wbst_motive**，
+`R1+Down` 使用该模型播放 **yewendun**（`14_yewendun-kick`）。
+参考直接取自该轮训练的 `omni15.npz`：`omni/12_wbst_motive.csv` 为 573 帧 / 50 Hz，
+播放 11.46 秒；`omni/14_yewendun-kick.csv` 为 916 帧 / 50 Hz，播放 18.32 秒。
+两段保持训练库的完整时间范围和速度，使用当前帧至未来第 9 帧的 SuperMimic-Reproduced
+参考格式；不能替换为 Uni-SuperMimic / AllMimic 的同名参考缓存。
 
 051 是 `duobox_g1_boxing.zip` 中的 `04_sparring_051_ma_free_liu_free.npz`、Ma 一侧，
 使用视频所展示的 20261017 修正重定向版本。原始 481 帧 / 30 Hz，部署缓存 800 帧 / 50 Hz，
@@ -24,6 +31,7 @@
 两类策略都由 `build/generic_motion_tracking_player` 执行，SDK 关节顺序、29 个动作，
 策略频率 50 Hz、命令发布 500 Hz、ONNX Runtime CPU 两线程。
 `manifest.json` 记录 checkpoint、模型、参数、参考数据 SHA256 和八个按键组合。
+共注册十个动作；SuperMimic 不带 Omni 的两个原动作仍可通过动作名调用。
 
 | 项目 | SuperMimic-Reproduced | AllMimic |
 |---|---|---|
@@ -47,7 +55,7 @@ git pull --ff-only origin feature
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DACTION_GO_CODE_ONLY=ON
 cmake --build build --parallel 2
 python3 tools/assets/check_model_assets.py --policy fighting154k
-for spec in actions/fighting154k/config/*_051_ma.yaml actions/fighting154k/config/*_side_kick.yaml; do
+for spec in actions/fighting154k/config/generic_*.yaml; do
   ./build/policy_spec_schema_check --spec "$spec"
   ./build/generic_motion_tracking_player --spec "$spec" --check-only
 done
@@ -59,7 +67,7 @@ done
 python3 runtime/tests/fighting154k_deployment_test.py --player build/generic_motion_tracking_player
 ```
 
-此测试需要 PyYAML。它会校验资产、八个按键配置，执行真实 ONNX 推理，验证有限动作完成后
+此测试需要 PyYAML。它会校验资产、八个按键配置和十个动作，执行真实 ONNX 推理，验证有限动作完成后
 持续等待 release 文件，且整个 dry-run 无 LowCmd 发布。合成状态不能用来评价动作跟踪效果。
 
 真机仍从统一 supervisor 启动，网卡示例为 `eth0`：
@@ -76,14 +84,14 @@ ACTION_GO_NET=eth0 tools/launch/start_safe.sh
 4. 切换成功后继续重叠发布 0.30 秒，再给出 release，player 才退出。
 
 walkrun 切换失败时继续等待交接，不将失败当作成功释放。
-八个动作均启用既有 supervisor IMU safety；`R2+A` 中止并回 walkrun，`Select+Start` 进入阻尼。
+所有动作均启用既有 supervisor IMU safety；`R2+A` 中止并回 walkrun，`Select+Start` 进入阻尼。
 运行中命令保留有限值、位置范围、LowState 新鲜度及训练力矩上限检查。
 位置目标裁剪时通过前馈力矩补偿保持受限 PD 力矩，避免单独裁剪目标角改变训练控制律。
 
 ## 已有仿真证据
 
 `validation.json` 收录八组已播放视频对应的完整 ActionGo C++ / DDS / MuJoCo 结果和原生网络对照，
-并关联本包模型及 CSV 的哈希。八组均完成全段、状态有限且原生推理对照通过。
+并关联本包模型及 CSV 的哈希。十组均完成全段、状态有限且原生推理对照通过。
 视频采用参考首帧姿态与速度初始化、5 ms 物理步长、显式受限 PD、`simulation_parity` 配置。
 真机配置另外包含初始 yaw 对齐、激活过渡、位置过滤的力矩补偿和官方控制器交接；
-这些新模型及两个动作尚无真机验收记录。
+这些新模型及动作尚无真机验收记录。

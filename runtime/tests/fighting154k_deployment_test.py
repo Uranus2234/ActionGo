@@ -30,20 +30,26 @@ def run(player):
     registered = yaml.safe_load((PACKAGE / "fighting154k.yaml").read_text())["actions"]["generic_motion_tracking"]
     config = yaml.safe_load((ROOT / "config/motion_actions.yaml").read_text())
     assert config["action_files"]["fighting154k"] == "actions/fighting154k/fighting154k.yaml"
-    assert len(registered) == len(manifest["actions"]) == 8
+    assert len(registered) == len(manifest["actions"]) == 10
+    assert bindings["R1+A"] == "fighting154k_supermimic_omni_wbst_motive"
+    assert bindings["R1+Down"] == "fighting154k_supermimic_omni_yewendun"
     for asset in list(manifest["models"].values()) + list(manifest["motions"].values()):
         assert hashlib.sha256((PACKAGE / asset["path"]).read_bytes()).hexdigest() == asset["sha256"]
     for model in manifest["models"].values():
         assert model["iteration"] == 154000
         assert hashlib.sha256((PACKAGE / model["params"]).read_bytes()).hexdigest() == model["params_sha256"]
     with tempfile.TemporaryDirectory(prefix="fighting154k-") as temporary:
-        for index, key in enumerate(MODEL_KEYS):
-            for motion, button in (("051_ma", ("Y", "A", "X", "B")[index]),
-                                   ("side_kick", ("Up", "Down", "Left", "Right")[index])):
+        for key in MODEL_KEYS:
+            motions = ("051_ma", "side_kick")
+            if key == "supermimic_omni":
+                motions += ("wbst_motive", "yewendun")
+            for motion in motions:
                 name = f"fighting154k_{key}_{motion}"
                 item = manifest["actions"][name]
-                assert bindings[f"R1+{button}"] == name
-                assert item["binding"] == f"R1+{button}"
+                if item["binding"] is None:
+                    assert name not in bindings.values()
+                else:
+                    assert bindings[item["binding"]] == name
                 action = registered[name]
                 assert action["prestart_before_userctrl"] and action["postrun_handoff_hold"]
                 assert action["safety_enable"] and action["switch_back"]

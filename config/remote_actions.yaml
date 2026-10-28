@@ -4,11 +4,11 @@
 
 bindings:
   R1+Y: fighting154k_supermimic_omni_051_ma
-  R1+A: fighting154k_supermimic_no_omni_051_ma
+  R1+A: fighting154k_supermimic_omni_wbst_motive
   R1+X: fighting154k_allmimic_omni_051_ma
   R1+B: fighting154k_allmimic_no_omni_051_ma
   R1+Up: fighting154k_supermimic_omni_side_kick
-  R1+Down: fighting154k_supermimic_no_omni_side_kick
+  R1+Down: fighting154k_supermimic_omni_yewendun
   R1+Left: fighting154k_allmimic_omni_side_kick
   R1+Right: fighting154k_allmimic_no_omni_side_kick
   R2+Down: kick_right

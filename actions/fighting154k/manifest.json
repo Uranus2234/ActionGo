@@ -213,6 +213,40 @@
         "record_sha256": "3e14e6c2020b568b5b14dafe18d533525c34a57b7829f174864766fb62716136",
         "cache_sha256": "ce5e1c65e6cce2c1e06fbea5c9f7b1e42e84354158c6fac4e1cf1b1466f5bea6"
       }
+    },
+    "supermimic_wbst_motive": {
+      "path": "motions/supermimic_wbst_motive.csv",
+      "sha256": "5f722f3a23556c96fcf183a1eb518cc2740c3bef3fb613fc700b5039f03d3b3a",
+      "name": "omni/12_wbst_motive.csv",
+      "fps": 50,
+      "frames": 573,
+      "last_frame_time_sec": 11.44,
+      "split": "train, Omni subset",
+      "source": {
+        "library": "omni15.npz",
+        "clip": "omni/12_wbst_motive.csv",
+        "start": 2087596,
+        "frames": 573,
+        "qpos_sha256": "57775bbe1a13ed7b26800bd9869a2cd8f070aa53cdbdd28e8a0e8eb12f8b4459",
+        "qvel_sha256": "aca3be53f24c3fa3f41432a523747b04e18e15e6fc541d7262bda70b3913bd6a"
+      }
+    },
+    "supermimic_yewendun": {
+      "path": "motions/supermimic_yewendun.csv",
+      "sha256": "5f500025ecbaf12b5d1a7a67b5e9665b5ac6a9fe90e3015bc48e9197fdff7f1e",
+      "name": "omni/14_yewendun-kick.csv",
+      "fps": 50,
+      "frames": 916,
+      "last_frame_time_sec": 18.3,
+      "split": "train, Omni subset",
+      "source": {
+        "library": "omni15.npz",
+        "clip": "omni/14_yewendun-kick.csv",
+        "start": 2088579,
+        "frames": 916,
+        "qpos_sha256": "4c4898942483eabcf5bef1090ff1c1c77c79488ed894e6c23fb2a051d390ed53",
+        "qvel_sha256": "f37bb72204346783dd3fa1f12123282b13462add96b97394b80140412254c3ac"
+      }
     }
   },
   "actions": {
@@ -232,13 +266,13 @@
       "model": "supermimic_no_omni",
       "motion": "supermimic_051_ma",
       "spec": "config/generic_supermimic_no_omni_051_ma.yaml",
-      "binding": "R1+A"
+      "binding": null
     },
     "fighting154k_supermimic_no_omni_side_kick": {
       "model": "supermimic_no_omni",
       "motion": "supermimic_side_kick",
       "spec": "config/generic_supermimic_no_omni_side_kick.yaml",
-      "binding": "R1+Down"
+      "binding": null
     },
     "fighting154k_allmimic_omni_051_ma": {
       "model": "allmimic_omni",
@@ -263,6 +297,18 @@
       "motion": "allmimic_side_kick",
       "spec": "config/generic_allmimic_no_omni_side_kick.yaml",
       "binding": "R1+Right"
+    },
+    "fighting154k_supermimic_omni_wbst_motive": {
+      "model": "supermimic_omni",
+      "motion": "supermimic_wbst_motive",
+      "spec": "config/generic_supermimic_omni_wbst_motive.yaml",
+      "binding": "R1+A"
+    },
+    "fighting154k_supermimic_omni_yewendun": {
+      "model": "supermimic_omni",
+      "motion": "supermimic_yewendun",
+      "spec": "config/generic_supermimic_omni_yewendun.yaml",
+      "binding": "R1+Down"
     }
   }
 }

@@ -248,6 +248,66 @@
         "target_max_abs_error": 1.1920928955078125e-07,
         "passed": true
       }
+    },
+    "fighting154k_supermimic_omni_wbst_motive": {
+      "model_sha256": "46c88ffd007ddb84530b3319ee8422fb0f51354db0e4e0534add6095d24150c5",
+      "reference_sha256": "5f722f3a23556c96fcf183a1eb518cc2740c3bef3fb613fc700b5039f03d3b3a",
+      "metrics": {
+        "gpu": "gpu0-supermimic-omni15",
+        "case": "wbst_motive",
+        "label": "wbst_motive",
+        "seconds": 11.44,
+        "frames": 573,
+        "finite": true,
+        "full_duration": true,
+        "joint_rmse_rad": 0.20951264506883704,
+        "height_rmse_m": 0.024327435408420625,
+        "root_rmse_m": 0.13218964541703698,
+        "first_failure_sec": null,
+        "first_sustained_failure_sec": null,
+        "failure_definition": "height difference >0.25m or root Rzz difference >0.8; sustained=0.30s; diagnostic only, no auto reset",
+        "protocol": "ActionGo C++ ONNX, DDS lockstep, explicit torque-limited PD at 5ms physics substeps, configured 500Hz publisher, simulation_parity filter, reference initialization",
+        "checkpoint_sha256": "8427fbb123015c72c2497de83ef87edf249ac4f3f3e2c6333ef5f18c4e102b18"
+      },
+      "native_parity": {
+        "gpu": "gpu0-supermimic-omni15",
+        "case": "wbst_motive",
+        "frames": 572,
+        "native_observation_max_abs_error": 5.364418029785156e-07,
+        "native_action_max_abs_error": 1.33514404296875e-05,
+        "target_max_abs_error": 0.0,
+        "passed": true
+      }
+    },
+    "fighting154k_supermimic_omni_yewendun": {
+      "model_sha256": "46c88ffd007ddb84530b3319ee8422fb0f51354db0e4e0534add6095d24150c5",
+      "reference_sha256": "5f500025ecbaf12b5d1a7a67b5e9665b5ac6a9fe90e3015bc48e9197fdff7f1e",
+      "metrics": {
+        "gpu": "gpu0-supermimic-omni15",
+        "case": "yewendun",
+        "label": "yewendun",
+        "seconds": 18.3,
+        "frames": 916,
+        "finite": true,
+        "full_duration": true,
+        "joint_rmse_rad": 0.13364723878253948,
+        "height_rmse_m": 0.015140281287818148,
+        "root_rmse_m": 0.23658726338975974,
+        "first_failure_sec": null,
+        "first_sustained_failure_sec": null,
+        "failure_definition": "height difference >0.25m or root Rzz difference >0.8; sustained=0.30s; diagnostic only, no auto reset",
+        "protocol": "ActionGo C++ ONNX, DDS lockstep, explicit torque-limited PD at 5ms physics substeps, configured 500Hz publisher, simulation_parity filter, reference initialization",
+        "checkpoint_sha256": "8427fbb123015c72c2497de83ef87edf249ac4f3f3e2c6333ef5f18c4e102b18"
+      },
+      "native_parity": {
+        "gpu": "gpu0-supermimic-omni15",
+        "case": "yewendun",
+        "frames": 915,
+        "native_observation_max_abs_error": 5.364418029785156e-07,
+        "native_action_max_abs_error": 1.049041748046875e-05,
+        "target_max_abs_error": 0.0,
+        "passed": true
+      }
     }
   }
 }

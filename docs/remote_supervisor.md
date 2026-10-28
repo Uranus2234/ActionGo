@@ -91,7 +91,7 @@ R2+A          -> 停止当前模型，切官方 walkrun，回到 SHELL_IDLE/睡�
 Select+Start  -> 切官方 passive，回到 SHELL_IDLE，程序不退出
 
 R1+Y / Up     -> 154k SuperMimic-Reproduced Omni 15%，051/Ma / 功夫侧踢
-R1+A / Down   -> 154k SuperMimic-Reproduced 不带 Omni，051/Ma / 功夫侧踢
+R1+A / Down   -> 154k SuperMimic-Reproduced Omni 15%，wbst_motive / yewendun
 R1+X / Left   -> 154k AllMimic Omni 15%，051/Ma / 功夫侧踢
 R1+B / Right  -> 154k AllMimic 不带 Omni，051/Ma / 功夫侧踢
 R2+Down       -> kick_right

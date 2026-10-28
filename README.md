@@ -108,8 +108,8 @@ package asset check -> schema -> package check-only -> dry-run -> simulation/rep
 
 The [four-policy 154k fighting package](actions/fighting154k/README.md) pins the exact
 154000-iteration SuperMimic-Reproduced / AllMimic Omni15% / NoOmni exports from the
-comparison videos. All four ONNX files and family-specific 051/Ma and Kungfu side-kick
-references are included as regular Git files on `feature`. Each finite action uses
+comparison videos. All four ONNX files and family-specific 051/Ma, Kungfu side-kick,
+wbst_motive and yewendun references are included as regular Git files on `feature`. Each finite action uses
 ready/start/complete/release handoff and returns to official walkrun on completion.
 
 Only proceed after the selected package's strict asset and schema checks pass, the action-specific sensor/reference checks pass, and the operator has verified the robot network interface and damping path. An all-package strict check is appropriate when every configured package is installed.
@@ -133,7 +133,7 @@ Arm first with `Start` or `Left+B`, then use an action binding. The checked-in d
 | `R2+A` | Stop the current action, return to official walkrun, enter `SHELL_IDLE` |
 | `Select+Start` | Stop the current action, enter official passive/damping, enter `SHELL_IDLE` |
 | `R1+Y` / `R1+Up` | 154k SuperMimic-Reproduced Omni15%: 051/Ma / Kungfu side kick |
-| `R1+A` / `R1+Down` | 154k SuperMimic-Reproduced NoOmni: 051/Ma / Kungfu side kick |
+| `R1+A` / `R1+Down` | 154k SuperMimic-Reproduced Omni15%: wbst_motive / yewendun |
 | `R1+X` / `R1+Left` | 154k AllMimic Omni15%: 051/Ma / Kungfu side kick |
 | `R1+B` / `R1+Right` | 154k AllMimic NoOmni: 051/Ma / Kungfu side kick |
 | `R2+Down` | `kick_right` |

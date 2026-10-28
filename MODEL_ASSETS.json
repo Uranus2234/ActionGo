@@ -7,20 +7,24 @@
         "actions/fighting154k/model/supermimic_omni.onnx",
         "actions/fighting154k/model/supermimic_no_omni.onnx",
         "actions/fighting154k/motions/supermimic_051_ma.csv",
-        "actions/fighting154k/motions/supermimic_side_kick.csv"
+        "actions/fighting154k/motions/supermimic_side_kick.csv",
+        "actions/fighting154k/motions/supermimic_wbst_motive.csv",
+        "actions/fighting154k/motions/supermimic_yewendun.csv"
       ],
       "sha256": [
         "46c88ffd007ddb84530b3319ee8422fb0f51354db0e4e0534add6095d24150c5",
         "e597657f94233c3e99438f083d0430cd9c4e7cc73b69ef6c62593d94b6664ebe",
         "13ab97c5c86bd96e4f5d29004ea9f14d15b545e0bb3917704970bb55375242a0",
-        "ff10d1c5c72207520c771521bb5d2d721fdf2e16f379787d882a4dbf9d28cf0c"
+        "ff10d1c5c72207520c771521bb5d2d721fdf2e16f379787d882a4dbf9d28cf0c",
+        "5f722f3a23556c96fcf183a1eb518cc2740c3bef3fb613fc700b5039f03d3b3a",
+        "5f500025ecbaf12b5d1a7a67b5e9665b5ac6a9fe90e3015bc48e9197fdff7f1e"
       ],
       "source": "SuperMimic-Reproduced local training",
       "upstream_revision": "local training; see actions/fighting154k/manifest.json",
       "upstream_code_license": "unverified",
       "weight_license": "local training export; dataset terms apply separately",
       "redistribution": "blocked_pending_review",
-      "notes": "154000-iteration Omni15% / NoOmni pair; exact video comparison exports, shared family-specific 051/Ma and Kungfu side-kick references. Ordinary Git binaries; not LFS."
+      "notes": "154000-iteration Omni15% / NoOmni pair; exact video comparison exports, shared family-specific 051/Ma and Kungfu side-kick references. Ordinary Git binaries; not LFS. R1+A / R1+Down now use the Omni15% model with full-length training-library wbst_motive / yewendun references; NoOmni actions remain registered without remote bindings."
     },
     {
       "paths": [

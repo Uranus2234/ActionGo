@@ -47,9 +47,10 @@ ACTION_GO_NET=lo tools/launch/start_dry_run.sh
 
 新增 [四模型 154k 格斗动作包](actions/fighting154k/README.md)：固定使用已播放对比的
 154000 轮 SuperMimic-Reproduced / AllMimic、各自带 Omni 15% / 不带 Omni 四个模型。
-`R1+Y/A/X/B` 播放 051/Ma，`R1+上/下/左/右` 播放功夫侧踢，模型顺序相同。
+`R1+Y/X/B` 播放 051/Ma，`R1+上/左/右` 播放功夫侧踢，模型顺序相同。
+`R1+A/下` 使用 SuperMimic 带 Omni 模型，分别播放 wbst_motive / yewendun。
 四个 ONNX 和对应参考数据使用普通 Git 随 `feature` 分支提交。
-八个动作沿用 ready/start/complete/release 握手，正常结束自动回官方 walkrun。
+所有动作沿用 ready/start/complete/release 握手，正常结束自动回官方 walkrun。
 
 Uni-SuperMimic 使用独立的 `uni_supermimic` variant，动作名为 `uni_supermimic_tracking`。
 20 万轮模型的本地导出、MuJoCo 推理与接口说明见 [Uni-SuperMimic 适配](actions/uni_supermimic/README.md)。
@@ -77,7 +78,7 @@ ACTION_GO_NET=<机器人网卡> tools/launch/start_safe.sh
 | `R2+A` | 停止当前动作，回官方 walkrun，进入 `SHELL_IDLE` |
 | `Select+Start` | 停止当前动作，进入官方 passive/damping 和 `SHELL_IDLE` |
 | `R1+Y` / `R1+Up` | 154k SuperMimic-Reproduced Omni 15%：051/Ma / 功夫侧踢 |
-| `R1+A` / `R1+Down` | 154k SuperMimic-Reproduced 不带 Omni：051/Ma / 功夫侧踢 |
+| `R1+A` / `R1+Down` | 154k SuperMimic-Reproduced Omni 15%：wbst_motive / yewendun |
 | `R1+X` / `R1+Left` | 154k AllMimic Omni 15%：051/Ma / 功夫侧踢 |
 | `R1+B` / `R1+Right` | 154k AllMimic 不带 Omni：051/Ma / 功夫侧踢 |
 | `R2+Down` | `kick_right` |

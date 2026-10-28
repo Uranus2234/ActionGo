@@ -38,7 +38,7 @@ def run(player):
         assert hashlib.sha256((PACKAGE / model["params"]).read_bytes()).hexdigest() == model["params_sha256"]
     with tempfile.TemporaryDirectory(prefix="fighting154k-") as temporary:
         for index, key in enumerate(MODEL_KEYS):
-            for motion, button in (("051_ma", ("A", "B", "X", "Y")[index]),
+            for motion, button in (("051_ma", ("Y", "A", "X", "B")[index]),
                                    ("side_kick", ("Up", "Down", "Left", "Right")[index])):
                 name = f"fighting154k_{key}_{motion}"
                 item = manifest["actions"][name]

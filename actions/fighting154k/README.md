@@ -7,10 +7,10 @@
 
 | 模型 | 051 / Ma（约 16 秒） | 功夫侧踢（约 6 秒） |
 |---|---|---|
-| SuperMimic-Reproduced，Omni 15% | R1+A | R1+Up |
-| SuperMimic-Reproduced，不带 Omni | R1+B | R1+Down |
+| SuperMimic-Reproduced，Omni 15% | R1+Y | R1+Up |
+| SuperMimic-Reproduced，不带 Omni | R1+A | R1+Down |
 | AllMimic，Omni 15% | R1+X | R1+Left |
-| AllMimic，不带 Omni | R1+Y | R1+Right |
+| AllMimic，不带 Omni | R1+B | R1+Right |
 
 051 是 `duobox_g1_boxing.zip` 中的 `04_sparring_051_ma_free_liu_free.npz`、Ma 一侧，
 使用视频所展示的 20261017 修正重定向版本。原始 481 帧 / 30 Hz，部署缓存 800 帧 / 50 Hz，

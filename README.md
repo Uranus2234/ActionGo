@@ -132,10 +132,10 @@ Arm first with `Start` or `Left+B`, then use an action binding. The checked-in d
 | `Left+B` | ARM with `ufo_stand`; valid IMU tilt at or above `30 deg` starts recovery |
 | `R2+A` | Stop the current action, return to official walkrun, enter `SHELL_IDLE` |
 | `Select+Start` | Stop the current action, enter official passive/damping, enter `SHELL_IDLE` |
-| `R1+A` / `R1+Up` | 154k SuperMimic-Reproduced Omni15%: 051/Ma / Kungfu side kick |
-| `R1+B` / `R1+Down` | 154k SuperMimic-Reproduced NoOmni: 051/Ma / Kungfu side kick |
+| `R1+Y` / `R1+Up` | 154k SuperMimic-Reproduced Omni15%: 051/Ma / Kungfu side kick |
+| `R1+A` / `R1+Down` | 154k SuperMimic-Reproduced NoOmni: 051/Ma / Kungfu side kick |
 | `R1+X` / `R1+Left` | 154k AllMimic Omni15%: 051/Ma / Kungfu side kick |
-| `R1+Y` / `R1+Right` | 154k AllMimic NoOmni: 051/Ma / Kungfu side kick |
+| `R1+B` / `R1+Right` | 154k AllMimic NoOmni: 051/Ma / Kungfu side kick |
 | `R2+Down` | `kick_right` |
 | `Left+X` | `hlqk` action using the current `paoxiao.onnx` checkpoint |
 | `Left+A` | `ufo_tracking_zs7` |

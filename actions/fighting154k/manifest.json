@@ -220,7 +220,7 @@
       "model": "supermimic_omni",
       "motion": "supermimic_051_ma",
       "spec": "config/generic_supermimic_omni_051_ma.yaml",
-      "binding": "R1+A"
+      "binding": "R1+Y"
     },
     "fighting154k_supermimic_omni_side_kick": {
       "model": "supermimic_omni",
@@ -232,7 +232,7 @@
       "model": "supermimic_no_omni",
       "motion": "supermimic_051_ma",
       "spec": "config/generic_supermimic_no_omni_051_ma.yaml",
-      "binding": "R1+B"
+      "binding": "R1+A"
     },
     "fighting154k_supermimic_no_omni_side_kick": {
       "model": "supermimic_no_omni",
@@ -256,7 +256,7 @@
       "model": "allmimic_no_omni",
       "motion": "allmimic_051_ma",
       "spec": "config/generic_allmimic_no_omni_051_ma.yaml",
-      "binding": "R1+Y"
+      "binding": "R1+B"
     },
     "fighting154k_allmimic_no_omni_side_kick": {
       "model": "allmimic_no_omni",

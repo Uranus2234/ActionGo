@@ -1,0 +1,22 @@
+actions:
+  generic_motion_tracking:
+    mjlab_combat_92000_duobox017_ma:
+      params: config/generic_mjlab_combat_017.yaml
+      safety_enable: true
+      switch_back: true
+      switch_back_mode: walkrun
+      prestart_before_userctrl: true
+      prestart_ready_timeout_sec: 15.0
+      postrun_handoff_hold: true
+      switch_back_overlap_sec: 0.30
+      command: "{action_go_root}/build/generic_motion_tracking_player --net {net} --cmd-topic rt/user_lowcmd --state-topic rt/lowstate --spec {params} --ready-file {ready_file} --start-file {start_file} --handoff-complete-file {handoff_complete_file} --handoff-release-file {handoff_release_file} --no-damping-on-stop {event_log_arg}"
+    mjlab_combat_92000_duobox034_ma:
+      params: config/generic_mjlab_combat_034.yaml
+      safety_enable: true
+      switch_back: true
+      switch_back_mode: walkrun
+      prestart_before_userctrl: true
+      prestart_ready_timeout_sec: 15.0
+      postrun_handoff_hold: true
+      switch_back_overlap_sec: 0.30
+      command: "{action_go_root}/build/generic_motion_tracking_player --net {net} --cmd-topic rt/user_lowcmd --state-topic rt/lowstate --spec {params} --ready-file {ready_file} --start-file {start_file} --handoff-complete-file {handoff_complete_file} --handoff-release-file {handoff_release_file} --no-damping-on-stop {event_log_arg}"

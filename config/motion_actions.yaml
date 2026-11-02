@@ -131,6 +131,7 @@ action_files:
   instinct_parkour: actions/instinct/instinct_parkour.yaml             # g1_parkour
   holosoma_wbt: actions/holosoma/holosoma_wbt.yaml                     # generic_policy: holosoma_dance
   mjlab: actions/mjlab/mjlab.yaml                                      # generic_policy: reverse_vault flat / terrain
+  mjlab_combat: actions/mjlab_combat/mjlab_combat.yaml
   humanoid_gpt: actions/humanoid_gpt/humanoid_gpt.yaml                  # generic_motion_tracking: humanoid_gpt_offline / humanoid_gpt_realtime
   sonic: actions/sonic/sonic.yaml                                      # generic_motion_tracking: offline / G1 ZMQ / PICO SMPL teleop
   protomotions_tracker: actions/protomotions/protomotions_tracker.yaml  # generic_motion_tracking: proto_walk / proto_dance

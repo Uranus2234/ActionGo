@@ -5,12 +5,8 @@
 bindings:
   R1+Y: fighting154k_supermimic_omni_051_ma
   R1+A: fighting154k_supermimic_omni_wbst_motive
-  R1+X: fighting154k_allmimic_omni_051_ma
-  R1+B: fighting154k_allmimic_no_omni_051_ma
   R1+Up: fighting154k_supermimic_omni_side_kick
   R1+Down: fighting154k_supermimic_omni_yewendun
-  R1+Left: fighting154k_allmimic_omni_side_kick
-  R1+Right: fighting154k_allmimic_no_omni_side_kick
   R2+Down: kick_right
   Left+X: hlqk
   Left+A: ufo_tracking_zs7
@@ -23,8 +19,8 @@ bindings:
   Down+A: pbfm_loco
   Down+B: pbfm_tracking_dance
   Down+X: pbfm_pico_teleop
-  Right+A: allmimic_paoxiao
-  Right+B: allmimic_paoxiao_no_omni
+  Right+A: mjlab_combat_92000_duobox017_ma
+  Right+B: mjlab_combat_92000_duobox034_ma
   Right+X: proto_walk
   Right+Y: proto_dance
   R1+F1: holosoma_dance

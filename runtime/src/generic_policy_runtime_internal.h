@@ -20,6 +20,7 @@
 #include "action_go/runtime/sonic_policy.h"
 #include "action_go/runtime/supermimic_policy.h"
 #include "action_go/runtime/allmimic_policy.h"
+#include "action_go/runtime/mjlab_combat_policy.h"
 #include "action_go/runtime/yaml_contract.h"
 
 #include <yaml-cpp/yaml.h>
@@ -1170,7 +1171,7 @@ inline Args parse_args(int argc, char** argv) {
       std::cout
                 << "  --check-only loads spec/params/ONNX and runs a zero-input IO check without DDS.\n"
                 << "  --dry-run subscribes LowState and runs inference, but does not publish LowCmd.\n"
-                << "  --dry-run-latency measures AllMimic/SuperMimic receive-to-command latency; requires --dry-run --event-log.\n"
+                << "  --dry-run-latency measures AllMimic/SuperMimic/mjlab_combat receive-to-command latency; requires --dry-run --event-log.\n"
                 << "  --lowstate-timeout-sec SEC overrides the spec safety timeout.\n"
                 << "  --activation-blend-sec SEC blends q/kp/kd from the final hold command.\n"
                 << "  --sim-lowstate-decimation N advances embedded mimic after N fresh simulation states.\n"
@@ -2775,6 +2776,7 @@ class GenericPolicyPlayer {
   std::vector<float> beyond_action_, beyond_ref_joint_pos_, beyond_ref_joint_vel_, beyond_ref_body_quat_w_;
   action_go::runtime::SuperMimicController supermimic_controller_;
   action_go::runtime::AllMimicController allmimic_controller_;
+  action_go::runtime::MjlabCombatController mjlab_combat_controller_;
   bool supermimic_use_lowstate_tick_{false};
   bool supermimic_sim_lockstep_sequence_{false};
   bool supermimic_align_initial_yaw_{true};

@@ -1,0 +1,402 @@
+{
+  "variant": "mjlab_combat",
+  "iteration": 92000,
+  "checkpoint": "model_92000.pt",
+  "training_run": "2026-11-01_12-11-21_mixed_future40ms_4gpu_8192_resume56000_200k",
+  "checkpoint_sha256": "c31719c2393c8602d38b49284917f90d6973dfcce1b81f964029b86100edf0e4",
+  "model": {
+    "path": "model/policy_92000.onnx",
+    "sha256": "def3b00c7e2cceb07b319006f74f5564d9e365cdd3abeb75ce9831a72c8ed7fe"
+  },
+  "params": {
+    "path": "config/MjlabCombat.yaml",
+    "sha256": "0176296eab9fb53345f663e3c6b9af2372593e5bcbd3083440b4afd1f042fe8c"
+  },
+  "policy_contract": {
+    "version": "phase2_policy_v1",
+    "model_sha256": "3ffb445eeef4038548ae2f03056f10ae2a36ab2ca749dddd486871a1dd5f5592",
+    "joint_names": [
+      "left_hip_pitch_joint",
+      "left_hip_roll_joint",
+      "left_hip_yaw_joint",
+      "left_knee_joint",
+      "left_ankle_pitch_joint",
+      "left_ankle_roll_joint",
+      "right_hip_pitch_joint",
+      "right_hip_roll_joint",
+      "right_hip_yaw_joint",
+      "right_knee_joint",
+      "right_ankle_pitch_joint",
+      "right_ankle_roll_joint",
+      "waist_yaw_joint",
+      "waist_roll_joint",
+      "waist_pitch_joint",
+      "left_shoulder_pitch_joint",
+      "left_shoulder_roll_joint",
+      "left_shoulder_yaw_joint",
+      "left_elbow_joint",
+      "left_wrist_roll_joint",
+      "left_wrist_pitch_joint",
+      "left_wrist_yaw_joint",
+      "right_shoulder_pitch_joint",
+      "right_shoulder_roll_joint",
+      "right_shoulder_yaw_joint",
+      "right_elbow_joint",
+      "right_wrist_roll_joint",
+      "right_wrist_pitch_joint",
+      "right_wrist_yaw_joint"
+    ],
+    "tracked_body_names": [
+      "pelvis",
+      "left_hip_roll_link",
+      "left_knee_link",
+      "left_ankle_roll_link",
+      "right_hip_roll_link",
+      "right_knee_link",
+      "right_ankle_roll_link",
+      "torso_link",
+      "left_shoulder_roll_link",
+      "left_elbow_link",
+      "left_wrist_yaw_link",
+      "right_shoulder_roll_link",
+      "right_elbow_link",
+      "right_wrist_yaw_link"
+    ],
+    "anchor_body_name": "torso_link",
+    "step_dt": 0.02,
+    "observations": {
+      "actor": [
+        {
+          "name": "command",
+          "function": "mjlab.envs.mdp.observations.generated_commands",
+          "params": {
+            "command_name": "motion"
+          }
+        },
+        {
+          "name": "motion_anchor_ori_b",
+          "function": "mjlab.tasks.tracking.mdp.observations.motion_anchor_ori_b",
+          "params": {
+            "command_name": "motion"
+          }
+        },
+        {
+          "name": "base_ang_vel",
+          "function": "mjlab.envs.mdp.observations.builtin_sensor",
+          "params": {
+            "sensor_name": "robot/imu_ang_vel"
+          }
+        },
+        {
+          "name": "joint_pos",
+          "function": "mjlab.envs.mdp.observations.joint_pos_rel",
+          "params": {
+            "biased": true
+          }
+        },
+        {
+          "name": "joint_vel",
+          "function": "mjlab.envs.mdp.observations.joint_vel_rel",
+          "params": {}
+        },
+        {
+          "name": "actions",
+          "function": "mjlab.envs.mdp.observations.last_action",
+          "params": {}
+        },
+        {
+          "name": "hybrid_reference",
+          "function": "combat_tracker.temporal_reference.hybrid_reference_observation",
+          "params": {}
+        }
+      ],
+      "critic": [
+        {
+          "name": "command",
+          "function": "mjlab.envs.mdp.observations.generated_commands",
+          "params": {
+            "command_name": "motion"
+          }
+        },
+        {
+          "name": "motion_anchor_pos_b",
+          "function": "mjlab.tasks.tracking.mdp.observations.motion_anchor_pos_b",
+          "params": {
+            "command_name": "motion"
+          }
+        },
+        {
+          "name": "motion_anchor_ori_b",
+          "function": "mjlab.tasks.tracking.mdp.observations.motion_anchor_ori_b",
+          "params": {
+            "command_name": "motion"
+          }
+        },
+        {
+          "name": "body_pos",
+          "function": "mjlab.tasks.tracking.mdp.observations.robot_body_pos_b",
+          "params": {
+            "command_name": "motion"
+          }
+        },
+        {
+          "name": "body_ori",
+          "function": "mjlab.tasks.tracking.mdp.observations.robot_body_ori_b",
+          "params": {
+            "command_name": "motion"
+          }
+        },
+        {
+          "name": "base_lin_vel",
+          "function": "mjlab.envs.mdp.observations.builtin_sensor",
+          "params": {
+            "sensor_name": "robot/imu_lin_vel"
+          }
+        },
+        {
+          "name": "base_ang_vel",
+          "function": "mjlab.envs.mdp.observations.builtin_sensor",
+          "params": {
+            "sensor_name": "robot/imu_ang_vel"
+          }
+        },
+        {
+          "name": "joint_pos",
+          "function": "mjlab.envs.mdp.observations.joint_pos_rel",
+          "params": {}
+        },
+        {
+          "name": "joint_vel",
+          "function": "mjlab.envs.mdp.observations.joint_vel_rel",
+          "params": {}
+        },
+        {
+          "name": "actions",
+          "function": "mjlab.envs.mdp.observations.last_action",
+          "params": {}
+        },
+        {
+          "name": "hybrid_reference",
+          "function": "combat_tracker.temporal_reference.hybrid_reference_observation",
+          "params": {}
+        }
+      ]
+    },
+    "reference": {
+      "version": "g1_hybrid_reference_v2",
+      "mode": "temporal",
+      "offsets_steps": [
+        0,
+        2
+      ],
+      "offsets_seconds": [
+        0.0,
+        0.04
+      ],
+      "task_body_names": [
+        "left_wrist_yaw_link",
+        "right_wrist_yaw_link",
+        "left_ankle_roll_link",
+        "right_ankle_roll_link"
+      ],
+      "noncurrent_fields": [
+        [
+          "joint_pos",
+          29
+        ],
+        [
+          "joint_vel",
+          29
+        ],
+        [
+          "anchor_displacement_heading",
+          3
+        ],
+        [
+          "anchor_orientation_robot_6d",
+          6
+        ],
+        [
+          "anchor_lin_vel_heading",
+          3
+        ],
+        [
+          "anchor_ang_vel_heading",
+          3
+        ],
+        [
+          "task_body_pos_anchor_relative_heading",
+          12
+        ],
+        [
+          "offset_seconds",
+          1
+        ],
+        [
+          "valid",
+          1
+        ]
+      ],
+      "current_fields": [
+        [
+          "anchor_lin_vel_heading",
+          3
+        ],
+        [
+          "anchor_ang_vel_heading",
+          3
+        ],
+        [
+          "task_body_pos_anchor_relative_heading",
+          12
+        ]
+      ],
+      "append_width": 105,
+      "flatten_order": "offset_order_current_without_duplicated_joint_targets_or_orientation",
+      "quaternion_order": "wxyz",
+      "anchor_displacement_origin": "current_reference_anchor",
+      "vector_frame": "current_robot_anchor_heading",
+      "orientation_frame": "current_robot_anchor_full_orientation",
+      "invalid_frame": "zero_kinematics_keep_offset_and_validity_zero",
+      "past_is": "past_reference_not_robot_history",
+      "current_reference": "unchanged_v0_observation_prefix"
+    },
+    "action_scale": [
+      0.5475464463233948,
+      0.3506614565849304,
+      0.5475464463233948,
+      0.3506614565849304,
+      0.4385773241519928,
+      0.4385773241519928,
+      0.5475464463233948,
+      0.3506614565849304,
+      0.5475464463233948,
+      0.3506614565849304,
+      0.4385773241519928,
+      0.4385773241519928,
+      0.5475464463233948,
+      0.4385773241519928,
+      0.4385773241519928,
+      0.4385773241519928,
+      0.4385773241519928,
+      0.4385773241519928,
+      0.4385773241519928,
+      0.4385773241519928,
+      0.07450087368488312,
+      0.07450087368488312,
+      0.4385773241519928,
+      0.4385773241519928,
+      0.4385773241519928,
+      0.4385773241519928,
+      0.4385773241519928,
+      0.07450087368488312,
+      0.07450087368488312
+    ],
+    "default_joint_pos": [
+      -0.31200000643730164,
+      0.0,
+      0.0,
+      0.6690000295639038,
+      -0.3630000054836273,
+      0.0,
+      -0.31200000643730164,
+      0.0,
+      0.0,
+      0.6690000295639038,
+      -0.3630000054836273,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.20000000298023224,
+      0.20000000298023224,
+      0.0,
+      0.6000000238418579,
+      0.0,
+      0.0,
+      0.0,
+      0.20000000298023224,
+      -0.20000000298023224,
+      0.0,
+      0.6000000238418579,
+      0.0,
+      0.0,
+      0.0
+    ]
+  },
+  "motions": {
+    "017": {
+      "path": "motions/duobox_017_ma.csv",
+      "sha256": "3fefdb03262f9aa28d2af5ed96f3466bc275c81cefd961adccea0bb1026e211d",
+      "frames": 824,
+      "fps": 50,
+      "source_motion": "duobox_repaired__01_drill_017_ma_jab-cross_liu_defense__ma.npz",
+      "source_sha256": "1798e2abba861fff36c1e32e246bd904fa51002a29349442257549348235514c",
+      "action": "mjlab_combat_92000_duobox017_ma",
+      "binding": "Right+A",
+      "spec": "config/generic_mjlab_combat_017.yaml",
+      "metrics": {
+        "steps": 824,
+        "seconds": 16.48,
+        "sim_timestep": 0.005,
+        "joint_rmse_rad": 0.10704708833809053,
+        "root_position_mean_error_m": 0.34057857490618865,
+        "minimum_pelvis_height_m": 0.7154422651691231,
+        "finite": true,
+        "automatic_resets": 0
+      },
+      "parity": {
+        "passed": true,
+        "samples": 824,
+        "mjlab_state_samples": 4,
+        "max_abs_error": {
+          "raw_input": 0.0,
+          "actions": 6.198883056640625e-06,
+          "target": 0.0,
+          "dds_target": 0.0,
+          "mjlab_observation": 1.430511474609375e-06
+        }
+      }
+    },
+    "034": {
+      "path": "motions/duobox_034_ma.csv",
+      "sha256": "4c333a0a7e5a1a4f54d8dcc5b637d65b3deb4382386f96ffd5490eb460950ae3",
+      "frames": 876,
+      "fps": 50,
+      "source_motion": "duobox_repaired__03_combo_034_ma_comb13_liu_comb14__ma.npz",
+      "source_sha256": "38c3596abe4ba6b8b7d3cabdaf38deeaff0165e478851f63207e3db98f8ff2da",
+      "action": "mjlab_combat_92000_duobox034_ma",
+      "binding": "Right+B",
+      "spec": "config/generic_mjlab_combat_034.yaml",
+      "metrics": {
+        "steps": 876,
+        "seconds": 17.52,
+        "sim_timestep": 0.005,
+        "joint_rmse_rad": 0.13163412399453162,
+        "root_position_mean_error_m": 0.31757039976217827,
+        "minimum_pelvis_height_m": 0.6577802831285623,
+        "finite": true,
+        "automatic_resets": 0
+      },
+      "parity": {
+        "passed": true,
+        "samples": 876,
+        "mjlab_state_samples": 4,
+        "max_abs_error": {
+          "raw_input": 0.0,
+          "actions": 6.467103958129883e-06,
+          "target": 0.0,
+          "dds_target": 0.0,
+          "mjlab_observation": 2.980232238769531e-07
+        }
+      }
+    }
+  },
+  "export_validation": {
+    "mjlab_observation_max_abs_error": 3.681052476167679e-07,
+    "mjlab_action_max_abs_error": 3.0994415283203125e-06,
+    "onnx_max_abs_error": 1.5497207641601562e-06,
+    "samples": 5,
+    "boundary_frames_included": true
+  }
+}

@@ -610,6 +610,13 @@ if(DEFINED ACTION_GO_ONNXRUNTIME_LIB AND DEFINED ACTION_GO_ONNXRUNTIME_INCLUDE_D
         --player $<TARGET_FILE:generic_motion_tracking_player>)
       set_tests_properties(allmimic_dry_run_test PROPERTIES TIMEOUT 60)
     endif()
+    if(NOT ACTION_GO_CODE_ONLY AND
+       EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/actions/mjlab_combat/model/policy_92000.onnx")
+      add_test(NAME mjlab_combat_deployment_test COMMAND ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/runtime/tests/mjlab_combat_deployment_test.py
+        --player $<TARGET_FILE:generic_motion_tracking_player>)
+      set_tests_properties(mjlab_combat_deployment_test PROPERTIES TIMEOUT 90)
+    endif()
     if(NOT ACTION_GO_CODE_ONLY AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/actions/bfm0/model/FBcprAuxModel.onnx")
       add_test(
         NAME policy_spec_schema_check_all

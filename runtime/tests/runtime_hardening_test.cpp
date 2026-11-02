@@ -13,6 +13,7 @@
 #include "action_go/runtime/sonic_policy.h"
 #include "action_go/runtime/supermimic_policy.h"
 #include "action_go/runtime/allmimic_policy.h"
+#include "action_go/runtime/mjlab_combat_policy.h"
 
 #include <chrono>
 #include <cmath>
@@ -673,6 +674,63 @@ void test_allmimic_policy_helpers() {
   expect_true("AllMimic protocol input", protocol && protocol->obs_dim == 1660);
 }
 
+void test_mjlab_combat_policy_helpers() {
+  using namespace action_go::runtime;
+  MjlabCombatController controller;
+  controller.configure(std::vector<float>(29, 0.25f), std::vector<float>(29, 0.5f));
+  const auto path = std::filesystem::temp_directory_path() /
+      ("mjlab-combat-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + ".csv");
+  const auto write_reference = [&](std::size_t columns, float quaternion) {
+    std::ofstream output(path);
+    for (std::size_t frame = 0; frame < 4; ++frame) {
+      for (std::size_t column = 0; column < columns; ++column) {
+        if (column) output << ',';
+        output << (column == 61 ? quaternion : column == 0 ? static_cast<float>(frame) : 0.f);
+      }
+      output << '\n';
+    }
+  };
+  write_reference(83, 1.f);
+  controller.load_reference_csv(path.string());
+  SuperMimicRobotFrame robot;
+  robot.q[0] = 0.3f;
+  auto input = controller.build_input(robot);
+  expect_true("mjlab combat raw input dimension", input.size() == 261);
+  expect_near("mjlab combat raw joint state", input[0], 0.3f);
+  expect_near("mjlab combat current frame", input[94], 0.f);
+  expect_near("mjlab combat future frame", input[177], 2.f);
+  expect_near("mjlab combat valid future", input[260], 1.f);
+  const std::vector<float> action(29, 2.f);
+  expect_near("mjlab combat default plus scaled action", controller.decode_action(action)[0], 1.25f);
+  controller.accept_action(action);
+  input = controller.build_input(robot);
+  expect_near("mjlab combat previous raw action", input[65], 2.f);
+  expect_near("mjlab combat next future frame", input[177], 3.f);
+  controller.accept_action(action);
+  input = controller.build_input(robot);
+  expect_near("mjlab combat invalid future clamped", input[177], 3.f);
+  expect_near("mjlab combat invalid future flag", input[260], 0.f);
+  controller.accept_action(action);
+  controller.accept_action(action);
+  expect_true("mjlab combat finished reference", controller.at_end());
+  expect_true("mjlab combat final frame hold", controller.reference_index() == 3);
+  controller.reset(robot.quat, false);
+  expect_near("mjlab combat reset clears previous action", controller.build_input(robot)[65], 0.f);
+  expect_throw("mjlab combat rejects unsupported yaw alignment", [&] { controller.reset(robot.quat, true); });
+  robot.quat.fill(0.f);
+  expect_throw("mjlab combat rejects zero quaternion", [&] { controller.build_input(robot); });
+  write_reference(82, 1.f);
+  expect_throw("mjlab combat rejects missing reference column", [&] { controller.load_reference_csv(path.string()); });
+  write_reference(84, 1.f);
+  expect_throw("mjlab combat rejects extra reference column", [&] { controller.load_reference_csv(path.string()); });
+  write_reference(83, 0.f);
+  expect_throw("mjlab combat rejects invalid reference quaternion", [&] { controller.load_reference_csv(path.string()); });
+  std::filesystem::remove(path);
+  expect_true("mjlab combat tracking player contract", variant_allowed_for_player("mjlab_combat", GenericPlayerKind::kMotionTracking));
+  const auto* protocol = protocol_constraint_for_variant("mjlab_combat");
+  expect_true("mjlab combat protocol dimensions", protocol && protocol->obs_dim == 261 && protocol->action_dim == 29);
+}
+
 void test_supermimic_policy_helpers() {
   using namespace action_go::runtime;
   expect_true("Uni-SuperMimic uses motion tracking player",
@@ -1079,6 +1137,7 @@ int main() {
     test_sonic_policy_helpers();
     test_supermimic_policy_helpers();
     test_allmimic_policy_helpers();
+    test_mjlab_combat_policy_helpers();
     test_sonic_planner_helpers();
   } catch (const std::exception& e) {
     fail("uncaught exception", e.what());

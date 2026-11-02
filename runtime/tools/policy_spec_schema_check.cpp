@@ -388,13 +388,17 @@ void validate_source_sections(const fs::path& spec,
       break;
     case PolicyTemplateId::kMotionConditionedTracking: {
       const std::string variant = lower(yamlc::required_scalar<std::string>(y, "runtime.variant"));
-      if (variant == "supermimic" || variant == "uni_supermimic" || variant == "allmimic") {
+      if (variant == "supermimic" || variant == "uni_supermimic" || variant == "allmimic" || variant == "mjlab_combat") {
         require_existing_path(spec, yamlc::required_scalar<std::string>(y, "reference.path"), "reference.path", true);
         if (yamlc::required_scalar<std::string>(y, "reference.type") !=
-            (variant == "allmimic" ? "allmimic_csv_v1" : "supermimic_csv_v1")) {
+            (variant == "mjlab_combat" ? "mjlab_combat_csv_v1" :
+             variant == "allmimic" ? "allmimic_csv_v1" : "supermimic_csv_v1")) {
           throw std::runtime_error(variant + " reference.type does not match its cache format");
         }
         require_matching_int(y, {"runtime.inference_hz"}, 50, "SuperMimic inference Hz");
+        if (variant == "mjlab_combat" && yamlc::required_scalar<std::string>(y, "reference.yaw_alignment") != "none") {
+          throw std::runtime_error("mjlab_combat requires reference.yaw_alignment=none");
+        }
       } else if (variant == "protomotions") {
         require_existing_path(spec, yamlc::required_scalar<std::string>(y, "reference.path"), "reference.path", true);
         yamlc::required_scalar<std::string>(y, "reference.anchor_source");
@@ -505,7 +509,7 @@ void validate_params(const YAML::Node& y,
       throw std::runtime_error("unitree allowed obs dims mismatch");
     }
     yamlc::required_scalar<double>(params, "observation.phase_period");
-  } else if (variant == "beyondmimic" || variant == "supermimic" || variant == "uni_supermimic" || variant == "allmimic") {
+  } else if (variant == "beyondmimic" || variant == "supermimic" || variant == "uni_supermimic" || variant == "allmimic" || variant == "mjlab_combat") {
     validate_standard_robot_vectors(params, motor_count, true, true, "robot.policy_joint_order");
     require_matching_int(params, {"policy.num_actions", "num_actions"}, action_dim, "BeyondMimic action dim");
     require_matching_int(params, {"policy.num_obs", "num_obs"}, obs_dim, "BeyondMimic obs dim");

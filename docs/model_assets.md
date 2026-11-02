@@ -24,6 +24,7 @@ ActionGo 源码仓库保存 runtime、配置和资产清单，第三方模型优
 | Holosoma | [Holosoma](https://github.com/amazon-far/holosoma) | `actions/holosoma/model/ppo_g1_29dof_dancing.onnx` |
 | Humanoid-GPT | [Humanoid-GPT](https://github.com/GalaxyGeneralRobotics/Humanoid-GPT)；准确 checkpoint 版本待补 | `model/pns_wo_priv216.onnx`、`motions/` 和 `assets/` |
 | mjlab | [MJLab](https://github.com/mujocolab/mjlab)；[包说明](../actions/mjlab/README.md) 记录本地训练 checkpoint | `actions/mjlab/model/`；当前没有这些本地导出的公开下载地址 |
+| mjlab combat | [包说明](../actions/mjlab_combat/README.md)；本地四卡 92000 轮 checkpoint | `actions/mjlab_combat/model/policy_92000.onnx` 和修复版 DuoBox 017 / 034 CSV，共用同一策略 |
 | OmniXtreme | [OmniXtreme](https://github.com/Perkins729/OmniXtreme) | 三个 ONNX 和 `actions/omnixtreme/motions/`，包含完整 motion 与各 segment |
 | PHP | [student-assets-v1](https://github.com/amazon-far/php_parkour/releases/tag/student-assets-v1) | `actions/php/model/`，两个文件的本地校验值与上游 release manifest 一致 |
 | P-BFM | [P-BFM public demo](https://github.com/Roboparty/P-BFM/tree/671fbafe71a5f58bab77eeb5d969051fd2d283f4/interactive)；[包说明](../actions/pbfm/README.md) | `actions/pbfm/model/policy.onnx`，checkpoint `364822528`；导入器保留 CC-BY-NC-4.0，文本 context 随配置提供 |

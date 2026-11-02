@@ -134,8 +134,6 @@ Arm first with `Start` or `Left+B`, then use an action binding. The checked-in d
 | `Select+Start` | Stop the current action, enter official passive/damping, enter `SHELL_IDLE` |
 | `R1+Y` / `R1+Up` | 154k SuperMimic-Reproduced Omni15%: 051/Ma / Kungfu side kick |
 | `R1+A` / `R1+Down` | 154k SuperMimic-Reproduced Omni15%: wbst_motive / yewendun |
-| `R1+X` / `R1+Left` | 154k AllMimic Omni15%: 051/Ma / Kungfu side kick |
-| `R1+B` / `R1+Right` | 154k AllMimic NoOmni: 051/Ma / Kungfu side kick |
 | `R2+Down` | `kick_right` |
 | `Left+X` | `hlqk` action using the current `paoxiao.onnx` checkpoint |
 | `Left+A` | `ufo_tracking_zs7` |
@@ -148,8 +146,8 @@ Arm first with `Start` or `Left+B`, then use an action binding. The checked-in d
 | `Down+A` | `pbfm_loco` |
 | `Down+B` | `pbfm_tracking_dance` |
 | `Down+X` | `pbfm_pico_teleop` |
-| `Right+A` | `allmimic_paoxiao` using the 159000-iteration AllMimic Omni-mix actor |
-| `Right+B` | `allmimic_paoxiao_no_omni` using the 159000-iteration AllMimic actor trained without Omni |
+| `Right+A` | `mjlab_combat_92000_duobox017_ma`: repaired DuoBox jab-cross 017 / Ma, four-GPU 92000 actor |
+| `Right+B` | `mjlab_combat_92000_duobox034_ma`: repaired DuoBox combo 034 / Ma, same 92000 actor |
 | `Right+X` | `proto_walk` |
 | `Right+Y` | `proto_dance` |
 | `R1+F1` | `holosoma_dance` |

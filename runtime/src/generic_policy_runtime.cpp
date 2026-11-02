@@ -21,9 +21,9 @@ void GenericPolicyPlayer::run() {
     load_spec();
     if (args_.dry_run_latency &&
         (!args_.dry_run || args_.event_log.empty() || args_.check_only ||
-         (variant_ != "allmimic" && variant_ != "supermimic" && variant_ != "uni_supermimic") ||
+         (variant_ != "allmimic" && variant_ != "supermimic" && variant_ != "uni_supermimic" && variant_ != "mjlab_combat") ||
          preview_mode_enabled())) {
-      throw std::runtime_error("--dry-run-latency requires --dry-run --event-log and an AllMimic/SuperMimic spec without preview or --check-only");
+      throw std::runtime_error("--dry-run-latency requires --dry-run --event-log and an AllMimic/SuperMimic/mjlab_combat spec without preview or --check-only");
     }
     event_log_.log("spec_loaded",
                    {event_string("player", player_label()),
@@ -223,6 +223,13 @@ const GenericPolicyPlayer::PolicyRuntimeModule& GenericPolicyPlayer::runtime_mod
          &GenericPolicyPlayer::schema_summary_humanoid_gpt,
          &GenericPolicyPlayer::check_only_humanoid_gpt,
          &GenericPolicyPlayer::control_loop_humanoid_gpt},
+        {"mjlab_combat", GenericPlayerKind::kMotionTracking,
+         &GenericPolicyPlayer::load_spec_supermimic,
+         &GenericPolicyPlayer::load_supermimic_params,
+         &GenericPolicyPlayer::post_load_supermimic,
+         &GenericPolicyPlayer::schema_summary_supermimic,
+         &GenericPolicyPlayer::check_only_supermimic,
+         &GenericPolicyPlayer::control_loop_supermimic},
         {"allmimic", GenericPlayerKind::kMotionTracking,
          &GenericPolicyPlayer::load_spec_supermimic,
          &GenericPolicyPlayer::load_supermimic_params,

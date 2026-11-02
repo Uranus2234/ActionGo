@@ -92,8 +92,6 @@ Select+Start  -> 切官方 passive，回到 SHELL_IDLE，程序不退出
 
 R1+Y / Up     -> 154k SuperMimic-Reproduced Omni 15%，051/Ma / 功夫侧踢
 R1+A / Down   -> 154k SuperMimic-Reproduced Omni 15%，wbst_motive / yewendun
-R1+X / Left   -> 154k AllMimic Omni 15%，051/Ma / 功夫侧踢
-R1+B / Right  -> 154k AllMimic 不带 Omni，051/Ma / 功夫侧踢
 R2+Down       -> kick_right
 Left+X        -> hlqk
 Left+A        -> ufo_tracking_zs7
@@ -101,8 +99,8 @@ F1+A          -> wbst
 Up+Y          -> g1_parkour
 Right+X       -> proto_walk
 Right+Y       -> proto_dance
-Right+A       -> allmimic_paoxiao，159000 轮 AllMimic Omni 混合模型
-Right+B       -> allmimic_paoxiao_no_omni，159000 轮 AllMimic 不带 Omni 模型跟踪 paoxiao
+Right+A       -> mjlab_combat_92000_duobox017_ma，四卡 92k，修复版 DuoBox 刺拳接直拳 017 / Ma
+Right+B       -> mjlab_combat_92000_duobox034_ma，同一四卡 92k，修复版 DuoBox 组合拳 034 / Ma
 Down+A        -> pbfm_loco，真实深度摇杆行走
 Down+B        -> pbfm_tracking_dance，LaFAN dance 56.52–98.72 秒
 Down+X        -> pbfm_pico_teleop，XRoboToolkit 实时全身遥操

@@ -24,7 +24,8 @@ std::string supermimic_csv(const Values& values) {
 
 void GenericPolicyPlayer::load_spec_supermimic(const YAML::Node& y) {
   const auto reference = y["reference"];
-  const auto expected_reference = variant_ == "allmimic" ? "allmimic_csv_v1" : "supermimic_csv_v1";
+  const auto expected_reference = variant_ == "mjlab_combat" ? "mjlab_combat_csv_v1" :
+      variant_ == "allmimic" ? "allmimic_csv_v1" : "supermimic_csv_v1";
   if (yamlc::required_scalar<std::string>(y, "reference.type") != expected_reference) {
     throw std::runtime_error(variant_ + " requires reference.type=" + expected_reference);
   }
@@ -33,6 +34,9 @@ void GenericPolicyPlayer::load_spec_supermimic(const YAML::Node& y) {
     throw std::runtime_error("reference.yaw_alignment must be initial or none");
   }
   supermimic_align_initial_yaw_ = yaw == "initial";
+  if (variant_ == "mjlab_combat" && yaw != "none") {
+    throw std::runtime_error("MJLab combat requires reference.yaw_alignment=none");
+  }
   const auto end_behavior = scalar_or<std::string>(reference, "end_behavior", "hold");
   if (end_behavior != "hold" && end_behavior != "stop") {
     throw std::runtime_error("reference.end_behavior must be hold or stop");
@@ -61,7 +65,8 @@ void GenericPolicyPlayer::load_supermimic_params() {
   const auto y = YAML::LoadFile(params_path_.string());
   num_actions_ = yamlc::required_scalar<int>(y, "policy.num_actions");
   num_obs_ = yamlc::required_scalar<int>(y, "policy.num_obs");
-  if (motor_count_ != 29 || num_actions_ != 29 || num_obs_ != (variant_ == "allmimic" ? 1660 : 1720) ||
+  const int expected_obs = variant_ == "mjlab_combat" ? 261 : variant_ == "allmimic" ? 1660 : 1720;
+  if (motor_count_ != 29 || num_actions_ != 29 || num_obs_ != expected_obs ||
       configured_action_dim_ != 29 || configured_obs_dim_ != num_obs_) {
     throw std::runtime_error(variant_ + " has incompatible motor/action/observation dimensions");
   }
@@ -89,7 +94,12 @@ void GenericPolicyPlayer::load_supermimic_params() {
     }
   }
   safety_limits_.torque = torque_limits_;
-  if (variant_ == "allmimic") {
+  if (variant_ == "mjlab_combat") {
+    mjlab_combat_controller_.configure(default_q_, action_scale_);
+    mjlab_combat_controller_.load_reference_csv(trajectory_path_.string());
+    if (max_frames_ <= 0) max_frames_ = static_cast<int>(mjlab_combat_controller_.reference_size());
+    mjlab_combat_controller_.set_frame_limit(static_cast<std::size_t>(max_frames_));
+  } else if (variant_ == "allmimic") {
     allmimic_controller_.configure(default_q_, action_scale_,
         yamlc::required_vector_size<float>(y, "action.residual_scale", motor_count_),
         yamlc::required_vector_size<float>(y, "action.residual_reference", motor_count_));
@@ -114,14 +124,17 @@ void GenericPolicyPlayer::post_load_supermimic() {
       (shapes[0][0] != 1 && shapes[0][0] != -1) || shapes[0][1] != num_obs_) {
     throw std::runtime_error(variant_ + " ONNX input must match the configured packed observation dimension");
   }
-  if (variant_ == "allmimic") allmimic_controller_.reset({1.f, 0.f, 0.f, 0.f}, false);
+  if (variant_ == "mjlab_combat") mjlab_combat_controller_.reset({1.f, 0.f, 0.f, 0.f}, false);
+  else if (variant_ == "allmimic") allmimic_controller_.reset({1.f, 0.f, 0.f, 0.f}, false);
   else supermimic_controller_.reset({1.f, 0.f, 0.f, 0.f}, false);
 }
 
 void GenericPolicyPlayer::schema_summary_supermimic() {
   schema_summary_common();
   std::cout << "  " << variant_ << "_contract packed_obs=" << num_obs_
-            << " obs_frame=" << (variant_ == "allmimic" ? 93 : 99) << " history=10 goal=730 actions=29"
+            << (variant_ == "mjlab_combat" ? " actor_obs=259 reference_offsets_ms=0,40 actions=29" :
+                variant_ == "allmimic" ? " obs_frame=93 history=10 goal=730 actions=29" :
+                " obs_frame=99 history=10 goal=730 actions=29")
             << " reference=" << trajectory_path_.string()
             << " yaw_alignment=" << (supermimic_align_initial_yaw_ ? "initial" : "none")
             << " end_behavior=" << (supermimic_stop_at_end_ ? "stop" : "hold")
@@ -132,7 +145,8 @@ void GenericPolicyPlayer::schema_summary_supermimic() {
 }
 
 void GenericPolicyPlayer::check_only_supermimic() {
-  if (variant_ == "allmimic") check_only_motion_controller(allmimic_controller_);
+  if (variant_ == "mjlab_combat") check_only_motion_controller(mjlab_combat_controller_);
+  else if (variant_ == "allmimic") check_only_motion_controller(allmimic_controller_);
   else check_only_motion_controller(supermimic_controller_);
 }
 
@@ -150,7 +164,8 @@ void GenericPolicyPlayer::check_only_motion_controller(Controller& controller) {
 }
 
 void GenericPolicyPlayer::control_loop_supermimic() {
-  if (variant_ == "allmimic") control_loop_motion_controller(allmimic_controller_);
+  if (variant_ == "mjlab_combat") control_loop_motion_controller(mjlab_combat_controller_);
+  else if (variant_ == "allmimic") control_loop_motion_controller(allmimic_controller_);
   else control_loop_motion_controller(supermimic_controller_);
 }
 
@@ -265,7 +280,8 @@ void GenericPolicyPlayer::control_loop_motion_controller(Controller& controller)
       target_sequence = latency_samples.size();
     }
     if (supermimic_trace_) {
-      event_log_.log(variant_ == "allmimic" ? "allmimic_inference" : "supermimic_inference",
+      event_log_.log(variant_ == "mjlab_combat" ? "mjlab_combat_inference" :
+                     variant_ == "allmimic" ? "allmimic_inference" : "supermimic_inference",
                      {event_string("player", player_label()), event_string("variant", variant_),
                       event_int("step", policy_counter_ - 1), event_int("reference_frame", reference_frame),
                       event_int("command_sequence", policy_counter_),

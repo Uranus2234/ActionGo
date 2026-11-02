@@ -3,3 +3,4 @@
 actions/uni_supermimic/motions/*.csv filter=lfs diff=lfs merge=lfs -text
 actions/allmimic/motions/*.csv filter=lfs diff=lfs merge=lfs -text
 actions/fighting154k/model/*.onnx -filter -diff -merge -text
+actions/mjlab_combat/model/*.onnx -filter -diff -merge -text

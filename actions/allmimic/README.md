@@ -11,8 +11,8 @@
 
 | 按键 | 动作 | 模型 | 训练来源 |
 | --- | --- | --- | --- |
-| →+A | `allmimic_paoxiao` | `model/policy.onnx` | `gpu1/ckpt_0159000.pt`，Omni 采样占 30%，seed 1 |
-| →+B | `allmimic_paoxiao_no_omni` | `model/policy_no_omni.onnx` | `gpu0/ckpt_0159000.pt`，无 Omni 动作，seed 0 |
+| 未绑定 | `allmimic_paoxiao` | `model/policy.onnx` | `gpu1/ckpt_0159000.pt`，Omni 采样占 30%，seed 1 |
+| 未绑定 | `allmimic_paoxiao_no_omni` | `model/policy_no_omni.onnx` | `gpu0/ckpt_0159000.pt`，无 Omni 动作，seed 0 |
 
 两者均跟踪 paoxiao，部署参数和参考 CSV 经逐字节核对一致，直接共用
 `config/AllMimic.yaml` 和 `motions/paoxiao.csv`。观测归一化随各自权重嵌入 ONNX。
@@ -41,9 +41,8 @@
 
 ## 按键和交接
 
-`config/remote_actions.yaml` 的 →+A / →+B 当前分别绑定带 Omni 的 `allmimic_paoxiao` /
-不带 Omni 的 `allmimic_paoxiao_no_omni`。原来的带 Omni 动作 `allmimic_wbst_motive`
-仍保留在动作清单中，目前未绑定 →+B。Uni-SuperMimic 的原动作和模型也保留。
+`config/remote_actions.yaml` 已取消 AllMimic 快捷键；→+A / →+B 改为四卡 92k mjlab combat
+模型的 DuoBox 017 / 034。AllMimic 动作和模型继续保留，可通过动作名调用。
 
 这些真机入口均采用 `reference.end_behavior: stop`。先发布当前姿态 hold 并通知 ready，
 supervisor 成功切入 UserCtrl 后通知 start；动作完成后保持最后安全命令并通知 complete，

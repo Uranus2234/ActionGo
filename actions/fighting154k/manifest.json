@@ -278,25 +278,25 @@
       "model": "allmimic_omni",
       "motion": "allmimic_051_ma",
       "spec": "config/generic_allmimic_omni_051_ma.yaml",
-      "binding": "R1+X"
+      "binding": null
     },
     "fighting154k_allmimic_omni_side_kick": {
       "model": "allmimic_omni",
       "motion": "allmimic_side_kick",
       "spec": "config/generic_allmimic_omni_side_kick.yaml",
-      "binding": "R1+Left"
+      "binding": null
     },
     "fighting154k_allmimic_no_omni_051_ma": {
       "model": "allmimic_no_omni",
       "motion": "allmimic_051_ma",
       "spec": "config/generic_allmimic_no_omni_051_ma.yaml",
-      "binding": "R1+B"
+      "binding": null
     },
     "fighting154k_allmimic_no_omni_side_kick": {
       "model": "allmimic_no_omni",
       "motion": "allmimic_side_kick",
       "spec": "config/generic_allmimic_no_omni_side_kick.yaml",
-      "binding": "R1+Right"
+      "binding": null
     },
     "fighting154k_supermimic_omni_wbst_motive": {
       "model": "supermimic_omni",

@@ -9,8 +9,8 @@
 |---|---|---|
 | SuperMimic-Reproduced，Omni 15% | R1+Y | R1+Up |
 | SuperMimic-Reproduced，不带 Omni | 保留动作，未绑定 | 保留动作，未绑定 |
-| AllMimic，Omni 15% | R1+X | R1+Left |
-| AllMimic，不带 Omni | R1+B | R1+Right |
+| AllMimic，Omni 15% | 保留动作，未绑定 | 保留动作，未绑定 |
+| AllMimic，不带 Omni | 保留动作，未绑定 | 保留动作，未绑定 |
 
 `R1+A` 使用同一份 SuperMimic-Reproduced Omni 15% 的 154k 模型播放 **wbst_motive**，
 `R1+Down` 使用该模型播放 **yewendun**（`14_yewendun-kick`）。
@@ -30,7 +30,7 @@
 
 两类策略都由 `build/generic_motion_tracking_player` 执行，SDK 关节顺序、29 个动作，
 策略频率 50 Hz、命令发布 500 Hz、ONNX Runtime CPU 两线程。
-`manifest.json` 记录 checkpoint、模型、参数、参考数据 SHA256 和八个按键组合。
+`manifest.json` 记录 checkpoint、模型、参数、参考数据 SHA256 和当前按键组合。
 共注册十个动作；SuperMimic 不带 Omni 的两个原动作仍可通过动作名调用。
 
 | 项目 | SuperMimic-Reproduced | AllMimic |

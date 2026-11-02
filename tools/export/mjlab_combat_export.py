@@ -72,7 +72,7 @@ def make_spec():
         "robot": {"params": "MjlabCombat.yaml", "motor_count": 29},
         "model": {"path": "policy.onnx", "input_names": ["obs"], "output_names": ["actions"],
                   "obs_input": "obs", "action_output": "actions"},
-        "reference": {"type": "mjlab_combat_csv_v1", "path": "reference.csv", "yaw_alignment": "none",
+        "reference": {"type": "mjlab_combat_csv_v1", "path": "reference.csv", "yaw_alignment": "initial",
                       "end_behavior": "hold", "policy_step_source": "lowstate_tick", "policy_tick_ms": 20,
                       "sim_lockstep_sequence": True, "trace": True},
         "observation": {"builder": "mjlab_combat", "obs_dim": RAW_DIM},

@@ -716,7 +716,30 @@ void test_mjlab_combat_policy_helpers() {
   expect_true("mjlab combat final frame hold", controller.reference_index() == 3);
   controller.reset(robot.quat, false);
   expect_near("mjlab combat reset clears previous action", controller.build_input(robot)[65], 0.f);
-  expect_throw("mjlab combat rejects unsupported yaw alignment", [&] { controller.reset(robot.quat, true); });
+  controller.reset(robot.quat, true);
+  expect_near("mjlab combat zero heading offset", controller.yaw_offset(), 0.f);
+  controller.set_frame_limit(3);
+  input = controller.build_input(robot);
+  expect_near("mjlab truncated future before boundary", input[177], 2.f);
+  expect_near("mjlab truncated future valid before boundary", input[260], 1.f);
+  controller.accept_action(action);
+  input = controller.build_input(robot);
+  expect_near("mjlab truncated future clamps to playable end", input[177], 2.f);
+  expect_near("mjlab truncated future invalid at boundary", input[260], 0.f);
+  controller.accept_action(action);
+  controller.accept_action(action);
+  input = controller.build_input(robot);
+  expect_true("mjlab truncated playback completes", controller.at_end());
+  expect_near("mjlab truncated current frame hold", input[94], 2.f);
+  expect_near("mjlab truncated future frame hold", input[177], 2.f);
+  controller.set_frame_limit(1);
+  controller.reset(robot.quat, false);
+  input = controller.build_input(robot);
+  expect_near("mjlab single playable frame future clamp", input[177], 0.f);
+  expect_near("mjlab single playable frame future invalid", input[260], 0.f);
+  expect_throw("mjlab rejects empty playable limit", [&] { controller.set_frame_limit(0); });
+  expect_throw("mjlab rejects excessive playable limit", [&] { controller.set_frame_limit(5); });
+  controller.set_frame_limit(4);
   robot.quat.fill(0.f);
   expect_throw("mjlab combat rejects zero quaternion", [&] { controller.build_input(robot); });
   write_reference(82, 1.f);
@@ -729,6 +752,81 @@ void test_mjlab_combat_policy_helpers() {
   expect_true("mjlab combat tracking player contract", variant_allowed_for_player("mjlab_combat", GenericPlayerKind::kMotionTracking));
   const auto* protocol = protocol_constraint_for_variant("mjlab_combat");
   expect_true("mjlab combat protocol dimensions", protocol && protocol->obs_dim == 261 && protocol->action_dim == 29);
+}
+
+void test_mjlab_combat_heading_alignment() {
+  using namespace action_go::runtime;
+  MjlabCombatController controller;
+  controller.configure(std::vector<float>(29, 0.f), std::vector<float>(29, 1.f));
+  const auto path = std::filesystem::temp_directory_path() /
+      ("mjlab-heading-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + ".csv");
+  const float quarter_turn = std::acos(-1.f) / 2.f;
+  std::array<MjlabCombatController::Reference, 4> frames{};
+  {
+    std::ofstream output(path);
+    output << std::setprecision(9);
+    for (std::size_t frame = 0; frame < frames.size(); ++frame) {
+      auto& reference = frames[frame];
+      reference[0] = static_cast<float>(frame);
+      reference[58] = 10.f + frame;
+      reference[59] = 20.f;
+      reference[60] = 0.8f;
+      reference[61] = 1.f;
+      reference[65] = 2.f;
+      reference[68] = 3.f;
+      reference[70] = 0.5f;
+      for (std::size_t offset = 71; offset < 83; offset += 3) {
+        reference[offset] = reference[58] + 1.f;
+        reference[offset + 1] = 20.f;
+        reference[offset + 2] = 0.4f;
+      }
+      for (std::size_t column = 0; column < reference.size(); ++column) {
+        if (column) output << ',';
+        output << reference[column];
+      }
+      output << '\n';
+    }
+  }
+  controller.load_reference_csv(path.string());
+  SuperMimicRobotFrame robot;
+  robot.q[12] = quarter_turn;
+  controller.reset_from_state(robot, true);
+  expect_near("mjlab yaw alignment uses actual waist", controller.yaw_offset(), quarter_turn);
+  auto input = controller.build_input(robot);
+  expect_near("mjlab initial anchor pivot unchanged x", input[94 + 58], 10.f);
+  expect_near("mjlab initial anchor pivot unchanged y", input[94 + 59], 20.f);
+  expect_near("mjlab future anchor rotated x", input[177 + 58], 10.f);
+  expect_near("mjlab future anchor rotated y", input[177 + 59], 22.f);
+  expect_near("mjlab aligned anchor quaternion w", input[94 + 61], std::sqrt(0.5f));
+  expect_near("mjlab aligned anchor quaternion z", input[94 + 64], std::sqrt(0.5f));
+  for (std::size_t base : {94u, 177u}) {
+    expect_near("mjlab heading rotates linear velocity x", input[base + 65], 0.f);
+    expect_near("mjlab heading rotates linear velocity y", input[base + 66], 2.f);
+    expect_near("mjlab heading rotates angular velocity x", input[base + 68], 0.f);
+    expect_near("mjlab heading rotates angular velocity y", input[base + 69], 3.f);
+    expect_near("mjlab heading preserves vertical angular velocity", input[base + 70], 0.5f);
+    for (std::size_t offset = 71; offset < 83; offset += 3) {
+      expect_near("mjlab heading rotates task position x", input[base + offset], 10.f);
+      expect_near("mjlab heading rotates task position y", input[base + offset + 1], base == 94 ? 21.f : 23.f);
+      expect_near("mjlab heading preserves task height", input[base + offset + 2], 0.4f);
+    }
+  }
+  controller.accept_action(std::vector<float>(29, 1.f));
+  controller.reset_from_state(robot, true);
+  const auto repeated = controller.build_input(robot);
+  expect_true("mjlab repeated startup does not accumulate alignment", repeated == input);
+  robot.q[12] = 0.f;
+  robot.quat = {std::cos(quarter_turn), 0.f, 0.f, std::sin(quarter_turn)};
+  controller.reset_from_state(robot, true);
+  expect_near("mjlab second heading replaces first offset", std::abs(controller.yaw_offset()), 2.f * quarter_turn);
+  controller.reset_from_state(robot, false);
+  input = controller.build_input(robot);
+  for (std::size_t column = 0; column < frames[0].size(); ++column) {
+    expect_near("mjlab alignment disable restores original reference", input[94 + column], frames[0][column]);
+  }
+  robot.quat.fill(0.f);
+  expect_throw("mjlab initial alignment rejects invalid IMU", [&] { controller.reset_from_state(robot, true); });
+  std::filesystem::remove(path);
 }
 
 void test_supermimic_policy_helpers() {
@@ -1138,6 +1236,7 @@ int main() {
     test_supermimic_policy_helpers();
     test_allmimic_policy_helpers();
     test_mjlab_combat_policy_helpers();
+    test_mjlab_combat_heading_alignment();
     test_sonic_planner_helpers();
   } catch (const std::exception& e) {
     fail("uncaught exception", e.what());

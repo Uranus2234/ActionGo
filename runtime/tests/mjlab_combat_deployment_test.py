@@ -50,7 +50,7 @@ def run(player):
                                        ("robot", "params", manifest["params"]["path"]),
                                        ("reference", "path", item["path"])):
             assert (spec_path.parent / spec[section][key]).resolve() == PACKAGE / expected
-        assert spec["reference"]["yaw_alignment"] == "none"
+        assert spec["reference"]["yaw_alignment"] == "initial"
         assert spec["reference"]["end_behavior"] == "stop" and spec["reference"]["policy_step_source"] == "wall_clock"
         assert spec["observation"]["obs_dim"] == 261 and spec["action"]["action_dim"] == 29
         checked = subprocess.run([str(player), "--spec", str(spec_path), "--check-only"],
@@ -61,7 +61,7 @@ def run(player):
             ready, start, complete, release = [folder / name for name in ("ready", "start", "complete", "release")]
             events_path, log_path = folder / "events.jsonl", folder / "player.log"
             command = [str(player), "--spec", str(spec_path), "--dry-run", "--dry-run-latency",
-                       "--offline-dry-run-state", "--max-frames", "3", "--duration-sec", "0",
+                       "--offline-dry-run-state", "--max-frames", "55", "--duration-sec", "5",
                        "--lowstate-timeout-sec", "10", "--event-log", str(events_path),
                        "--ready-file", str(ready), "--start-file", str(start),
                        "--handoff-complete-file", str(complete), "--handoff-release-file", str(release)]
@@ -81,7 +81,8 @@ def run(player):
                         process.wait()
             events = [json.loads(line) for line in events_path.read_text().splitlines()]
             samples = [event for event in events if event["event"] == "dry_run_latency"]
-            assert len(samples) == 3 and all(not event["lowcmd_sent"] and event["synthetic_state"] for event in samples)
+            assert len(samples) == 55 and all(not event["lowcmd_sent"] and event["synthetic_state"] for event in samples)
+            assert "startup progress policy_steps=51" in log_path.read_text()
             assert any(event["event"] == "handoff_hold_stopped" and event["released"] for event in events)
             assert not any(event["event"] in ("first_command_published", "first_active_command") for event in events)
         print(f"PASS DuoBox {number}: assets, bindings, ONNX and handoff; no LowCmd")

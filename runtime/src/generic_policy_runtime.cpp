@@ -913,6 +913,15 @@ void GenericPolicyPlayer::publish(const std::vector<float>& q,
     }
     if (phase == CommandPhase::kActive && !first_active_command_logged_) {
       first_active_command_logged_ = true;
+      if (variant_ == "mjlab_combat") {
+        float max_delta = 0.f;
+        for (std::size_t joint = 0; joint < filtered.q.size() && joint < safety_state.q.size(); ++joint) {
+          max_delta = std::max(max_delta, std::abs(filtered.q[joint] - safety_state.q[joint]));
+        }
+        std::cout << player_log_prefix() << " first active LowCmd sent mode_machine=" << mode_machine
+                  << " max_filtered_delta_rad=" << max_delta
+                  << " state_seq=" << safety_state.seq << std::endl;
+      }
       event_log_.log("first_active_command",
                      {event_string("player", player_label()),
                       event_string("template", template_),

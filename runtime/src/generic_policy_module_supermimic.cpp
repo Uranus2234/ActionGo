@@ -6,6 +6,15 @@ namespace {
 
 using SuperController = action_go::runtime::SuperMimicController;
 
+template <typename Controller>
+void reset_motion_controller(Controller& controller, const SuperMimicRobotFrame& robot, bool align_yaw) {
+  controller.reset(robot.quat, align_yaw);
+}
+
+void reset_motion_controller(MjlabCombatController& controller, const SuperMimicRobotFrame& robot, bool align_yaw) {
+  controller.reset_from_state(robot, align_yaw);
+}
+
 template <typename Values>
 std::string supermimic_csv(const Values& values) {
   std::ostringstream stream;
@@ -34,9 +43,6 @@ void GenericPolicyPlayer::load_spec_supermimic(const YAML::Node& y) {
     throw std::runtime_error("reference.yaw_alignment must be initial or none");
   }
   supermimic_align_initial_yaw_ = yaw == "initial";
-  if (variant_ == "mjlab_combat" && yaw != "none") {
-    throw std::runtime_error("MJLab combat requires reference.yaw_alignment=none");
-  }
   const auto end_behavior = scalar_or<std::string>(reference, "end_behavior", "hold");
   if (end_behavior != "hold" && end_behavior != "stop") {
     throw std::runtime_error("reference.end_behavior must be hold or stop");
@@ -194,6 +200,22 @@ void GenericPolicyPlayer::control_loop_motion_controller(Controller& controller)
     robot.gyro = state.gyro;
     return robot;
   };
+  std::vector<float> initial_joint_positions;
+  auto reset_controller = [&](const RobotState& state) {
+    reset_motion_controller(controller, robot_frame(state), supermimic_align_initial_yaw_);
+    if (variant_ == "mjlab_combat") {
+      initial_joint_positions = state.q;
+      const double yaw_degrees = mjlab_combat_controller_.yaw_offset() * 180.0 / std::acos(-1.0);
+      event_log_.log("mjlab_combat_reset",
+                     {event_number("reference_yaw_offset_deg", yaw_degrees),
+                      event_int("state_seq", state.seq),
+                      event_string("q_csv", supermimic_csv(state.q)),
+                      event_string("quat_csv", supermimic_csv(state.quat))});
+      std::cout << player_log_prefix() << " mjlab reset reference_yaw_offset_deg=" << yaw_degrees
+                << " waist_yaw=" << state.q[12] << " waist_roll=" << state.q[13]
+                << " waist_pitch=" << state.q[14] << " state_seq=" << state.seq << std::endl;
+    }
+  };
   auto state = snapshot();
   require_fresh(state);
   std::vector<float> target, target_kp, target_kd;
@@ -270,6 +292,31 @@ void GenericPolicyPlayer::control_loop_motion_controller(Controller& controller)
     target_kp = kp_;
     target_kd = kd_;
     policy_counter_ = static_cast<int64_t>(controller.policy_step());
+    if (variant_ == "mjlab_combat" && policy_counter_ == 1) {
+      float max_delta = 0.f;
+      std::size_t max_joint = 0;
+      for (std::size_t joint = 0; joint < target.size(); ++joint) {
+        const float delta = std::abs(target[joint] - policy_state.q[joint]);
+        if (delta > max_delta) { max_delta = delta; max_joint = joint; }
+      }
+      std::cout << player_log_prefix() << " first policy target max_delta_rad=" << max_delta
+                << " joint=" << SuperController::sdk_joint_names()[max_joint]
+                << " inference_ms=" << inference_ms << std::endl;
+    }
+    if (variant_ == "mjlab_combat" && policy_counter_ == 51) {
+      float actual_change = 0.f;
+      float target_error = 0.f;
+      for (std::size_t joint = 0; joint < target.size(); ++joint) {
+        actual_change = std::max(actual_change, std::abs(policy_state.q[joint] - initial_joint_positions[joint]));
+        target_error = std::max(target_error, std::abs(target[joint] - policy_state.q[joint]));
+      }
+      std::cout << player_log_prefix() << " startup progress policy_steps=" << policy_counter_
+                << " active_publish_count=" << active_publish_count_.load()
+                << " actual_joint_change_rad=" << actual_change
+                << " raw_target_error_rad=" << target_error
+                << " mode_machine=" << policy_state.mode_machine
+                << " state_seq=" << policy_state.seq << std::endl;
+    }
     last_policy_tick_ms = policy_state.source_tick_ms;
     last_policy_state_seq = policy_state.seq;
     if (args_.dry_run_latency) {
@@ -299,7 +346,7 @@ void GenericPolicyPlayer::control_loop_motion_controller(Controller& controller)
   };
 
   if (preview_mode_enabled()) {
-    controller.reset(state.quat, supermimic_align_initial_yaw_);
+    reset_controller(state);
     const auto saved_controller = controller;
     infer(state);
     const auto decision = wait_preview_decision(target, target_kp, target_kd, state.mode_machine, publish_hz, 0);
@@ -319,7 +366,7 @@ void GenericPolicyPlayer::control_loop_motion_controller(Controller& controller)
     if (g_stop_requested.load()) return;
     state = snapshot();
     require_fresh(state);
-    controller.reset(state.quat, supermimic_align_initial_yaw_);
+    reset_controller(state);
     hold_current_pose(state, target, target_kp, target_kd);
     last_policy_tick_ms = state.source_tick_ms;
     last_policy_state_seq = state.seq;
@@ -466,6 +513,13 @@ void GenericPolicyPlayer::control_loop_motion_controller(Controller& controller)
   if (g_stop_requested.load() && damping_on_stop_) publish_damping_for_stop();
   const auto metrics = async_publisher ? async_publisher->metrics() :
       AsyncPublisherMetrics{sync_publish_count, sync_publish_deadline_miss, sync_max_publish_interval_ms};
+  if (variant_ == "mjlab_combat") {
+    std::cout << player_log_prefix() << " finished policy_steps=" << policy_counter_
+              << " publish_count=" << metrics.publish_count
+              << " inference_ms_max=" << inference_ms_max
+              << " policy_deadline_miss=" << policy_deadline_miss
+              << " max_publish_interval_ms=" << metrics.max_publish_interval_ms << std::endl;
+  }
   event_log_.log("runtime_metrics",
                  {event_string("player", player_label()), event_string("variant", variant_),
                   event_int("step", policy_counter_), event_int("publish_count", metrics.publish_count),

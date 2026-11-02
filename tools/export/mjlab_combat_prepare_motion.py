@@ -39,6 +39,7 @@ def prepare(args):
     for name in ("policy.onnx", "scene.mjb", "MjlabCombat.yaml"):
         (args.output / name).symlink_to(base / name)
     spec = yaml.safe_load((base / "generic_mjlab_combat.yaml").read_text())
+    spec["reference"]["yaw_alignment"] = "initial"
     (args.output / "generic_mjlab_combat.yaml").write_text(yaml.safe_dump(spec, sort_keys=False))
     output_manifest = copy.deepcopy(manifest)
     output_manifest.update(motion=str(args.motion.resolve()), motion_sha256=sha256(args.motion),

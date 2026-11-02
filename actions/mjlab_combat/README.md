@@ -39,9 +39,12 @@ done
 python3 runtime/tests/mjlab_combat_deployment_test.py --player ./build/generic_motion_tracking_player
 ```
 
-Rebuild is required for the new variant. Start the existing remote supervisor after
-updating, arm with Start, then select Right+A or Right+B. Both actions retain the
-standard ready/start/complete/release handoff and return to walkrun after the clip.
+Rebuild is required for the new variant and the subsequent startup-heading fix.
+The previous binary does not apply the new alignment even if the YAML is updated.
+Both actions retain the standard ready/start/complete/release handoff and return to
+walkrun after the clip. Real-robot startup remains under investigation following a
+no-motion first run and a distorted second run; local checks below are not hardware
+acceptance. Do not use repeated unrestrained action starts to diagnose those symptoms.
 
 ## Reuse and input contract
 
@@ -70,19 +73,36 @@ Each reference row contains joint positions (29), joint velocities (29), torso w
 position (3), wxyz quaternion (4), world linear/angular velocity (3+3), and world
 positions of left/right wrists followed by left/right ankles (12). References run at
 50Hz. At clip boundaries, the original hybrid builder zeros invalid future kinematics
-and retains the +0.04s offset with validity zero. Motions remain external to the ONNX.
+and retains the +0.04s offset with validity zero. With `--max-frames`, future lookup
+and validity use the truncated playable boundary. Motions remain external to the ONNX.
 
 ActionGo reuses its existing DDS control loop, ONNX runner, action decoder,
 ready/start/handoff barriers, tracing and command safety. The new C++ controller only
 loads reference rows, advances frames and packs raw state/reference values.
 The decoded target is `default_joint_pos + action_scale * raw_action` for 29 SDK joints.
 
-`yaw_alignment: none` is required for this initial variant. Initialize simulation from
-the motion's first pose; arbitrary initial heading alignment is not implemented.
+Both registered specs use `yaw_alignment: initial`. After the start barrier the
+controller computes actual torso heading from the pelvis IMU and waist yaw/roll/pitch,
+and rotates current/future references into that heading. Positions rotate around the
+first reference torso position; world orientations and velocities rotate consistently.
+Each reset starts from the unmodified reference and clears previous actions. Setting
+`none` retains the recorded heading and is intended for controlled parity checks.
+This does not align roll/pitch, change joint targets or make arbitrary initial poses
+equivalent to the trained motion.
+
 The registered action uses the normal hardware safety profile and a 0.1s activation
-blend. The closed-loop tests use the exported mjlab model, original implicit PD and
-`simulation_parity` settings, without activation blending or target clamps. Hardware
-execution has not been validated.
+blend. The original closed-loop tests used reference-frame initialization and
+`simulation_parity` settings, without activation blending or target clamps. The newer
+checks also cover a default standing pose, heading changes and hardware command
+filtering. Those DDS simulations remain lockstep and do not verify firmware control
+ownership or real-time hardware response.
+
+The player now prints heading/reset state, first policy-target delta, first active
+LowCmd write, joint changes after 51 policy steps, and final inference/publication
+counts. The first filtered delta can be zero because activation blending begins at
+the held pose. A successful LowCmd write or UserCtrl RPC alone does not prove the
+robot accepted or executed the commands; the original first-run no-motion symptom
+is not yet explained.
 
 ## Run local ActionGo inference
 
@@ -142,7 +162,8 @@ during deployment/parity, rather than a random training encoder-bias sample.
 - Build: `generic_motion_tracking_player`, `policy_spec_schema_check`, `runtime_hardening_test`.
 - Strict schema and C++ ONNX `--check-only` pass for the registered action.
 - Controller tests cover dimensions, previous action, +2 frame lookup, final hold,
-  future validity, reset, malformed CSV and invalid quaternions.
+  future validity, reset, malformed CSV, invalid quaternions, torso-heading alignment,
+  consistent current/future transforms and repeat resets without accumulated rotation.
 - `fight1_subject2`: 500 policy steps / 10s, no resets; original mjlab observation
   maximum absolute error `2.39e-7`, C++ ONNX/PyTorch action error `5.73e-6`.
 - Repaired DuoBox `01_drill_000_ma_jab_liu_defense__liu`: 370 steps / 7.4s including
@@ -152,6 +173,21 @@ during deployment/parity, rather than a random training encoder-bias sample.
   runs, without resets; C++ ONNX/PyTorch action errors are below `6.5e-6`.
 - Package tests verify hashes, remote bindings, portable paths, ONNX loading and
   ready/start/complete/release using synthetic state without publishing LowCmd.
+- Startup-heading regression: original ONNX targets remain within `5.2e-7` rad when
+  the same state is yaw-rotated by +90, 180 or -90 degrees with alignment enabled.
+  Without alignment the target differences reach `0.786`, `2.475` and `2.234` rad.
+- Standing-start checks with hardware filtering: 017 at +90 degrees runs 824 steps,
+  joint RMSE `0.117` rad, minimum pelvis height `0.716` m, maximum tilt `15.41` degrees;
+  034 at -90 degrees runs 876 steps, RMSE `0.152` rad, minimum height `0.649` m,
+  maximum tilt `21.52` degrees. Neither run resets. Raw input/original observation
+  parity passes, and C++ ONNX/PyTorch action errors stay below `7.8e-6`.
+
+To reproduce a standing-start check, add `--initial-pose default --initial-yaw-deg 90
+--yaw-alignment initial --hardware-safety` to the simulator command, select the
+prepared 017 package and use `--steps 824` (034 uses 876). In hardware-filter mode
+`parity.json` explicitly reports `dds_target_compared: false`: the filtered DDS target
+must not be compared directly to the unfiltered policy target. MuJoCo still applies
+the received filtered commands for the trajectory metrics.
 
 Recordings and full results are in `ActionGo-local/runs/mjlab-combat-92000-fight1-v3`
 and `ActionGo-local/runs/mjlab-combat-92000-duobox`.

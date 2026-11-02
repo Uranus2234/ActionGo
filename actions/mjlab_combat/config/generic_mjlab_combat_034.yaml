@@ -17,7 +17,7 @@ model:
 reference:
   type: mjlab_combat_csv_v1
   path: ../motions/duobox_034_ma.csv
-  yaw_alignment: none
+  yaw_alignment: initial
   end_behavior: stop
   policy_step_source: wall_clock
 observation:

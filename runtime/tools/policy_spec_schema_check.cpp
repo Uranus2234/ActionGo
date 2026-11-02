@@ -396,8 +396,11 @@ void validate_source_sections(const fs::path& spec,
           throw std::runtime_error(variant + " reference.type does not match its cache format");
         }
         require_matching_int(y, {"runtime.inference_hz"}, 50, "SuperMimic inference Hz");
-        if (variant == "mjlab_combat" && yamlc::required_scalar<std::string>(y, "reference.yaw_alignment") != "none") {
-          throw std::runtime_error("mjlab_combat requires reference.yaw_alignment=none");
+        if (variant == "mjlab_combat") {
+          const auto yaw = yamlc::required_scalar<std::string>(y, "reference.yaw_alignment");
+          if (yaw != "none" && yaw != "initial") {
+            throw std::runtime_error("mjlab_combat reference.yaw_alignment must be initial or none");
+          }
         }
       } else if (variant == "protomotions") {
         require_existing_path(spec, yamlc::required_scalar<std::string>(y, "reference.path"), "reference.path", true);

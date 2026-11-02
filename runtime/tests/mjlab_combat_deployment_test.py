@@ -33,7 +33,7 @@ def run(player):
         path = PACKAGE / asset["path"]
         assert path.is_file() and not path.is_symlink()
         assert hashlib.sha256(path.read_bytes()).hexdigest() == asset["sha256"]
-    for number, binding, count in (("017", "Right+A", 824), ("034", "Right+B", 876)):
+    for number, binding, count in (("017", "Right+A", 824), ("a42_8s", "Right+B", 399)):
         item = manifest["motions"][number]
         assert item["binding"] == binding and bindings[binding] == item["action"]
         assert item["frames"] == count and item["fps"] == 50
@@ -85,7 +85,7 @@ def run(player):
             assert "startup progress policy_steps=51" in log_path.read_text()
             assert any(event["event"] == "handoff_hold_stopped" and event["released"] for event in events)
             assert not any(event["event"] in ("first_command_published", "first_active_command") for event in events)
-        print(f"PASS DuoBox {number}: assets, bindings, ONNX and handoff; no LowCmd")
+        print(f"PASS mjlab combat {number}: assets, bindings, ONNX and handoff; no LowCmd")
 
 
 if __name__ == "__main__":

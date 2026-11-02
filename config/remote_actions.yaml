@@ -20,7 +20,7 @@ bindings:
   Down+B: pbfm_tracking_dance
   Down+X: pbfm_pico_teleop
   Right+A: mjlab_combat_92000_duobox017_ma
-  Right+B: mjlab_combat_92000_duobox034_ma
+  Right+B: mjlab_combat_92000_a42_8s
   Right+X: proto_walk
   Right+Y: proto_dance
   R1+F1: holosoma_dance

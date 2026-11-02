@@ -1,4 +1,4 @@
-name: mjlab_combat_92000_duobox034_ma
+name: mjlab_combat_92000_a42_8s
 runtime:
   template: motion_conditioned_tracking
   variant: mjlab_combat
@@ -16,7 +16,7 @@ model:
   action_output: actions
 reference:
   type: mjlab_combat_csv_v1
-  path: ../motions/duobox_034_ma.csv
+  path: ../motions/a42_8s_generated.csv
   yaw_alignment: initial
   end_behavior: stop
   policy_step_source: wall_clock

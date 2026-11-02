@@ -42,7 +42,7 @@
 ## 按键和交接
 
 `config/remote_actions.yaml` 已取消 AllMimic 快捷键；→+A / →+B 改为四卡 92k mjlab combat
-模型的 DuoBox 017 / 034。AllMimic 动作和模型继续保留，可通过动作名调用。
+模型的 DuoBox 017 / A42 8 秒生成片段。AllMimic 动作和模型继续保留，可通过动作名调用。
 
 这些真机入口均采用 `reference.end_behavior: stop`。先发布当前姿态 hold 并通知 ready，
 supervisor 成功切入 UserCtrl 后通知 start；动作完成后保持最后安全命令并通知 complete，

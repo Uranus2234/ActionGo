@@ -3,10 +3,16 @@
 Variant: `mjlab_combat`, template: `motion_conditioned_tracking`, player:
 `generic_motion_tracking_player`.
 
-| Remote binding | Registered action | Repaired DuoBox clip | Frames / duration |
+| Remote binding | Registered action | Motion | Frames / duration |
 | --- | --- | --- | --- |
 | Right+A | `mjlab_combat_92000_duobox017_ma` | jab-cross 017 / Ma | 824 / 16.48s |
-| Right+B | `mjlab_combat_92000_duobox034_ma` | combo 034 / Ma | 876 / 17.52s |
+| Right+B | `mjlab_combat_92000_a42_8s` | A42 generated eight-second segment | 399 / 7.98s |
+
+Right+B uses `generated_qpos36` from
+`A42_30k_8s_segment_tracker_20261102.npz`, record
+`motiondecode:03_swing_punch_00045`, starting at frame 320. The original 240 frames
+at 30Hz are resampled to 399 frames at 50Hz with the existing G1 forward kinematics.
+The four-GPU 92000 policy weights are unchanged.
 
 These replace the old AllMimic paoxiao bindings. All other AllMimic remote bindings
 are removed; its original actions remain callable by name.
@@ -32,7 +38,7 @@ git pull --ff-only origin feature
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DACTION_GO_CODE_ONLY=ON
 cmake --build build --parallel 2
 python3 tools/assets/check_model_assets.py --policy mjlab_combat
-for clip in 017 034; do
+for clip in 017 a42_8s; do
   ./build/policy_spec_schema_check --spec "actions/mjlab_combat/config/generic_mjlab_combat_${clip}.yaml"
   ./build/generic_motion_tracking_player --spec "actions/mjlab_combat/config/generic_mjlab_combat_${clip}.yaml" --check-only
 done
@@ -41,6 +47,8 @@ python3 runtime/tests/mjlab_combat_deployment_test.py --player ./build/generic_m
 
 Rebuild is required for the new variant and the subsequent startup-heading fix.
 The previous binary does not apply the new alignment even if the YAML is updated.
+Replacing Right+B with A42 only changes motion data/configuration; an installation
+that already includes the startup-heading fix does not need another rebuild.
 Both actions retain the standard ready/start/complete/release handoff and return to
 walkrun after the clip. Real-robot startup remains under investigation following a
 no-motion first run and a distorted second run; local checks below are not hardware
@@ -169,8 +177,13 @@ during deployment/parity, rather than a random training encoder-bias sample.
 - Repaired DuoBox `01_drill_000_ma_jab_liu_defense__liu`: 370 steps / 7.4s including
   the clip end, same ONNX SHA256; observation error `1.93e-7`, action error `6.45e-6`.
 - These are two deployment checks; they do not establish quality on every motion.
-- The bundled 017/Ma and 034/Ma references match the later full 824/876-step video
+- The original 017/Ma and 034/Ma references matched the full 824/876-step video
   runs, without resets; C++ ONNX/PyTorch action errors are below `6.5e-6`.
+- The current Right+B A42 reference passes all 399 steps / 7.98s from the default
+  standing pose with initial heading alignment and hardware filtering: zero resets,
+  joint RMSE `0.1885` rad, minimum pelvis height `0.7269` m, maximum tilt `21.14`
+  degrees. Original mjlab observation error is `4.77e-7`; C++ ONNX/PyTorch action
+  error is `7.04e-6`. This is a local simulation check, not a hardware test.
 - Package tests verify hashes, remote bindings, portable paths, ONNX loading and
   ready/start/complete/release using synthetic state without publishing LowCmd.
 - Startup-heading regression: original ONNX targets remain within `5.2e-7` rad when
@@ -191,3 +204,4 @@ the received filtered commands for the trajectory metrics.
 
 Recordings and full results are in `ActionGo-local/runs/mjlab-combat-92000-fight1-v3`
 and `ActionGo-local/runs/mjlab-combat-92000-duobox`.
+The A42 recording and results are in `ActionGo-local/runs/mjlab-combat-92000-a42-8s`.

@@ -358,36 +358,50 @@
         }
       }
     },
-    "034": {
-      "path": "motions/duobox_034_ma.csv",
-      "sha256": "4c333a0a7e5a1a4f54d8dcc5b637d65b3deb4382386f96ffd5490eb460950ae3",
-      "frames": 876,
+    "a42_8s": {
+      "path": "motions/a42_8s_generated.csv",
+      "sha256": "7b0798f613d8bf691288ea6c1ea874d115b681ff5b2e04975309b3a4d4176d60",
+      "frames": 399,
       "fps": 50,
-      "source_motion": "duobox_repaired__03_combo_034_ma_comb13_liu_comb14__ma.npz",
-      "source_sha256": "38c3596abe4ba6b8b7d3cabdaf38deeaff0165e478851f63207e3db98f8ff2da",
-      "action": "mjlab_combat_92000_duobox034_ma",
+      "source_motion": "a42_8s_generated.npz",
+      "source_sha256": "8ec6612d4596fe3bc2ca79c06f9b0a7e59f02fcb41f670fab0c469a4d5bf800f",
+      "original_source_motion": "A42_30k_8s_segment_tracker_20261102.npz",
+      "original_source_sha256": "1300b2f0a3c39fc2f900d28c35b51d1f231e7146c1b2b8c536ed0e893002599f",
+      "source_field": "generated_qpos36",
+      "source_record_id": "motiondecode:03_swing_punch_00045",
+      "source_start_frame": 320,
+      "source_frames": 240,
+      "source_fps": 30,
+      "action": "mjlab_combat_92000_a42_8s",
       "binding": "Right+B",
-      "spec": "config/generic_mjlab_combat_034.yaml",
+      "spec": "config/generic_mjlab_combat_a42_8s.yaml",
       "metrics": {
-        "steps": 876,
-        "seconds": 17.52,
+        "steps": 399,
+        "seconds": 7.98,
         "sim_timestep": 0.005,
-        "joint_rmse_rad": 0.13163412399453162,
-        "root_position_mean_error_m": 0.31757039976217827,
-        "minimum_pelvis_height_m": 0.6577802831285623,
+        "initial_pose": "default",
+        "initial_yaw_deg": 0,
+        "yaw_alignment": "initial",
+        "hardware_safety": true,
+        "joint_rmse_rad": 0.18849584245147913,
+        "root_position_mean_error_m": 0.21975439905347643,
+        "minimum_pelvis_height_m": 0.7268680437088922,
+        "maximum_pelvis_tilt_deg": 21.13718866499395,
         "finite": true,
         "automatic_resets": 0
       },
       "parity": {
         "passed": true,
-        "samples": 876,
+        "samples": 399,
         "mjlab_state_samples": 4,
+        "yaw_offset_deg": -85.85342565047875,
+        "dds_target_compared": false,
         "max_abs_error": {
-          "raw_input": 0.0,
-          "actions": 6.467103958129883e-06,
+          "raw_input": 4.76837158203125e-07,
+          "actions": 7.033348083496094e-06,
           "target": 0.0,
           "dds_target": 0.0,
-          "mjlab_observation": 2.980232238769531e-07
+          "mjlab_observation": 4.76837158203125e-07
         }
       }
     }

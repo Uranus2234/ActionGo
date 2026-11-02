@@ -6,19 +6,19 @@
       "paths": [
         "actions/mjlab_combat/model/policy_92000.onnx",
         "actions/mjlab_combat/motions/duobox_017_ma.csv",
-        "actions/mjlab_combat/motions/duobox_034_ma.csv"
+        "actions/mjlab_combat/motions/a42_8s_generated.csv"
       ],
       "sha256": [
         "def3b00c7e2cceb07b319006f74f5564d9e365cdd3abeb75ce9831a72c8ed7fe",
         "3fefdb03262f9aa28d2af5ed96f3466bc275c81cefd961adccea0bb1026e211d",
-        "4c333a0a7e5a1a4f54d8dcc5b637d65b3deb4382386f96ffd5490eb460950ae3"
+        "7b0798f613d8bf691288ea6c1ea874d115b681ff5b2e04975309b3a4d4176d60"
       ],
-      "source": "Local mjlab combat-tracker training and repaired DuoBox references",
+      "source": "Local mjlab combat-tracker training, repaired DuoBox and A42 generated references",
       "upstream_revision": "local four-GPU checkpoint 92000; see actions/mjlab_combat/manifest.json",
       "upstream_code_license": "unverified",
       "weight_license": "local training export; dataset terms apply separately",
       "redistribution": "blocked_pending_review",
-      "notes": "Ordinary Git assets. Shared actor with original mjlab preprocessing captured in ONNX; current/+40ms reference. Full 824-frame 017/Ma and 876-frame 034/Ma references match the recorded ActionGo inference. Right+A / Right+B replace the old AllMimic shortcuts."
+      "notes": "Ordinary Git assets. Shared actor with original mjlab preprocessing captured in ONNX; current/+40ms reference. Full 824-frame 017/Ma and 399-frame A42 generated references match the recorded ActionGo inference. Right+A uses 017/Ma; Right+B uses the A42 eight-second segment."
     },
     {
       "paths": [

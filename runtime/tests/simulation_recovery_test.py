@@ -14,7 +14,7 @@ REPO = Path(__file__).resolve().parents[2]
 def load_recovery_functions():
     source_path = REPO / "tools/sim/action_go_sim_remote.py"
     module = ast.parse(source_path.read_text(encoding="utf-8"))
-    main = next(node for node in module.body if isinstance(node, ast.FunctionDef) and node.name == "main")
+    main = next(node for node in module.body if isinstance(node, ast.FunctionDef) and node.name == "run_simulation")
     names = {
         "reset_safety_state", "ensure_safety_recovery_running", "arm_shell",
         "start_action", "start_safety_recovery", "safety_tick",

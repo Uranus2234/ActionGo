@@ -47,6 +47,10 @@ ACTION_GO_NET=lo tools/launch/start_dry_run.sh
 
 ## 真机入口
 
+平地 x86 统一仿真运行 `tools/launch/start_sim.sh`：同一个 MuJoCo G1 XML，
+以 Unitree mjlab 替代 WALKRUN，支持连续策略切换和状态/当前 E2E 显示。
+环境配置、资产路径与验证范围见 [统一 sim2sim](docs/sim2sim.md)。
+
 新增 [四模型 154k 格斗动作包](actions/fighting154k/README.md)：固定使用已播放对比的
 154000 轮 SuperMimic-Reproduced / AllMimic、各自带 Omni 15% / 不带 Omni 四个模型。
 `R1+Y/X/B` 播放 051/Ma，`R1+上/左/右` 播放功夫侧踢，模型顺序相同。

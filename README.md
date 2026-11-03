@@ -224,6 +224,7 @@ The supervisor command plane supports authenticated non-loopback UDP. Realtime T
 
 ## Developer Entry Points
 
+- [Unified x86 sim2sim](docs/sim2sim.md): one flat G1 scene, mjlab WALKRUN, policy switching, and session logs; start with `tools/launch/start_sim.sh`.
 - [Policy onboarding](docs/new_policy_onboarding.md): semantic reconnaissance and spec authoring.
 - [Runtime architecture](docs/runtime_architecture.md): contracts, players, safety, and handoff boundaries.
 - [Remote supervisor](docs/remote_supervisor.md): controls, authenticated UDP, and deployment behavior.

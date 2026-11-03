@@ -150,6 +150,8 @@ if(BUILD_TESTING)
   add_test(NAME runtime_logging_test COMMAND runtime_logging_test)
   add_test(NAME log_manager_test COMMAND ${Python3_EXECUTABLE}
     ${CMAKE_CURRENT_SOURCE_DIR}/runtime/tests/log_manager_test.py)
+  add_test(NAME sim2sim_test COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_CURRENT_SOURCE_DIR}/runtime/tests/sim2sim_test.py)
   add_test(
     NAME simulation_recovery_test
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/runtime/tests/simulation_recovery_test.py

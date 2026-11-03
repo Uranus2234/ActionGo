@@ -7,7 +7,6 @@ import time
 import tty
 
 import numpy as np
-import onnxruntime as ort
 
 
 class TerminalKeys:
@@ -32,6 +31,7 @@ class TerminalKeys:
 
 class RiskSwitch:
     def __init__(self, model_path):
+        import onnxruntime as ort
         options = ort.SessionOptions()
         options.intra_op_num_threads = 1
         options.inter_op_num_threads = 1

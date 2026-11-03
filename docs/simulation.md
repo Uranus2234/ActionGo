@@ -1,5 +1,9 @@
 # Simulation
 
+新的 x86 单场景入口见 [Unified sim2sim](sim2sim.md)：同一个平地 G1 XML，
+使用 Unitree mjlab 替代 WALKRUN，支持连续策略切换、姿态验收和独立会话日志。
+运行 `tools/launch/start_sim.sh`；以下保留旧入口的默认行为和独立测试示例。
+
 仿真和真机最容易混淆的是 DDS topic：
 
 ```text

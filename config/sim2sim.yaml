@@ -1,0 +1,12 @@
+bridge: native
+interface: lo
+domain_id: 42
+sim_dt: 0.002
+execution_provider: cpu
+initial_mode: walkrun
+initial_height: 0.79
+command_timeout_sec: 0.2
+use_joystick: false
+console: normal
+state_log_period_sec: 0.5
+sequence_walkrun_sec: 3.0

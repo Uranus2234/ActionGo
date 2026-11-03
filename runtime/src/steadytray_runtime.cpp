@@ -265,6 +265,7 @@ std::array<float, 3> projected_gravity_from_quat_steadytray(const std::array<flo
 
 struct Args {
   std::string net{"enP8p1s0"};
+  int domain_id{0};
   std::string model;
   std::string params;
   std::string cmd_topic{"rt/user_lowcmd"};
@@ -277,6 +278,7 @@ struct Args {
   std::string event_log;
   std::string object_source{"apriltag"};  // apriltag / udp / zero
   int udp_port{39001};
+  std::string udp_bind{"0.0.0.0"};
   int tag_id{-1};
   float tag_size{0.08f};
   int rs_width{640};
@@ -337,6 +339,7 @@ Args parse_args(int argc, char** argv) {
   for (int i = 1; i < argc; ++i) {
     const std::string k = argv[i];
     if (k == "--net") a.net = need_arg(i, argc, argv, k);
+    else if (k == "--domain-id") a.domain_id = std::stoi(need_arg(i, argc, argv, k));
     else if (k == "--model") a.model = need_arg(i, argc, argv, k);
     else if (k == "--params") a.params = need_arg(i, argc, argv, k);
     else if (k == "--cmd-topic") a.cmd_topic = need_arg(i, argc, argv, k);
@@ -349,6 +352,7 @@ Args parse_args(int argc, char** argv) {
     else if (k == "--event-log") a.event_log = need_arg(i, argc, argv, k);
     else if (k == "--object-source") a.object_source = need_arg(i, argc, argv, k);
     else if (k == "--udp-port") a.udp_port = std::stoi(need_arg(i, argc, argv, k));
+    else if (k == "--udp-bind") a.udp_bind = need_arg(i, argc, argv, k);
     else if (k == "--tag-id") a.tag_id = std::stoi(need_arg(i, argc, argv, k));
     else if (k == "--tag-size") a.tag_size = std::stof(need_arg(i, argc, argv, k));
     else if (k == "--rs-width") a.rs_width = std::stoi(need_arg(i, argc, argv, k));
@@ -385,6 +389,8 @@ Args parse_args(int argc, char** argv) {
     else if (k == "--help") {
       std::cout << "Usage: generic_sensor_policy_player --spec actions/steadytray/config/generic_steadytray.yaml [runtime overrides]\n"
                 << "  --object-source apriltag|udp|zero\n"
+                << "  --domain-id ID selects the DDS domain (default 0)\n"
+                << "  --udp-bind ADDRESS selects the UDP listener address (default 0.0.0.0)\n"
                 << "  --tag-size METERS --tag-id ID --require-tag\n"
                 << "  --vision-to-policy-pos 'x y z' --vision-to-policy-quat 'qw qx qy qz'\n"
                 << "  --camera-check                 RealSense+AprilTag/UDP pose check only\n"
@@ -396,6 +402,8 @@ Args parse_args(int argc, char** argv) {
       throw std::runtime_error("unknown arg: " + k);
     }
   }
+  if (a.domain_id < 0 || a.domain_id > 232) throw std::runtime_error("--domain-id must be in [0,232]");
+  if (a.udp_port < 1 || a.udp_port > 65535) throw std::runtime_error("--udp-port must be in [1,65535]");
   if (!a.camera_check && (a.model.empty() || a.params.empty())) {
     throw std::runtime_error("--model and --params are required (except --camera-check)");
   }
@@ -438,15 +446,16 @@ class ZeroObjectSource final : public ObjectSource {
 
 class UdpObjectSource final : public ObjectSource {
  public:
-  explicit UdpObjectSource(int port) : port_(port) {
+  UdpObjectSource(int port, const std::string& bind_address) : port_(port) {
+    sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    if (::inet_pton(AF_INET, bind_address.c_str(), &addr.sin_addr) != 1)
+      throw std::runtime_error("invalid --udp-bind IPv4 address");
+    addr.sin_port = htons(static_cast<uint16_t>(port_));
     fd_ = ::socket(AF_INET, SOCK_DGRAM, 0);
     if (fd_ < 0) throw std::runtime_error("socket(AF_INET,SOCK_DGRAM) failed");
     int yes = 1;
     setsockopt(fd_, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes));
-    sockaddr_in addr{};
-    addr.sin_family = AF_INET;
-    addr.sin_addr.s_addr = INADDR_ANY;
-    addr.sin_port = htons(static_cast<uint16_t>(port_));
     if (::bind(fd_, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) != 0) {
       const int e = errno;
       ::close(fd_);
@@ -713,7 +722,7 @@ class AprilTagObjectSource final : public ObjectSource {
 
 std::unique_ptr<ObjectSource> make_object_source(const Args& args) {
   if (args.object_source == "zero") return std::make_unique<ZeroObjectSource>();
-  if (args.object_source == "udp") return std::make_unique<UdpObjectSource>(args.udp_port);
+  if (args.object_source == "udp") return std::make_unique<UdpObjectSource>(args.udp_port, args.udp_bind);
   if (args.object_source == "apriltag") return std::make_unique<AprilTagObjectSource>(args);
   throw std::runtime_error("unknown --object-source: " + args.object_source);
 }
@@ -967,7 +976,7 @@ class UnitreeDDS {
     safety_filter_.set_config(safety_cfg);
     safety_limits_.lower = lower_limits;
     safety_limits_.upper = upper_limits;
-    unitree::robot::ChannelFactory::Instance()->Init(0, args_.net);
+    unitree::robot::ChannelFactory::Instance()->Init(args_.domain_id, args_.net);
     publisher_.reset(new unitree::robot::ChannelPublisher<LowCmd>(args_.cmd_topic));
     publisher_->InitChannel();
     subscriber_.reset(new unitree::robot::ChannelSubscriber<LowState>(args_.state_topic));

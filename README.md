@@ -9,7 +9,7 @@
 [![Release](https://img.shields.io/github/v/release/Uranus2234/ActionGo?display_name=tag)](https://github.com/Uranus2234/ActionGo/releases)
 ![Platform](https://img.shields.io/badge/platform-Unitree%20G1-orange)
 
-[中文说明](README.zh-CN.md) · [Policy onboarding](docs/new_policy_onboarding.md) · [Runtime architecture](docs/runtime_architecture.md)
+[中文说明](README.zh-CN.md) · [Policy catalog](docs/policy_catalog.md) · [Policy onboarding](docs/new_policy_onboarding.md) · [Agent deployment guide](docs/agent_policy_deployment.md) · [Runtime architecture](docs/runtime_architecture.md)
 
 </div>
 

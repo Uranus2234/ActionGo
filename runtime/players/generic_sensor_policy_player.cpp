@@ -66,7 +66,7 @@ Cli parse_cli(int argc, char** argv) {
     } else {
       cli.passthrough.push_back(k);
       const bool takes_value =
-          k == "--net" || k == "--cmd-topic" || k == "--state-topic" ||
+          k == "--net" || k == "--domain-id" || k == "--udp-bind" || k == "--cmd-topic" || k == "--state-topic" ||
           k == "--ready-file" || k == "--start-file" ||
           k == "--trace-file" || k == "--depth-shm-name" ||
           k == "--preview-file" || k == "--commit-file" ||

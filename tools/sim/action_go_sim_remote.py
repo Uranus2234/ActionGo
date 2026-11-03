@@ -13,6 +13,7 @@ actions/unitree_rl_mjlab/model/policy.onnx
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import shlex
 import signal
@@ -34,14 +35,7 @@ import mujoco
 import numpy as np
 import yaml
 
-from sim2sim_support import MOTOR_NAMES, SimSession, motor_layout, resource_overlay, signal_exists, walkrun_pose_accepted, write_signal
-
-try:
-    import mujoco.viewer
-except Exception:  # headless users may not have a display backend
-    mujoco_viewer = None
-else:
-    mujoco_viewer = mujoco.viewer
+from sim2sim_support import MOTOR_NAMES, KeyboardRemoteInput, SimSession, keyboard_combo_name, motor_layout, resource_overlay, signal_exists, walkrun_pose_accepted, write_signal
 
 ACTION_GO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_WALKRUN_MODEL = ACTION_GO_ROOT / "actions/unitree_rl_mjlab/model/policy.onnx"
@@ -643,6 +637,7 @@ class NativeActionGoBridge:
 
         self.model = model
         self.data = data
+        self.state_lock = threading.RLock()
         self.num_motor = len(MOTOR_NAMES)
         joint_names = [mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_JOINT, joint_id) or ""
                        for joint_id in range(model.njnt)]
@@ -702,6 +697,8 @@ class NativeActionGoBridge:
         self.lockstep_q: np.ndarray | None = None
         self.lockstep_steps_remaining = 0
         self.joystick = None
+        self.keyboard_input = KeyboardRemoteInput()
+        self.keyboard_lock = threading.Lock()
         self.axis_id: dict[str, int] = {}
         self.button_id: dict[str, int] = {}
         self.joystick_type = joystick_type
@@ -763,9 +760,9 @@ class NativeActionGoBridge:
                 self.lockstep_q = None
                 self.lockstep_steps_remaining = 0
 
-    def arm_user_command_barrier(self, duration_sec: float):
+    def arm_user_command_barrier(self, duration_sec: float, wait_for_command: bool = True):
         deadline = time.monotonic() + max(0.0, float(duration_sec))
-        while time.monotonic() < deadline:
+        while wait_for_command and time.monotonic() < deadline:
             with self.lock:
                 if self.usercmd is not None:
                     break
@@ -806,9 +803,13 @@ class NativeActionGoBridge:
             else:
                 self.lowcmd = cmd
 
-    def _joystick_mask_and_axes(self) -> tuple[int, list[float]]:
+    def _joystick_mask_and_axes(self, consume_keyboard_events: bool = False) -> tuple[int, list[float]]:
+        with self.keyboard_lock:
+            keyboard_mask, keyboard_axes = self.keyboard_input.sample()
+            if consume_keyboard_events:
+                keyboard_mask = self.keyboard_input.consume_buttons()
         if self.joystick is None:
-            return 0, [0.0, 0.0, 0.0, 0.0]
+            return keyboard_mask, keyboard_axes
         import pygame
         pygame.event.get()
         b = self.button_id
@@ -839,7 +840,17 @@ class NativeActionGoBridge:
             float(-self.joystick.get_axis(a["RY"])),
             float(-self.joystick.get_axis(a["LY"])),
         ]
-        return mask, axes
+        combined = [max(-1.0, min(1.0, gamepad + keyboard))
+                    for gamepad, keyboard in zip(axes, keyboard_axes)]
+        return mask | keyboard_mask, combined
+
+    def set_keyboard_key(self, key: int, pressed: bool):
+        with self.keyboard_lock:
+            self.keyboard_input.set_key(int(key), pressed)
+
+    def clear_keys(self):
+        with self.keyboard_lock:
+            self.keyboard_input.clear()
 
     @staticmethod
     def _write_float_bytes(buf, offset: int, value: float):
@@ -868,6 +879,10 @@ class NativeActionGoBridge:
         self.wireless_controller.ly = axes[3]
 
     def publish_lowstate(self):
+        with self.state_lock:
+            self._publish_lowstate()
+
+    def _publish_lowstate(self):
         if self.data is None:
             return
         self.low_state.tick = int(round(float(self.data.time) * 1000))
@@ -903,6 +918,8 @@ class NativeActionGoBridge:
         self._fill_remote()
         self.low_state_puber.Write(self.low_state)
         self.wireless_controller_puber.Write(self.wireless_controller)
+        if getattr(self, "perception", None) is not None:
+            self.perception.tick()
 
     def apply_damping(self, damping: float):
         torque = -float(damping) * np.asarray(self.data.qvel[self.dof_adr])
@@ -1008,6 +1025,11 @@ class SimActionManager:
         self.walkrun_event_log = ""
         self.walkrun_signal_dir = None
         self.action_signal_dir = None
+        self.nonblocking_transitions = not bool(getattr(args, "headless", False))
+        self.pending_action = None
+        self.pending_walkrun = None
+        self.retiring_processes = []
+        self.action_bindings: dict[str, list[int]] = {}
 
     def notice(self, message: str, level: str = "INFO"):
         if self.session:
@@ -1023,7 +1045,8 @@ class SimActionManager:
     def control_display(self) -> tuple[str, str, str]:
         if self.passive or getattr(self.bridge, "command_fallback", False):
             return "DAMPING", "", ""
-        if self.action_running() and getattr(self.bridge, "mode", "user") == "user":
+        if (getattr(self, "active_proc", None) is not None and self.action_running() and
+                getattr(self.bridge, "mode", "user") == "user"):
             return "USER_CTRL", self.active_action, self.active_config.payload_event_log
         if self.walkrun_running():
             return "WALKRUN", "unitree_rl_mjlab", self.walkrun_event_log
@@ -1037,19 +1060,167 @@ class SimActionManager:
         return self.walkrun_proc is not None and self.walkrun_proc.poll() is None
 
     def action_running(self) -> bool:
-        return self.active_proc is not None and self.active_proc.poll() is None
+        if self.active_proc is not None and self.active_proc.poll() is None:
+            return True
+        return (self.pending_action is not None and
+                self.pending_action["proc"].poll() is None)
 
     def any_motion_running(self) -> bool:
-        return self.action_running() or self.walkrun_running()
+        return self.action_running() or self.walkrun_running() or self.pending_walkrun is not None
+
+    def _retire_process(self, proc: subprocess.Popen | None, name: str, signal_dir=None):
+        if proc is None:
+            if signal_dir:
+                signal_dir.cleanup()
+            return
+        if proc.poll() is None:
+            try:
+                os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+            except Exception:
+                try:
+                    proc.terminate()
+                except Exception:
+                    pass
+            self.retiring_processes.append({
+                "proc": proc,
+                "name": name,
+                "signal_dir": signal_dir,
+                "deadline": time.monotonic() + 0.3,
+                "killed": False,
+            })
+            return
+        if signal_dir:
+            signal_dir.cleanup()
+
+    def _poll_retiring_processes(self):
+        now = time.monotonic()
+        pending = []
+        for record in self.retiring_processes:
+            proc = record["proc"]
+            if proc.poll() is not None:
+                if record["signal_dir"]:
+                    record["signal_dir"].cleanup()
+                print(f"[action_go_sim] stopped {record['name']}", flush=True)
+            elif now >= record["deadline"] and not record["killed"]:
+                try:
+                    os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+                except Exception:
+                    try:
+                        proc.kill()
+                    except Exception:
+                        pass
+                record["killed"] = True
+                pending.append(record)
+            else:
+                pending.append(record)
+        self.retiring_processes = pending
+
+    def _cancel_pending_action(self):
+        pending = self.pending_action
+        if pending is None:
+            return
+        self.pending_action = None
+        self._retire_process(pending["proc"], pending["name"], self.action_signal_dir)
+        self.action_signal_dir = None
+        if getattr(self.bridge, "perception", None) is not None:
+            self.bridge.perception.deactivate()
+        if self.active_proc is None:
+            self.active_action = ""
+            self.active_config = None
+
+    def _cancel_pending_walkrun(self):
+        pending = self.pending_walkrun
+        if pending is None:
+            return
+        self.pending_walkrun = None
+        self._retire_process(pending["proc"], "walkrun", self.walkrun_signal_dir)
+        self.walkrun_signal_dir = None
+
+    def advance_transitions(self):
+        self._poll_retiring_processes()
+        pending = self.pending_action
+        if pending is not None:
+            proc = pending["proc"]
+            if proc.poll() is not None:
+                self.pending_action = None
+                self._retire_process(proc, pending["name"], self.action_signal_dir)
+                self.action_signal_dir = None
+                self.active_action = ""
+                self.active_config = None
+                if getattr(self.bridge, "perception", None) is not None:
+                    self.bridge.perception.deactivate()
+                self.notice(f"{pending['name']} exited before ready; check player output", "ERROR")
+                if not self.walkrun_running() and not self.passive:
+                    self.start_walkrun()
+            elif time.monotonic() >= pending["deadline"]:
+                self.pending_action = None
+                self._retire_process(proc, pending["name"], self.action_signal_dir)
+                self.action_signal_dir = None
+                self.active_action = ""
+                self.active_config = None
+                if getattr(self.bridge, "perception", None) is not None:
+                    self.bridge.perception.deactivate()
+                self.notice(f"{pending['name']} ready timeout; check player output", "ERROR")
+                if not self.walkrun_running() and not self.passive:
+                    self.start_walkrun()
+            elif (not pending["action"].prestart_before_userctrl or
+                  signal_exists(pending["action"].ready_file)):
+                self.pending_action = None
+                self._activate_action(pending["name"], pending["source"], pending["action"], proc)
+                if self.session:
+                    self.session.event("strategy_ready", policy=pending["name"],
+                                       wait_sec=time.monotonic() - pending["started_at"])
+
+        pending = self.pending_walkrun
+        if pending is not None:
+            proc = pending["proc"]
+            if proc.poll() is not None:
+                self.pending_walkrun = None
+                self._retire_process(proc, "walkrun", self.walkrun_signal_dir)
+                self.walkrun_signal_dir = None
+                self.passive = True
+                self.set_bridge_mode("none")
+                reason = f"player exited with status {proc.returncode} before ready"
+                if self.session:
+                    self.session.event("walkrun_failed", "ERROR", exit_code=proc.returncode, reason=reason,
+                                       event_log=self.walkrun_event_log)
+                self.notice(f"WALKRUN stopped: {reason}; DAMPING | Backspace to reset", "ERROR")
+            elif time.monotonic() >= pending["deadline"]:
+                self.pending_walkrun = None
+                self._retire_process(proc, "walkrun", self.walkrun_signal_dir)
+                self.walkrun_signal_dir = None
+                self.passive = True
+                self.set_bridge_mode("none")
+                reason = "player ready timeout"
+                if self.session:
+                    self.session.event("walkrun_failed", "ERROR", reason=reason,
+                                       event_log=self.walkrun_event_log)
+                self.notice(f"WALKRUN stopped: {reason}; DAMPING | Backspace to reset", "ERROR")
+            elif signal_exists(pending["ready_file"]):
+                self.pending_walkrun = None
+                self.walkrun_proc = proc
+                write_signal(pending["start_file"], "start\n")
+                self.passive = False
+                self.set_bridge_mode("lowcmd")
+                self.notice("WALKRUN ready: unitree_rl_mjlab")
+                if self.session:
+                    self.session.event("strategy_ready", policy="unitree_rl_mjlab",
+                                       wait_sec=time.monotonic() - pending["started_at"])
 
     def start_walkrun(self, allow_action: bool = False):
         with self.lock:
             if self.action_running() and not allow_action:
                 return
+            if self.pending_walkrun is not None:
+                return
             if self.walkrun_running():
                 self.passive = False
                 self.set_bridge_mode("lowcmd")
                 return
+            if self.walkrun_proc is not None:
+                self._retire_process(self.walkrun_proc, "walkrun", self.walkrun_signal_dir)
+                self.walkrun_proc = None
+                self.walkrun_signal_dir = None
             model = str(Path(self.args.walkrun_model).expanduser())
             params = str(Path(self.args.walkrun_params).expanduser()) if self.args.walkrun_params else ""
             argv = [
@@ -1079,6 +1250,18 @@ class SimActionManager:
             else:
                 stem = "walkrun"
             proc = start_argv(argv, self.output_path(stem))
+            if self.nonblocking_transitions:
+                self.pending_walkrun = {
+                    "proc": proc,
+                    "ready_file": ready,
+                    "start_file": start,
+                    "deadline": time.monotonic() + 10.0,
+                    "started_at": time.monotonic(),
+                }
+                if not self.action_running():
+                    self.passive = True
+                    self.set_bridge_mode("none")
+                return
             self.walkrun_proc = proc
             if not self._wait_ready(ActionConfig(name="WALKRUN", prestart_before_userctrl=True,
                                                  prestart_ready_timeout_sec=10.0, ready_file=ready), proc):
@@ -1094,11 +1277,50 @@ class SimActionManager:
 
     def stop_walkrun(self):
         with self.lock:
+            if self.nonblocking_transitions:
+                self._cancel_pending_walkrun()
+                proc = self.walkrun_proc
+                self.walkrun_proc = None
+                signal_dir = self.walkrun_signal_dir
+                self.walkrun_signal_dir = None
+                self._retire_process(proc, "walkrun", signal_dir)
+                self.set_bridge_mode("none")
+                return
             stop_process(self.walkrun_proc, "walkrun")
             self.walkrun_proc = None
             if self.walkrun_signal_dir:
                 self.walkrun_signal_dir.cleanup()
                 self.walkrun_signal_dir = None
+
+    def poll_walkrun_failure(self):
+        if self.walkrun_proc is None:
+            return False
+        code = self.walkrun_proc.poll()
+        if code is None:
+            return False
+        event_log = self.walkrun_event_log
+        self.enter_passive()
+        reason = f"player exited with status {code}"
+        if event_log:
+            try:
+                with open(event_log, "rb") as stream:
+                    stream.seek(0, os.SEEK_END)
+                    stream.seek(max(0, stream.tell() - 65536))
+                    records = stream.read().decode(errors="replace").splitlines()
+                for line in reversed(records):
+                    try:
+                        record = json.loads(line)
+                    except ValueError:
+                        continue
+                    if record.get("event") == "process_exit" and record.get("reason"):
+                        reason = record["reason"]
+                        break
+            except OSError:
+                pass
+        if self.session:
+            self.session.event("walkrun_failed", "ERROR", exit_code=code, reason=reason, event_log=event_log)
+        self.notice(f"WALKRUN stopped: {reason}; DAMPING | Backspace to reset", "ERROR")
+        return True
 
     def enter_passive(self):
         print("[action_go_sim] enter simulated PASSIVE damping", flush=True)
@@ -1157,6 +1379,9 @@ class SimActionManager:
             write_signal(action.start_file, "start\n")
 
     def start_action(self, action_name: str, source: str = "remote") -> bool:
+        if (self.nonblocking_transitions and self.active_proc is not None and
+                self.active_proc.poll() is not None):
+            self.poll_action_done()
         if action_name not in self.actions:
             print(f"[action_go_sim] unknown action from {source}: {action_name}", flush=True)
             return False
@@ -1165,7 +1390,7 @@ class SimActionManager:
             return False
         action = replace(self.actions[action_name])
         if self.args.profile:
-            reason = sim_deferred_reason(action)
+            reason = sim_deferred_reason(action, object_body=self.args.object_body)
             if reason:
                 self.notice(action_name + ": " + reason, "WARN")
                 return False
@@ -1179,6 +1404,8 @@ class SimActionManager:
         if action_name.startswith("uni_supermimic"):
             self.notice("UniSuperMimic is excluded from this validation", "WARN")
             return False
+        if self.nonblocking_transitions and self.pending_walkrun is not None:
+            self._cancel_pending_walkrun()
         self.action_signal_dir = tempfile.TemporaryDirectory(prefix="actiongo_action_")
         directory = Path(self.action_signal_dir.name)
         action.ready_file = str(directory / "ready")
@@ -1201,16 +1428,35 @@ class SimActionManager:
         if not command:
             print(f"[action_go_sim] action has no command: {action_name}", flush=True)
             return False
+        if getattr(self.bridge, "perception", None) is not None:
+            command = self.bridge.perception.activate(action, command,
+                                                      warmup=not self.nonblocking_transitions)
+        elif "generic_sensor_policy_player" in command:
+            raise ValueError("sensor policies require --bridge native")
         self._prepare_prestart_files(action)
         if not self.native_bridge:
             self.stop_walkrun()
             self.passive = False
         proc = start_shell_command(command, self.output_path(stem))
+        if self.nonblocking_transitions:
+            self.active_action = action_name
+            self.active_config = action
+            self.pending_action = {
+                "proc": proc,
+                "action": action,
+                "name": action_name,
+                "source": source,
+                "deadline": time.monotonic() + float(action.prestart_ready_timeout_sec),
+                "started_at": time.monotonic(),
+            }
+            return True
         self.active_proc = proc
         self.active_action = action_name
         self.active_config = action
         if not self._wait_ready(action, proc):
             stop_process(proc, action_name)
+            if getattr(self.bridge, "perception", None) is not None:
+                self.bridge.perception.deactivate()
             self.active_proc = None
             self.active_action = ""
             self.active_config = None
@@ -1219,15 +1465,23 @@ class SimActionManager:
             if not self.walkrun_running() and not self.passive:
                 self.start_walkrun()
             return False
+        self._activate_action(action_name, source, action, proc)
+        return True
+
+    def _activate_action(self, action_name: str, source: str, action: ActionConfig,
+                         proc: subprocess.Popen):
+        self.active_proc = proc
+        self.active_action = action_name
+        self.active_config = action
         if self.native_bridge and action.prestart_before_userctrl:
-            # Real handoff order: action player is already publishing a hold on
-            # rt/user_lowcmd; switch the simulated UserCtrl gate to that topic,
-            # stop walkrun rt/lowcmd, then release the player from hold.
-            self.set_bridge_mode("user")
             self.stop_walkrun()
+            self.set_bridge_mode("user")
             self.passive = False
             if hasattr(self.bridge, "arm_user_command_barrier"):
-                self.bridge.arm_user_command_barrier(self.args.action_start_barrier_sec)
+                self.bridge.arm_user_command_barrier(
+                    0.0 if self.nonblocking_transitions else self.args.action_start_barrier_sec,
+                    wait_for_command=not self.nonblocking_transitions,
+                )
             self._signal_action_start(action)
         else:
             self.stop_walkrun()
@@ -1236,12 +1490,38 @@ class SimActionManager:
             self._signal_action_start(action)
         self.active_switch_mode = normalize_mode(action.switch_back_mode)
         self.notice("Running " + action_name)
+        for combo in self.action_bindings.get(action_name, []):
+            self.notice(f"Binding {combo_name(combo)} | Keyboard {keyboard_combo_name(combo)}")
+        if self.session:
+            self.session.event("action_started", policy=action_name, source=source,
+                               remote_bindings=[combo_name(combo) for combo in self.action_bindings.get(action_name, [])],
+                               keyboard_bindings=[keyboard_combo_name(combo) for combo in self.action_bindings.get(action_name, [])])
         print(f"[action_go_sim] active action={action_name} source={source} switch_back={self.active_switch_mode}", flush=True)
-        return True
 
     def stop_active(self, switch_mode: str = "walkrun"):
+        if self.nonblocking_transitions:
+            self._cancel_pending_action()
+            proc = self.active_proc
+            self.active_proc = None
+            signal_dir = self.action_signal_dir
+            self.action_signal_dir = None
+            self._retire_process(proc, self.active_action or "action", signal_dir)
+            if getattr(self.bridge, "perception", None) is not None:
+                self.bridge.perception.deactivate()
+            self.active_action = ""
+            self.active_config = None
+            self.active_switch_mode = normalize_mode(switch_mode) if switch_mode != "none" else "none"
+            if switch_mode == "walkrun":
+                self.start_walkrun()
+            elif switch_mode == "passive":
+                self.stop_walkrun()
+                self.set_bridge_mode("none")
+                self.passive = True
+            return
         if self.active_proc is not None:
             stop_process(self.active_proc, self.active_action or "action")
+        if getattr(self.bridge, "perception", None) is not None:
+            self.bridge.perception.deactivate()
         self.active_proc = None
         self.active_action = ""
         self.active_config = None
@@ -1276,6 +1556,8 @@ class SimActionManager:
         name = self.active_action
         mode = self.active_switch_mode
         print(f"[action_go_sim] action exited: {name} status={code} switch_back={mode}", flush=True)
+        if getattr(self.bridge, "perception", None) is not None:
+            self.bridge.perception.deactivate()
         self.active_proc = None
         self.active_action = ""
         self.active_config = None
@@ -1295,7 +1577,22 @@ class SimActionManager:
             self.start_walkrun()
         return name, int(code), mode
 
-    def shutdown(self, passive: bool = False):
+    def shutdown(self, passive: bool = False, wait: bool = False):
+        if self.nonblocking_transitions:
+            if not wait:
+                self.stop_active(switch_mode="none")
+                self.stop_walkrun()
+                self.set_bridge_mode("none")
+                self.passive = passive
+                return
+            self.nonblocking_transitions = False
+            self._cancel_pending_action()
+            self._cancel_pending_walkrun()
+            for record in self.retiring_processes:
+                stop_process(record["proc"], record["name"], force=True)
+                if record["signal_dir"]:
+                    record["signal_dir"].cleanup()
+            self.retiring_processes.clear()
         self.stop_active(switch_mode="none")
         self.stop_walkrun()
         self.set_bridge_mode("none")
@@ -1347,13 +1644,32 @@ def parse_args(argv=None) -> argparse.Namespace:
     p.add_argument("--xml", default="", help="default: <unitree_mujoco_root>/unitree_robots/g1/scene_29dof.xml")
     p.add_argument("--position-actuator-params", default="", help="add MJLab-style position actuators from an ActionGo robot params YAML")
     p.add_argument("--hfield-file", default="", help="optional MuJoCo heightfield asset added to the scene")
+    p.add_argument("--terrain", choices=["flat", "stairs", "ramp", "rough"], default="flat")
+    p.add_argument("--terrain-start", type=float, default=1.8)
+    p.add_argument("--terrain-height", type=float, default=0.12, help="step rise, ramp elevation, or roughness amplitude (meters)")
+    p.add_argument("--terrain-length", type=float, default=3.0)
+    p.add_argument("--terrain-width", type=float, default=2.0)
+    p.add_argument("--terrain-seed", type=int, default=0)
+    p.add_argument("--depth-hz", type=float, default=50.0)
+    p.add_argument("--sensor-log-period-sec", type=float, default=1.0, help="interval between retained raw/processed sensor snapshots")
+    p.add_argument("--php-camera-pos", type=float, nargs=3, default=(0.0487988662332928, 0.01, 0.4378029937970051))
+    p.add_argument("--php-camera-pitch-deg", type=float, default=27.0)
+    p.add_argument("--object-body", default="", help="MuJoCo body providing the SteadyTray object pose")
+    p.add_argument("--object-frame-body", default="d435_link", help="policy frame body or calibrated parent")
+    p.add_argument("--object-frame-pos", type=float, nargs=3, default=(0, 0, 0))
+    p.add_argument("--object-frame-quat", type=float, nargs=4, default=(1, 0, 0, 0), help="policy frame relative to parent, wxyz")
+    p.add_argument("--object-port", type=int, default=0, help="SteadyTray loopback UDP port; 0 selects an available port")
     p.add_argument("--hfield-size", type=float, nargs=4, default=(1.0, 1.0, 0.2, 0.1))
     p.add_argument("--hfield-pos", type=float, nargs=3, default=(0.0, 0.0, 0.0))
     p.add_argument("--hfield-solref", type=float, nargs=2, default=(0.02, 1.0))
     p.add_argument("--interface", default="lo")
-    p.add_argument("--domain-id", type=int, default=0, help="use 0 for compatibility with all action_go C++ players")
+    p.add_argument("--domain-id", type=int, default=0, help="DDS domain shared by bridge and C++ players")
     p.add_argument("--sim-dt", type=float, default=0.002, help="default matches a 500 Hz low-level robot/sim control loop")
-    p.add_argument("--viewer-hz", type=float, default=50.0)
+    p.add_argument("--viewer-hz", type=float, default=60.0)
+    p.add_argument("--viewer-width", type=int, default=1920)
+    p.add_argument("--viewer-height", type=int, default=1080)
+    p.add_argument("--render-backend", choices=("auto", "egl", "glfw"), default="auto",
+                   help="auto prefers GPU EGL rendering with a desktop preview; glfw renders directly to the window")
     p.add_argument("--headless", action="store_true")
     p.add_argument("--paused", action="store_true")
     p.add_argument("--no-realtime", action="store_true")
@@ -1409,6 +1725,12 @@ def parse_args(argv=None) -> argparse.Namespace:
         p.error("simulation durations and initial height must be finite and positive")
     if args.sequence and args.auto_action:
         p.error("--sequence and --auto-action cannot be combined")
+    if args.hfield_file and args.terrain != "flat":
+        p.error("choose either --hfield-file or a generated --terrain")
+    if not 0 <= args.object_port <= 65535:
+        p.error("--object-port must be in [0,65535]")
+    if args.viewer_width <= 0 or args.viewer_height <= 0:
+        p.error("viewer dimensions must be positive")
     sim_cadence_hz(args.sim_dt)
     return args
 
@@ -1446,7 +1768,7 @@ def setup_unitree_mujoco(args: argparse.Namespace):
             f"Current Python is {sys.executable}; try /usr/bin/python3 or set --unitree-sdk2py-root."
         ) from e
 
-    if args.hfield_file or args.position_actuator_params:
+    if args.hfield_file or args.position_actuator_params or args.terrain != "flat":
         spec = mujoco.MjSpec.from_file(cfg.ROBOT_SCENE)
     else:
         spec = None
@@ -1502,7 +1824,11 @@ def setup_unitree_mujoco(args: argparse.Namespace):
             rgba=(0.35, 0.65, 0.55, 0.75),
         )
 
+    from sim2sim_scene import add_terrain
     if spec is not None:
+        terrain = add_terrain(spec, args.terrain, start=args.terrain_start, height=args.terrain_height,
+                              length=args.terrain_length, width=args.terrain_width, seed=args.terrain_seed)
+        args.session.metadata(terrain=terrain)
         model = spec.compile()
     elif Path(cfg.ROBOT_SCENE).suffix.lower() == ".mjb":
         model = mujoco.MjModel.from_binary_path(cfg.ROBOT_SCENE)
@@ -1634,15 +1960,19 @@ def initialize_sim_stance(args, model, data, bridge):
     mujoco.mj_forward(model, data)
 
 
-def sim_deferred_reason(action):
+def sim_deferred_reason(action, object_body=None):
     if action.name.startswith("uni_supermimic"):
         return "UniSuperMimic is excluded for now"
     if action.type in SIM_DISABLED_ACTION_TYPES or action.type == "gentle_humanoid":
         return "separate scene/input integration required"
     tokens = shlex.split(action.command)
-    if action.type in {"php", "steadytray"} or any(
-            Path(token).name == "generic_sensor_policy_player" for token in tokens):
-        return "depth/object input bridge is not connected"
+    if action.name == "pbfm_pico_teleop":
+        return "external realtime reference is not connected"
+    if action.name.startswith("steadytray_") and object_body == "":
+        return "requires --object-body and a calibrated policy frame in the shared XML"
+    if any(Path(token).name == "generic_sensor_policy_player" for token in tokens) and not (
+            action.name.startswith(("php_", "pbfm_", "steadytray_"))):
+        return "sensor variant is not connected"
     if "--require-realtime" in tokens or any(Path(token).name == "run_sonic_pico.sh" for token in tokens):
         return "external realtime reference is not connected"
     return ""
@@ -1657,7 +1987,7 @@ def check_sim_actions(args, actions):
             args.session.notice("Unknown action: " + name, "ERROR")
             failures += 1
             continue
-        reason = sim_deferred_reason(action)
+        reason = sim_deferred_reason(action, object_body=args.object_body)
         if reason:
             args.session.notice("SKIP " + name + ": " + reason)
             continue
@@ -1692,13 +2022,15 @@ def main(argv=None) -> int:
 
 def run_simulation(args) -> int:
     manager = None
+    perception = None
+    viewer = None
     try:
         sim_lowlevel_hz = sim_cadence_hz(args.sim_dt)
         actions = load_action_registry(Path(args.config), args.interface)
         prepare_sim_resources(args, actions)
         if args.list_actions:
             for name, action in sorted(actions.items()):
-                reason = sim_deferred_reason(action)
+                reason = sim_deferred_reason(action, object_body=args.object_body)
                 status = "DEFERRED" if reason else "REGISTERED"
                 args.session.notice(f"{status:10s} {name}" + (": " + reason if reason else ""))
             return 0
@@ -1708,7 +2040,12 @@ def run_simulation(args) -> int:
             if name not in actions:
                 raise ValueError("unknown action: " + name)
         model, data, _bridge, joystick_ok, xml_path = setup_unitree_mujoco(args)
+        state_lock = getattr(_bridge, "state_lock", threading.RLock())
         initialize_sim_stance(args, model, data, _bridge)
+        from sim2sim_perception import SimPerception
+        if args.bridge == "native":
+            perception = SimPerception(model, data, args)
+            _bridge.perception = perception
         args.session.metadata(xml=xml_path, domain_id=args.domain_id, interface=args.interface,
                               sim_dt=args.sim_dt, build_dir=args.build_dir, asset_root=args.asset_root,
                               execution_provider=args.execution_provider, git_sha=os.environ.get("ACTION_GO_GIT_SHA", "unknown"))
@@ -1731,7 +2068,8 @@ def run_simulation(args) -> int:
             action = actions.get(args.auto_action)
             if action is None or not action.model:
                 raise RuntimeError("--reset-auto-action-to-reference requires a registered --auto-action with model")
-            reset_to_embedded_reference(model, data, action.model, args.reference_origin)
+            with state_lock:
+                reset_to_embedded_reference(model, data, action.model, args.reference_origin)
         disabled_bindings: list[Binding] = []
         enabled_bindings: list[Binding] = []
         for binding in remote_cfg.bindings:
@@ -1741,6 +2079,31 @@ def run_simulation(args) -> int:
             else:
                 enabled_bindings.append(binding)
         remote_cfg.bindings = enabled_bindings
+        for binding in remote_cfg.bindings:
+            manager.action_bindings.setdefault(binding.action, []).append(binding.combo)
+        for action_name, combo in ((remote_cfg.shell_start_action, remote_cfg.shell_start_combo),
+                                   (remote_cfg.shell_start_alt_action, remote_cfg.shell_start_alt_combo),
+                                   (remote_cfg.lie_action, remote_cfg.lie_down_combo)):
+            if combo:
+                manager.action_bindings.setdefault(action_name, []).append(combo)
+        args.session.notice("Controls | W/S forward/back | A/D sidestep | Q/E turn | release to stop")
+        args.session.notice("Remote | Shift+A=A | B/X/Y | arrows | R+1/2=R1/2 | L+1/2=L1/2 | F+1/2=F1/2")
+        args.session.notice("Input | MuJoCo window only | click window, then Enter to ARM")
+        args.session.notice("Shell | Enter or Shift+S=Start | T=Select | Backspace reset | Space pause")
+        args.session.notice("Mouse | Ctrl+LMB drag | Ctrl+RMB rotate | Shift horizontal | wheel zoom")
+        args.session.notice("Policy bindings | Remote | Keyboard | Policy")
+        for binding in remote_cfg.bindings:
+            action = actions.get(binding.action)
+            reason = sim_deferred_reason(action, object_body=args.object_body) if action else "not registered"
+            args.session.notice(f"{combo_name(binding.combo)} | {keyboard_combo_name(binding.combo)} | "
+                                f"{binding.action}" + (f" [DEFERRED: {reason}]" if reason else ""))
+        for combo, description in ((remote_cfg.shell_walkrun_combo, "WALKRUN"),
+                                    (remote_cfg.shell_damping_combo, "DAMPING"),
+                                    (remote_cfg.shell_start_combo, f"ARM / recovery: {remote_cfg.shell_start_action}"),
+                                    (remote_cfg.shell_start_alt_combo, f"ARM / recovery: {remote_cfg.shell_start_alt_action}"),
+                                    (remote_cfg.lie_down_combo, remote_cfg.lie_action)):
+            if combo:
+                args.session.notice(f"{combo_name(combo)} | {keyboard_combo_name(combo)} | {description}")
 
         print(
             f"[action_go_sim] xml={xml_path} domain={args.domain_id} interface={args.interface} "
@@ -1787,6 +2150,49 @@ def run_simulation(args) -> int:
             flush=True,
         )
 
+        paused = bool(args.paused)
+        last_keyboard_input = "None"
+        keyboard_events: list[str] = []
+        keyboard_lock = threading.Lock()
+
+        def key_callback(keycode, action):
+            nonlocal paused, last_keyboard_input
+            names = {257: "Enter", 259: "Backspace", 262: "Right", 263: "Left", 264: "Down", 265: "Up",
+                     340: "LeftShift", 344: "RightShift", 341: "LeftCtrl", 345: "RightCtrl"}
+            key_name = names.get(keycode, chr(keycode) if 32 <= keycode <= 126 else f"Key_{keycode}")
+            last_keyboard_input = key_name + " " + action
+            fields = dict(key=key_name, keycode=keycode, phase=action)
+            if isinstance(_bridge, NativeActionGoBridge):
+                with _bridge.keyboard_lock:
+                    mask, axes = _bridge.keyboard_input.sample()
+                fields.update(buttons=combo_name(mask), axes=axes)
+            args.session.event("keyboard_input", **fields)
+            if action == "press" and keycode == 32:
+                paused = not paused
+                print(f"[action_go_sim] paused={paused}", flush=True)
+            elif action == "press" and keycode == 259:
+                with keyboard_lock:
+                    keyboard_events.append("reset")
+
+        if not args.headless:
+            from mujoco_keyboard_viewer import KeyboardViewer
+            viewer = KeyboardViewer(model, data, _bridge, title="ActionGo Sim2Sim", key_callback=key_callback,
+                                    width=args.viewer_width, height=args.viewer_height, asynchronous=True,
+                                    render_backend=args.render_backend)
+            args.session.event("viewer_renderer", backend=viewer.render_backend, renderer=viewer.renderer_name,
+                               width=args.viewer_width, height=args.viewer_height,
+                               fallback_reason=viewer.backend_warning)
+            args.session.notice(f"Renderer {viewer.render_backend.upper()} | {viewer.renderer_name}")
+            if viewer.backend_warning:
+                args.session.notice("GPU EGL unavailable: " + viewer.backend_warning, "WARN")
+            viewer.cam.distance = 3.0
+            viewer.cam.elevation = -10.0
+            viewer.cam.azimuth = 180.0
+            viewer.cam.trackbodyid = 1
+            viewer.cam.type = mujoco.mjtCamera.mjCAMERA_TRACKING
+            for _ in range(2):
+                viewer.sync()
+
         if args.auto_action:
             manager.set_bridge_mode("none")
             manager.passive = False
@@ -1800,8 +2206,8 @@ def run_simulation(args) -> int:
             manager.enter_passive()
             print(
                 "[action_go_sim][shell] initial state=SHELL_IDLE + simulated PASSIVE: "
-                "robot is damped and will fall. Use Start/S for BFM stand or "
-                "Left+B/B for UFO stand when valid IMU tilt reaches the recovery threshold; "
+                "robot is damped and will fall. Use Enter/Shift+S for BFM stand or "
+                "Left+B for UFO stand when valid IMU tilt reaches the recovery threshold; "
                 "later falls enter damping unless auto recovery is enabled.",
                 flush=True,
             )
@@ -1818,54 +2224,13 @@ def run_simulation(args) -> int:
         run_started_at = time.monotonic()
         auto_action_pending = bool(args.auto_action)
         sequence_index = 0
-        sequence_phase = "walkrun"
-        sequence_deadline = time.monotonic() + args.sequence_walkrun_sec
+        sequence_phase = "walkrun_starting" if args.sequence else "walkrun"
+        sequence_deadline = float("inf") if args.sequence else 0.0
 
-        paused = bool(args.paused)
-        from handoffguard_preview import RiskSwitch, TerminalKeys
+        from handoffguard_preview import RiskSwitch
         risk_switch = RiskSwitch(args.risk_model) if args.risk_model else None
         next_risk_tick = float(data.time)
         risk_auto_requested = False
-        keyboard_events: list[str] = []
-        keyboard_lock = threading.Lock()
-
-        def key_callback(keycode):
-            nonlocal paused
-            try:
-                c = chr(keycode).lower()
-            except Exception:
-                c = ""
-            if keycode == ord(" "):
-                paused = not paused
-                print(f"[action_go_sim] paused={paused}", flush=True)
-            elif c == "1":
-                with keyboard_lock:
-                    keyboard_events.append("risk_switch")
-            elif c == "r":
-                with keyboard_lock:
-                    keyboard_events.append("reset")
-            elif c == "s":
-                with keyboard_lock:
-                    keyboard_events.append("start")
-            elif c == "b":
-                with keyboard_lock:
-                    keyboard_events.append("start_alt")
-            elif c == "w":
-                with keyboard_lock:
-                    keyboard_events.append("walkrun")
-            elif c == "p":
-                with keyboard_lock:
-                    keyboard_events.append("passive")
-            elif c == "t":
-                with keyboard_lock:
-                    keyboard_events.append("ufo_tracking")
-            elif c == "g":
-                with keyboard_lock:
-                    keyboard_events.append("ufo_stand")
-            elif c == "v":
-                with keyboard_lock:
-                    keyboard_events.append("auto_action")
-
         prev_mask = remote.mask()
         shell_armed = False
         lie_action_active = False
@@ -1900,6 +2265,7 @@ def run_simulation(args) -> int:
                 print(f"[action_go_sim][shell] cannot arm while action is running: {manager.active_action}", flush=True)
                 return
             shell_armed = True
+            manager.notice("ARMED | policy bindings enabled")
             selected_safety_action = recovery_action or remote_cfg.safety.action
             reset_safety_state()
             imu = remote.imu()
@@ -2017,12 +2383,13 @@ def run_simulation(args) -> int:
                     lie_action_active = False
                     reset_safety_state()
                     manager.shutdown(passive=False)
-                    initialize_sim_stance(args, model, data, _bridge)
+                    with state_lock:
+                        initialize_sim_stance(args, model, data, _bridge)
                     next_risk_tick = float(data.time)
                     manager.start_walkrun()
-                    print("[action_go_sim][shell] keyboard R -> reset + WALKRUN shell", flush=True)
+                    print("[action_go_sim][shell] keyboard Backspace -> reset + WALKRUN shell", flush=True)
                 elif ev == "start":
-                    arm_shell("keyboard S", remote_cfg.shell_start_action)
+                    arm_shell("keyboard Enter/Shift+S", remote_cfg.shell_start_action)
                 elif ev == "start_alt":
                     arm_shell("keyboard B", remote_cfg.shell_start_alt_action)
                 elif ev == "walkrun":
@@ -2054,19 +2421,22 @@ def run_simulation(args) -> int:
                     action_name = "ufo_tracking_zs7" if ev == "ufo_tracking" else "ufo_stand"
                     if not shell_armed:
                         print(
-                            f"[action_go_sim][keyboard] press S to ARM before starting {action_name}",
+                            f"[action_go_sim][keyboard] press Enter to ARM before starting {action_name}",
                             flush=True,
                         )
                     elif manager.action_running():
                         print(
-                            f"[action_go_sim][keyboard] stop the current action with W or P before starting {action_name}",
+                            f"[action_go_sim][keyboard] stop the current action with R+2+Shift+A or T+Shift+S before starting {action_name}",
                             flush=True,
                         )
                     else:
                         key_name = "T" if ev == "ufo_tracking" else "G"
                         start_action(action_name, f"keyboard {key_name}")
 
-            now_mask = remote.mask()
+            now_mask = (_bridge._joystick_mask_and_axes(consume_keyboard_events=True)[0]
+                        if isinstance(_bridge, NativeActionGoBridge) else remote.mask())
+            if now_mask != prev_mask:
+                args.session.event("remote_input", mask=now_mask, buttons=combo_name(now_mask))
             if combo_rising(now_mask, prev_mask, remote_cfg.damping_exit_combo):
                 print("[action_go_sim] damping exit requested", flush=True)
                 manager.shutdown(passive=True)
@@ -2114,11 +2484,16 @@ def run_simulation(args) -> int:
 
             if shell_armed and (risk_switch is None or risk_switch.state != "BFM"):
                 safety_tick()
-                if not manager.action_running():
-                    for binding in remote_cfg.bindings:
-                        if combo_rising(now_mask, prev_mask, binding.combo):
-                            start_action(binding.action, "remote")
-                            break
+            for binding in remote_cfg.bindings:
+                if not combo_rising(now_mask, prev_mask, binding.combo):
+                    continue
+                if not shell_armed:
+                    manager.notice(f"Press Enter to ARM before starting {binding.action}", "WARN")
+                elif manager.action_running():
+                    manager.notice(f"Already running {manager.active_action}; return to WALKRUN before switching", "WARN")
+                elif risk_switch is None or risk_switch.state != "BFM":
+                    start_action(binding.action, "remote")
+                break
 
             done = manager.poll_action_done()
             if done is not None:
@@ -2148,7 +2523,6 @@ def run_simulation(args) -> int:
         if args.record_video:
             out_path = Path(args.record_video).expanduser().resolve()
             out_path.parent.mkdir(parents=True, exist_ok=True)
-            record_renderer = mujoco.Renderer(model, height=int(args.record_height), width=int(args.record_width))
             record_camera = mujoco.MjvCamera()
             mujoco.mjv_defaultCamera(record_camera)
             record_camera.distance = 3.0
@@ -2168,12 +2542,14 @@ def run_simulation(args) -> int:
             print(f"[action_go_sim] recording video -> {out_path}", flush=True)
 
         def record_frame_if_needed(now: float):
-            nonlocal next_record_frame
-            if record_proc is None or record_renderer is None or record_camera is None:
+            nonlocal next_record_frame, record_renderer
+            if record_proc is None or record_camera is None:
                 return
             if now < next_record_frame:
                 return
             next_record_frame = now + 1.0 / max(1.0, float(args.record_fps))
+            if record_renderer is None:
+                record_renderer = mujoco.Renderer(model, height=int(args.record_height), width=int(args.record_width))
             if record_body_id >= 0:
                 record_camera.lookat[:] = data.xpos[record_body_id]
             record_renderer.update_scene(data, camera=record_camera)
@@ -2184,6 +2560,7 @@ def run_simulation(args) -> int:
                 print(f"[action_go_sim] record write failed: {e}", flush=True)
 
         def close_recorder():
+            nonlocal record_renderer, record_proc
             if record_proc is not None:
                 try:
                     if record_proc.stdin:
@@ -2194,16 +2571,21 @@ def run_simulation(args) -> int:
                         record_proc.kill()
                     except Exception:
                         pass
+                record_proc = None
             if record_renderer is not None:
                 try:
                     record_renderer.close()
                 except Exception:
                     pass
+                record_renderer = None
 
-        def run_loop(viewer=None):
-            nonlocal next_remote_tick, next_viewer_sync, auto_action_pending, next_state_log
+        control_status = manager.control_display()
+
+        def run_loop():
+            nonlocal next_remote_tick, auto_action_pending, next_state_log, control_status
             nonlocal next_risk_tick, risk_auto_requested
             nonlocal sequence_index, sequence_phase, sequence_deadline
+            nonlocal shell_armed, lie_action_active
             auto_arm_done = False
             auto_arm_alt_done = False
             next_step_time = time.perf_counter()
@@ -2219,16 +2601,22 @@ def run_simulation(args) -> int:
                     print(f"[action_go_sim][auto] exit after {args.auto_exit_sec:.2f}s", flush=True)
                     STOP.set()
                     break
-                if viewer is not None and not viewer.is_running():
-                    STOP.set()
-                    break
                 now = time.monotonic()
-                terminal_key = terminal_keys.poll()
-                if terminal_key in {"1", "v", "V"}:
-                    with keyboard_lock:
-                        keyboard_events.append("risk_switch" if terminal_key == "1" else "auto_action")
                 if hasattr(_bridge, "publish_lowstate"):
                     _bridge.publish_lowstate()
+                manager.advance_transitions()
+                if args.sequence and sequence_phase == "walkrun_starting":
+                    if manager.walkrun_running() and not manager.passive:
+                        sequence_phase = "walkrun"
+                        sequence_deadline = time.monotonic() + args.sequence_walkrun_sec
+                    elif manager.pending_walkrun is None:
+                        raise RuntimeError("WALKRUN failed to become ready during sequence")
+                elif args.sequence and sequence_phase == "action_starting":
+                    if manager.active_proc is not None and manager.active_action == args.sequence[sequence_index]:
+                        sequence_phase = "action"
+                        sequence_deadline = time.monotonic() + args.sequence_action_sec
+                    elif manager.pending_action is None:
+                        raise RuntimeError("sequence action failed to become ready: " + args.sequence[sequence_index])
                 if args.sequence and time.monotonic() >= sequence_deadline:
                     if sequence_phase == "walkrun":
                         tilt = tilt_deg_from_quat_wxyz(data.qpos[3:7])
@@ -2250,13 +2638,13 @@ def run_simulation(args) -> int:
                         action_name = args.sequence[sequence_index]
                         if not manager.start_action(action_name, source="sequence"):
                             raise RuntimeError("sequence failed to start " + action_name)
-                        sequence_phase = "action"
-                        sequence_deadline = time.monotonic() + args.sequence_action_sec
-                    else:
+                        sequence_phase = "action_starting"
+                        sequence_deadline = float("inf")
+                    elif sequence_phase == "action":
                         manager.stop_active(switch_mode="walkrun")
                         sequence_index += 1
-                        sequence_phase = "walkrun"
-                        sequence_deadline = time.monotonic() + args.sequence_walkrun_sec
+                        sequence_phase = "walkrun_starting"
+                        sequence_deadline = float("inf")
                     args.session.event("sequence_transition", phase=sequence_phase,
                                        index=sequence_index, policy=manager.active_action,
                                        sim_time=float(data.time), root_height=float(data.qpos[2]),
@@ -2277,13 +2665,6 @@ def run_simulation(args) -> int:
                                        root_velocity=data.qvel[:6].tolist(),
                                        tilt_deg=tilt_deg_from_quat_wxyz(root_quat),
                                        contact_count=int(data.ncon), control_state=state, policy=policy)
-                    print(
-                        f"[action_go_sim][state] sim_t={float(data.time):.3f} "
-                        f"root_pos={np.asarray(data.qpos[:3]).round(4).tolist()} "
-                        f"tilt={tilt_deg_from_quat_wxyz(root_quat):.2f}deg "
-                        f"ncon={int(data.ncon)} action={manager.active_action or '-'}",
-                        flush=True,
-                    )
                 if now >= next_remote_tick:
                     next_remote_tick = now + max(0.005, float(args.remote_period_sec))
                     remote_tick()
@@ -2313,22 +2694,25 @@ def run_simulation(args) -> int:
                         manager.stop_active(switch_mode="none")
                         manager.start_walkrun()
                 if not paused:
-                    should_step = True
-                    if manager.passive:
-                        manager.apply_passive(data)
-                    elif hasattr(_bridge, "apply_command"):
-                        should_step = bool(_bridge.apply_command())
-                    if should_step:
-                        mujoco.mj_step(model, data)
-                        if not np.isfinite(data.qpos).all() or not np.isfinite(data.qvel).all():
-                            raise RuntimeError("non-finite MuJoCo state")
-                if manager.walkrun_proc is not None and manager.walkrun_proc.poll() is not None:
-                    raise RuntimeError("WALKRUN player exited unexpectedly")
-                args.session.render(*manager.control_display())
+                    with state_lock:
+                        should_step = True
+                        if manager.passive:
+                            manager.apply_passive(data)
+                        elif hasattr(_bridge, "apply_command"):
+                            should_step = bool(_bridge.apply_command())
+                        if should_step:
+                            if viewer is not None:
+                                viewer.apply_perturbation()
+                            mujoco.mj_step(model, data)
+                            if not np.isfinite(data.qpos).all() or not np.isfinite(data.qvel).all():
+                                raise RuntimeError("non-finite MuJoCo state")
+                if manager.poll_walkrun_failure():
+                    shell_armed = False
+                    lie_action_active = False
+                    reset_safety_state()
+                control_status = manager.control_display()
+                args.session.render(*control_status)
                 record_frame_if_needed(now)
-                if viewer is not None and now >= next_viewer_sync:
-                    next_viewer_sync = now + 1.0 / max(1.0, float(args.viewer_hz))
-                    viewer.sync()
                 if not args.no_realtime:
                     current_time = time.perf_counter()
                     if paused or current_time - next_step_time > 0.1:
@@ -2341,29 +2725,67 @@ def run_simulation(args) -> int:
                     if sleep_time > 0:
                         time.sleep(sleep_time)
 
-        print(
-            "[action_go_sim] viewer keys: SPACE pause, R reset, S ARM, "
-            "B alternate ARM, T UFO tracking, G UFO stand, V replay auto-action, "
-            "W WALKRUN, P PASSIVE",
-            flush=True,
-        )
+        def run_interactive():
+            failures = []
+
+            def physics_loop():
+                try:
+                    run_loop()
+                except BaseException as error:
+                    failures.append(error)
+                finally:
+                    close_recorder()
+                    STOP.set()
+
+            physics = threading.Thread(target=physics_loop, name="mujoco-physics")
+            physics.start()
+            next_frame = time.perf_counter()
+            next_metrics = next_frame + 1
+            last_frames = 0
+            metrics_started = next_frame
+            try:
+                while not STOP.is_set():
+                    viewer.poll_events()
+                    if not viewer.is_running():
+                        break
+                    state, policy, _ = control_status
+                    focused = viewer.glfw.get_window_attrib(viewer.window, viewer.glfw.FOCUSED)
+                    input_status = ("ARMED" if shell_armed else "Enter to ARM") if focused else "Click window to control"
+                    viewer.set_texts([(mujoco.mjtFontScale.mjFONTSCALE_150, mujoco.mjtGridPos.mjGRID_TOPLEFT,
+                                       f"ActionGo | {state}",
+                                       f"{policy or '--'}\n{viewer.render_backend.upper()} | {viewer.fps:.0f} FPS\n"
+                                       f"Input: {input_status}\nKey: {last_keyboard_input}\n"
+                                       "WASD move | Q/E turn | Backspace reset")])
+                    viewer.sync()
+                    now = time.perf_counter()
+                    if now >= next_metrics:
+                        args.session.event("viewer_timing", backend=viewer.render_backend,
+                                           fps=(viewer.presented_count - last_frames) / (now - metrics_started),
+                                           render_ms=viewer.render_ms, present_ms=viewer.present_ms)
+                        last_frames = viewer.presented_count
+                        metrics_started = now
+                        next_metrics = now + 1
+                    next_frame += 1.0 / max(1.0, float(args.viewer_hz))
+                    if next_frame < now:
+                        next_frame = now
+                    STOP.wait(max(0, next_frame - now))
+            finally:
+                STOP.set()
+                physics.join()
+            if failures:
+                raise failures[0]
+
+        print("[action_go_sim] keyboard: Shift+A=A, B=B, X=X, Y=Y, arrows, R+1=R1, L+1=L1, "
+              "R+2=R2, L+2=L2, F+1=F1, F+2=F2, Shift+S/Enter=Start, T=Select; W/A/S/D move, Q/E turn; "
+              "Backspace reset, Space pause", flush=True)
         try:
-            with TerminalKeys() as terminal_keys:
-                if args.headless:
-                    run_loop(None)
-                else:
-                    if mujoco_viewer is None:
-                        raise RuntimeError("mujoco.viewer is unavailable; use --headless")
-                    with mujoco_viewer.launch_passive(model, data, key_callback=key_callback) as viewer:
-                        viewer.cam.distance = 3.0
-                        viewer.cam.elevation = -10.0
-                        viewer.cam.azimuth = 180.0
-                        viewer.cam.trackbodyid = 1
-                        viewer.cam.type = mujoco.mjtCamera.mjCAMERA_TRACKING
-                        run_loop(viewer)
+            if args.headless:
+                run_loop()
+            else:
+                run_interactive()
         finally:
             close_recorder()
-            manager.shutdown(passive=True)
+            manager.shutdown(passive=True, wait=True)
         return 0
     except KeyboardInterrupt:
         STOP.set()
@@ -2374,7 +2796,11 @@ def run_simulation(args) -> int:
         return 1
     finally:
         if manager is not None:
-            manager.shutdown(passive=True)
+            manager.shutdown(passive=True, wait=True)
+        if perception is not None:
+            perception.close()
+        if viewer is not None:
+            viewer.close()
 
 
 if __name__ == "__main__":

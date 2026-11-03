@@ -14,7 +14,7 @@ actions:
     hlqk:
       safety_enable: true
       params: config/generic_beyondmimic.yaml
-      model: model/paoxiao.onnx
+      model: model/hlqk.onnx
       max_frames: 3000
       postrun_handoff_hold: true
       switch_back_overlap_sec: 0.30

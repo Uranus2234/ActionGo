@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import contextlib
+from collections import deque
 import json
 import math
 import os
+import queue
 import shutil
 import sys
 import tempfile
+import threading
 import time
 from pathlib import Path
 
@@ -23,6 +26,84 @@ MOTOR_NAMES = (
     "right_shoulder_yaw_joint", "right_elbow_joint", "right_wrist_roll_joint", "right_wrist_pitch_joint",
     "right_wrist_yaw_joint",
 )
+
+
+KEYBOARD_REMOTE_BUTTONS = (
+    "R+1", "L+1", "Shift+S / Enter", "T", "R+2", "L+2", "F+1", "F+2",
+    "Shift+A", "B", "X", "Y", "Up", "Right", "Down", "Left",
+)
+
+
+def keyboard_combo_name(mask: int) -> str:
+    return "+".join("Shift+S" if button == 2 else name
+                    for button, name in enumerate(KEYBOARD_REMOTE_BUTTONS)
+                    if mask & (1 << button)) or "None"
+
+
+def keyboard_remote_input(keys: set[int]) -> tuple[int, list[float]]:
+    keys = {ord(chr(key).lower()) if ord("A") <= key <= ord("Z") else key for key in keys}
+    shifted = bool(keys & {340, 344})
+    button_keys = {
+        ord("b"): 9, ord("x"): 10, ord("y"): 11,
+        265: 12, 262: 13, 264: 14, 263: 15,
+        257: 2, ord("t"): 3,
+    }
+    mask = sum(1 << button for key, button in button_keys.items() if key in keys)
+    if shifted and ord("a") in keys:
+        mask |= 1 << 8
+    if shifted and ord("s") in keys:
+        mask |= 1 << 2
+    if ord("r") in keys and ord("1") in keys:
+        mask |= 1 << 0
+    if ord("l") in keys and ord("1") in keys:
+        mask |= 1 << 1
+    if ord("r") in keys and ord("2") in keys:
+        mask |= 1 << 4
+    if ord("l") in keys and ord("2") in keys:
+        mask |= 1 << 5
+    if ord("f") in keys and ord("1") in keys:
+        mask |= 1 << 6
+    if ord("f") in keys and ord("2") in keys:
+        mask |= 1 << 7
+    movement = keys - {ord("a"), ord("s")} if shifted else keys
+    forward = float(ord("w") in movement) - 0.3 * float(ord("s") in movement)
+    lateral = float(ord("d") in movement) - float(ord("a") in movement)
+    yaw = float(ord("e") in movement) - float(ord("q") in movement)
+    if ord("w") in movement and ord("s") in movement:
+        forward = 0.0
+    if ord("a") in movement and ord("d") in movement:
+        lateral = 0.0
+    if ord("q") in movement and ord("e") in movement:
+        yaw = 0.0
+    return mask, [lateral, 0.0, yaw, forward]
+
+
+class KeyboardRemoteInput:
+    def __init__(self):
+        self.keys: set[int] = set()
+        self.transitions: deque[int] = deque(maxlen=64)
+
+    def set_key(self, key: int, pressed: bool):
+        if ord("A") <= key <= ord("Z"):
+            key += ord("a") - ord("A")
+        previous, _ = self.sample()
+        if pressed:
+            self.keys.add(key)
+        else:
+            self.keys.discard(key)
+        current, _ = self.sample()
+        if current != previous:
+            self.transitions.append(current)
+
+    def sample(self) -> tuple[int, list[float]]:
+        return keyboard_remote_input(self.keys)
+
+    def consume_buttons(self) -> int:
+        return self.transitions.popleft() if self.transitions else self.sample()[0]
+
+    def clear(self):
+        self.keys.clear()
+        self.transitions.clear()
 
 
 def walkrun_pose_accepted(height: float, tilt: float, minimum_height: float, maximum_tilt: float) -> bool:
@@ -92,6 +173,9 @@ class SimSession:
         self.last_line = 0.0
         self.last_state = None
         self.result = 0
+        self.pending = queue.Queue()
+        self.writer_error = None
+        self.writer = threading.Thread(target=self.write_pending, name="sim2sim-logs")
         self.session_fields = {}
         self.events = (self.directory / "events.jsonl").open("a", buffering=1)
         self.readable = (self.directory / "events.log").open("a", buffering=1)
@@ -111,17 +195,45 @@ class SimSession:
         if self.mode != "debug":
             self.redirects.enter_context(contextlib.redirect_stdout(self.output))
             self.redirects.enter_context(contextlib.redirect_stderr(self.output))
+        self.writer.start()
         return self
 
     def event(self, event: str, level: str = "INFO", **fields):
         record = dict(event=event, level=level, pid=os.getpid(), run_id=self.directory.name,
                       t_unix_ns=time.time_ns(), t_steady_ns=time.monotonic_ns(), **fields)
+        if threading.current_thread() is self.writer:
+            self.write_event(record)
+        else:
+            self.pending.put(("event", record))
+
+    def write_event(self, record):
+        fields = {key: value for key, value in record.items()
+                  if key not in {"event", "level", "pid", "run_id", "t_unix_ns", "t_steady_ns"}}
         self.events.write(json.dumps(record) + "\n")
-        self.readable.write(time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()) +
-                            f" {level} {event} " + json.dumps(fields) + "\n")
+        self.readable.write(time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(record["t_unix_ns"] / 1e9)) +
+                            f" {record['level']} {record['event']} " + json.dumps(fields) + "\n")
+
+    def write_pending(self):
+        while True:
+            item = self.pending.get()
+            if item is None:
+                return
+            kind, payload = item
+            try:
+                if kind == "event":
+                    self.write_event(payload)
+                elif kind == "notice":
+                    self.write_notice(*payload)
+                else:
+                    self.write_display(*payload)
+            except Exception as error:
+                self.writer_error = error
 
     def notice(self, message: str, level: str = "INFO"):
         self.event("console_notice", level, message=message)
+        self.pending.put(("notice", (message, level)))
+
+    def write_notice(self, message: str, level: str):
         if self.drawn:
             self.console.write("\033[4A\033[J")
             self.drawn = False
@@ -133,6 +245,10 @@ class SimSession:
         if now - self.last_render < 0.2:
             return
         self.last_render = now
+        self.pending.put(("display", (state, policy, timing_path)))
+
+    def write_display(self, state: str, policy: str, timing_path: str):
+        now = time.monotonic()
         changed = (state, policy) != self.last_state
         if changed:
             self.event("display_state_changed", control_state=state, policy=policy)
@@ -174,6 +290,12 @@ class SimSession:
             self.notice(str(exception), "ERROR")
         ok = exception is None and self.result == 0
         self.event("session_finished", "INFO" if ok else "ERROR", ok=ok, exit_code=self.result)
+        self.pending.put(None)
+        self.writer.join()
+        if self.writer_error is not None:
+            ok = False
+            self.result = self.result or 1
+            self.console.write(f"ERROR Session log writer failed: {self.writer_error}\n")
         (self.directory / "summary.json").write_text(json.dumps(dict(clean_shutdown=ok, exit_code=self.result)) + "\n")
         self.redirects.close()
         if self.drawn:

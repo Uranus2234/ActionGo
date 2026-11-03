@@ -148,6 +148,7 @@ struct Args {
   float kd_max{20.f};
   std::string logdir;
   std::string net{"enP8p1s0"};
+  int domain_id{0};
   std::string cmd_topic{"rt/user_lowcmd"};
   std::string state_topic{"rt/lowstate"};
   std::string torso_imu_topic{"rt/secondary_imu"};
@@ -242,6 +243,7 @@ Args parse_args(int argc, char** argv) {
     else if (k == "--kd-max") a.kd_max = std::stof(need_arg(i, argc, argv, k));
     else if (k == "--logdir") a.logdir = need_arg(i, argc, argv, k);
     else if (k == "--net") a.net = need_arg(i, argc, argv, k);
+    else if (k == "--domain-id") a.domain_id = std::stoi(need_arg(i, argc, argv, k));
     else if (k == "--cmd-topic") a.cmd_topic = need_arg(i, argc, argv, k);
     else if (k == "--state-topic") a.state_topic = need_arg(i, argc, argv, k);
     else if (k == "--torso-imu-topic") a.torso_imu_topic = need_arg(i, argc, argv, k);
@@ -319,6 +321,7 @@ Args parse_args(int argc, char** argv) {
                 << "  --check-only | --dry-run | --camera-check | --dds-dry-run | --depth-camera-check-only\n"
                 << "  --depth-camera-check-only --require-depth-camera checks RealSense presence/frames without DDS/UserCtrl\n"
                 << "  --require-torso-imu waits for rt/secondary_imu and uses torso IMU like official instinct_onboard\n"
+                << "  --domain-id ID selects the DDS domain (default 0)\n"
                 << "  --cold-start-before-policy runs the official ColdStartAgent-style transition before parkour/stand\n"
                 << "  --standdir PATH --stand-until-l1 starts with the official stand policy; L1 switches to parkour\n"
                 << "  --ready-file PATH --start-file PATH enables action_go prestart handoff to remove UserCtrl vacuum\n"
@@ -328,6 +331,7 @@ Args parse_args(int argc, char** argv) {
       throw std::runtime_error("unknown arg: " + k);
     }
   }
+  if (a.domain_id < 0 || a.domain_id > 232) throw std::runtime_error("--domain-id must be in [0,232]");
   if (a.logdir.empty() && !a.depth_camera_check_only) throw std::runtime_error("--logdir is required");
   if (a.variant == "php" && (a.command_index < 0 || a.command_index >= 15)) throw std::runtime_error("PHP command index must be in [0,14]");
   if (a.depth_camera_check_only) { a.depth_source = "realsense"; a.require_depth_camera = true; }
@@ -1343,7 +1347,7 @@ class UnitreeDDS {
     if (!args_.trace_file.empty()) {
       command_trace_ = std::make_unique<action_go::runtime::AsyncTraceWriter>(args_.trace_file + ".lowcmd.yaml");
     }
-    unitree::robot::ChannelFactory::Instance()->Init(0, args_.net);
+    unitree::robot::ChannelFactory::Instance()->Init(args_.domain_id, args_.net);
     if (publish_enabled_) { publisher_.reset(new unitree::robot::ChannelPublisher<LowCmd>(args_.cmd_topic)); publisher_->InitChannel(); }
     subscriber_ = unitree::robot::ChannelFactory::Instance()->CreateRecvChannel<LowState>(
         args_.state_topic, std::bind(&UnitreeDDS::on_low_state, this, std::placeholders::_1), 1);

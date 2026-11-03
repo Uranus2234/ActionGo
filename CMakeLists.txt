@@ -847,6 +847,10 @@ if(BUILD_TESTING AND TARGET generic_policy_player)
     add_test(NAME pbfm_depth_test COMMAND ${Python3_EXECUTABLE}
       ${CMAKE_CURRENT_SOURCE_DIR}/runtime/tests/pbfm_depth_test.py
       --preprocessor $<TARGET_FILE:depth_image_preprocess>)
+    add_test(NAME sim2sim_perception_test COMMAND ${Python3_EXECUTABLE}
+      ${CMAKE_CURRENT_SOURCE_DIR}/runtime/tests/sim2sim_perception_test.py
+      --preprocessor $<TARGET_FILE:depth_image_preprocess>)
+    set_tests_properties(sim2sim_perception_test PROPERTIES SKIP_RETURN_CODE 77)
     add_test(NAME pbfm_keyboard_test COMMAND ${Python3_EXECUTABLE}
       ${CMAKE_CURRENT_SOURCE_DIR}/runtime/tests/pbfm_keyboard_test.py)
     if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/actions/pbfm/model/policy.onnx" AND

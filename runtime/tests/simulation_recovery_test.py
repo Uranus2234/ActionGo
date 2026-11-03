@@ -50,7 +50,11 @@ class Manager:
         self.start_success = True
         self.starts = []
         self.events = []
+        self.notices = []
         self.actions = {"unsafe_motion": SimpleNamespace(safety_enable=False)}
+
+    def notice(self, message, level="INFO"):
+        self.notices.append((level, message))
 
     def action_running(self):
         return self.running
@@ -109,6 +113,7 @@ class SimulationRecoveryTest(unittest.TestCase):
         self.sample.tilt_deg = 29.9
         self.arm("Start", "bfm_zero_stand")
         self.assertEqual(self.manager.starts, [])
+        self.assertEqual(self.manager.notices, [("INFO", "ARMED | policy bindings enabled")])
         self.sample.tilt_deg = 30.0
         self.arm("Left+B", "ufo_stand")
         self.assertEqual(self.manager.starts, ["ufo_stand"])

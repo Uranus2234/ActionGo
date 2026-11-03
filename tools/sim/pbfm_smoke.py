@@ -12,6 +12,7 @@ import yaml
 
 from action_go_sim_remote import NativeActionGoBridge
 from pbfm_depth import DepthHistory, DepthPublisher, MujocoDepthCamera
+from mujoco_keyboard_viewer import KeyboardViewer
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -90,147 +91,6 @@ class KeyboardBridge(PbfmSimulationBridge):
                     f"  turn_axis={self.turn:+.2f}\nactual speed={actual_speed:.2f} m/s")
 
 
-class KeyboardViewer:
-    def __init__(self, model, data, bridge):
-        import glfw
-
-        self.glfw = glfw
-        self.model, self.data, self.bridge = model, data, bridge
-        if not glfw.init():
-            raise RuntimeError("GLFW initialization failed")
-        self.window = glfw.create_window(1280, 800, "ActionGo P-BFM | Hold keys to move", None, None)
-        if not self.window:
-            glfw.terminate()
-            raise RuntimeError("MuJoCo keyboard window creation failed")
-        glfw.make_context_current(self.window)
-        glfw.swap_interval(0)
-        self.cam = mujoco.MjvCamera()
-        self.option = mujoco.MjvOption()
-        self.perturb = mujoco.MjvPerturb()
-        self.scene = mujoco.MjvScene(model, maxgeom=10000)
-        self.context = mujoco.MjrContext(model, mujoco.mjtFontScale.mjFONTSCALE_150)
-        self.texts = []
-        self.last_cursor = None
-        self.last_click_time = -1.0
-        self.last_click_position = None
-        glfw.set_key_callback(self.window, lambda window, key, scancode, action, mods:
-                              bridge.key_event(key, action != glfw.RELEASE))
-        glfw.set_window_focus_callback(self.window, self.focus_changed)
-        glfw.set_mouse_button_callback(self.window, self.mouse_button)
-        glfw.set_cursor_pos_callback(self.window, self.mouse_move)
-        glfw.set_scroll_callback(self.window, lambda window, horizontal, vertical:
-                                 mujoco.mjv_moveCamera(model, mujoco.mjtMouse.mjMOUSE_ZOOM,
-                                                       0, -0.05 * vertical, self.scene, self.cam))
-
-    def focus_changed(self, window, focused):
-        if not focused:
-            self.bridge.clear_keys()
-            self.perturb.active = 0
-            self.data.xfrc_applied[:] = 0
-            self.last_cursor = None
-
-    def select_body(self, horizontal, vertical):
-        width, height = self.glfw.get_window_size(self.window)
-        if width <= 0 or height <= 0:
-            return
-        point = np.zeros(3, dtype=np.float64)
-        geom_id = np.full(1, -1, dtype=np.int32)
-        flex_id = np.full(1, -1, dtype=np.int32)
-        skin_id = np.full(1, -1, dtype=np.int32)
-        body_id = mujoco.mjv_select(self.model, self.data, self.option, width / height,
-                                   horizontal / width, 1 - vertical / height, self.scene,
-                                   point, geom_id, flex_id, skin_id)
-        self.perturb.active = 0
-        self.perturb.select = max(0, body_id)
-        self.perturb.skinselect = int(skin_id[0])
-        if body_id > 0:
-            rotation = self.data.xmat[body_id].reshape(3, 3)
-            self.perturb.localpos[:] = rotation.T @ (point - self.data.xpos[body_id])
-
-    def mouse_button(self, window, button, action, mods):
-        glfw = self.glfw
-        if action == glfw.RELEASE:
-            self.perturb.active = 0
-            self.data.xfrc_applied[:] = 0
-            return
-        horizontal, vertical = glfw.get_cursor_pos(window)
-        self.last_cursor = (horizontal, vertical)
-        control = bool(mods & glfw.MOD_CONTROL)
-        now = glfw.get_time()
-        double_click = (button == glfw.MOUSE_BUTTON_LEFT and self.last_click_position is not None and
-                        now - self.last_click_time < 0.3 and
-                        np.hypot(horizontal - self.last_click_position[0],
-                                 vertical - self.last_click_position[1]) < 5)
-        if button == glfw.MOUSE_BUTTON_LEFT:
-            self.last_click_time = now
-            self.last_click_position = (horizontal, vertical)
-        if double_click or control and button in (glfw.MOUSE_BUTTON_LEFT, glfw.MOUSE_BUTTON_RIGHT):
-            self.select_body(horizontal, vertical)
-        if control and self.perturb.select > 0:
-            if button == glfw.MOUSE_BUTTON_LEFT:
-                self.perturb.active = mujoco.mjtPertBit.mjPERT_ROTATE
-            elif button == glfw.MOUSE_BUTTON_RIGHT:
-                self.perturb.active = mujoco.mjtPertBit.mjPERT_TRANSLATE
-            if self.perturb.active:
-                mujoco.mjv_initPerturb(self.model, self.data, self.scene, self.perturb)
-
-    def apply_perturbation(self):
-        self.data.xfrc_applied[:] = 0
-        if self.perturb.active:
-            mujoco.mjv_applyPerturbForce(self.model, self.data, self.perturb)
-
-    def mouse_move(self, window, horizontal, vertical):
-        previous = self.last_cursor
-        self.last_cursor = (horizontal, vertical)
-        if previous is None:
-            return
-        height = max(1, self.glfw.get_window_size(window)[1])
-        if self.perturb.active:
-            shifted = any(self.glfw.get_key(window, key) == self.glfw.PRESS
-                          for key in (self.glfw.KEY_LEFT_SHIFT, self.glfw.KEY_RIGHT_SHIFT))
-            if self.perturb.active == mujoco.mjtPertBit.mjPERT_TRANSLATE:
-                action = mujoco.mjtMouse.mjMOUSE_MOVE_H if shifted else mujoco.mjtMouse.mjMOUSE_MOVE_V
-            else:
-                action = mujoco.mjtMouse.mjMOUSE_ROTATE_H if shifted else mujoco.mjtMouse.mjMOUSE_ROTATE_V
-            mujoco.mjv_movePerturb(self.model, self.data, action,
-                                  (horizontal - previous[0]) / height,
-                                  (vertical - previous[1]) / height, self.scene, self.perturb)
-            return
-        if self.glfw.get_mouse_button(window, self.glfw.MOUSE_BUTTON_LEFT) != self.glfw.PRESS:
-            return
-        mujoco.mjv_moveCamera(self.model, mujoco.mjtMouse.mjMOUSE_ROTATE_V,
-                             (horizontal - previous[0]) / height,
-                             (vertical - previous[1]) / height, self.scene, self.cam)
-
-    def poll_events(self):
-        self.glfw.poll_events()
-
-    def is_running(self):
-        return not self.glfw.window_should_close(self.window)
-
-    def set_texts(self, texts):
-        self.texts = texts
-
-    def sync(self):
-        self.glfw.make_context_current(self.window)
-        width, height = self.glfw.get_framebuffer_size(self.window)
-        if width <= 0 or height <= 0:
-            return
-        viewport = mujoco.MjrRect(0, 0, width, height)
-        mujoco.mjv_updateScene(self.model, self.data, self.option, self.perturb, self.cam,
-                              mujoco.mjtCatBit.mjCAT_ALL, self.scene)
-        mujoco.mjr_render(viewport, self.scene, self.context)
-        for font_scale, position, title, text in self.texts:
-            mujoco.mjr_overlay(mujoco.mjtFont.mjFONT_NORMAL, position, viewport, title, text, self.context)
-        self.glfw.swap_buffers(self.window)
-
-    def close(self):
-        self.bridge.clear_keys()
-        self.perturb.active = 0
-        self.data.xfrc_applied[:] = 0
-        self.context.free()
-        self.glfw.destroy_window(self.window)
-        self.glfw.terminate()
 
 
 def configure_camera(camera):
@@ -571,7 +431,7 @@ def main():
                          "ActionGo P-BFM | " + ("RUNNING" if started is not None else
                                                 "READY - ENTER to start" if ready.exists() else "Loading policy..."),
                          "HOLD W/S move | A/D turn | Q/E sidestep\nRELEASE to stop | SPACE stop | X exit\n"
-                         "Double-click select | CTRL+RMB drag | CTRL+LMB rotate | SHIFT horizontal\n" + bridge.status())])
+                         "Double-click select | CTRL+LMB drag | CTRL+RMB rotate | SHIFT horizontal\n" + bridge.status())])
                 viewer.sync()
                 next_viewer_time = now + 1 / 30
             deadline += model.opt.timestep

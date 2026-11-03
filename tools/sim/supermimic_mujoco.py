@@ -209,7 +209,7 @@ def runtime_spec(package, log_dir, trace=False):
 
     source = package / "generic_supermimic.yaml"
     if not source.is_file():
-        source = ACTION_GO_ROOT / "actions/supermimic/config/generic_supermimic.yaml"
+        source = ACTION_GO_ROOT / "actions/tracking/supermimic/config/generic_supermimic.yaml"
     spec = yaml.safe_load(source.read_text())
     spec.setdefault("runtime", {}).update(duration_sec=0, publish_hz=500)
     spec.setdefault("robot", {})["params"] = str(package / "SuperMimic.yaml")

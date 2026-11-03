@@ -10,7 +10,7 @@ import yaml
 
 
 ROOT = Path(__file__).resolve().parents[2]
-PACKAGE = ROOT / "actions/mjlab_combat"
+PACKAGE = ROOT / "actions/tracking/mjlab_combat"
 
 
 def wait_file(path, process, log):
@@ -26,7 +26,7 @@ def run(player):
     bindings = yaml.safe_load((ROOT / "config/remote_actions.yaml").read_text())["bindings"]
     actions = yaml.safe_load((PACKAGE / "mjlab_combat.yaml").read_text())["actions"]["generic_motion_tracking"]
     registry = yaml.safe_load((ROOT / "config/motion_actions.yaml").read_text())
-    assert registry["action_files"]["mjlab_combat"] == "actions/mjlab_combat/mjlab_combat.yaml"
+    assert registry["action_files"]["mjlab_combat"] == "actions/tracking/mjlab_combat/mjlab_combat.yaml"
     assert not any("allmimic" in action for action in bindings.values())
     assert manifest["iteration"] == 92000
     for asset in (manifest["model"], manifest["params"], *manifest["motions"].values()):

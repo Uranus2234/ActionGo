@@ -12,8 +12,8 @@ ROOT = Path(__file__).resolve().parents[2]
 def main():
     parser = argparse.ArgumentParser(description="Import the official P-BFM public-demo inference package")
     parser.add_argument("--source", type=Path, required=True)
-    parser.add_argument("--output", type=Path, default=ROOT / "actions/pbfm")
-    parser.add_argument("--hardware-params", type=Path, default=ROOT / "actions/ufo/config/UFO.yaml")
+    parser.add_argument("--output", type=Path, default=ROOT / "actions/perception/pbfm")
+    parser.add_argument("--hardware-params", type=Path, default=ROOT / "actions/tracking/ufo/config/UFO.yaml")
     args = parser.parse_args()
     config = json.loads((args.source / "config.json").read_text())
     contexts = json.loads((args.source / "contexts.json").read_text())

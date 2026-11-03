@@ -59,15 +59,15 @@ def parse_args(argv=None):
                    help="MuJoCo XML for --bridge native")
     p.add_argument("--player", default=str(ACTION_GO_ROOT / "build/generic_composite_policy_player"))
     p.add_argument("--action", default="",
-                   help="OmniXtreme action name from actions/omnixtreme/*.yaml, e.g. omni_motion_default or omni_seg04_wbst_stand")
-    p.add_argument("--action-yaml", default=str(ACTION_GO_ROOT / "actions/omnixtreme/omnixtreme.yaml"),
+                   help="OmniXtreme action name from actions/tracking/omnixtreme/*.yaml, e.g. omni_motion_default or omni_seg04_wbst_stand")
+    p.add_argument("--action-yaml", default=str(ACTION_GO_ROOT / "actions/tracking/omnixtreme/omnixtreme.yaml"),
                    help="Root OmniXtreme action YAML used by --action")
-    p.add_argument("--base-model", "--model", dest="base_model", default=str(ACTION_GO_ROOT / "actions/omnixtreme/model/base_policy_trt.onnx"))
-    p.add_argument("--residual-model", default=str(ACTION_GO_ROOT / "actions/omnixtreme/model/residual_policy.onnx"))
-    p.add_argument("--fk-model", default=str(ACTION_GO_ROOT / "actions/omnixtreme/model/fk_trt.onnx"))
-    p.add_argument("--spec", default=str(ACTION_GO_ROOT / "actions/omnixtreme/config/generic_omnixtreme.yaml"))
-    p.add_argument("--params", default=str(ACTION_GO_ROOT / "actions/omnixtreme/config/OmniXtreme.yaml"))
-    p.add_argument("--motion", default=str(ACTION_GO_ROOT / "actions/omnixtreme/motions/motion.npz"))
+    p.add_argument("--base-model", "--model", dest="base_model", default=str(ACTION_GO_ROOT / "actions/tracking/omnixtreme/model/base_policy_trt.onnx"))
+    p.add_argument("--residual-model", default=str(ACTION_GO_ROOT / "actions/tracking/omnixtreme/model/residual_policy.onnx"))
+    p.add_argument("--fk-model", default=str(ACTION_GO_ROOT / "actions/tracking/omnixtreme/model/fk_trt.onnx"))
+    p.add_argument("--spec", default=str(ACTION_GO_ROOT / "actions/tracking/omnixtreme/config/generic_omnixtreme.yaml"))
+    p.add_argument("--params", default=str(ACTION_GO_ROOT / "actions/tracking/omnixtreme/config/OmniXtreme.yaml"))
+    p.add_argument("--motion", default=str(ACTION_GO_ROOT / "actions/tracking/omnixtreme/motions/motion.npz"))
     p.add_argument("--duration-sec", type=float, default=0.0, help="0 means run until viewer is closed/player exits/motion ends")
     p.add_argument("--max-frames", type=int, default=None,
                    help="Stop C++ player after N policy frames; default 500, or action max_frames when --action is used; 0 means full motion")

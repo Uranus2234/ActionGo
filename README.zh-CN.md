@@ -39,7 +39,7 @@ python3 tools/assets/check_model_assets.py --policy bfm0  # 严格检查已安�
 python3 tools/assets/check_model_assets.py --installed-only
 ./build/policy_spec_schema_check --all --allow-missing-assets
 ./build/policy_spec_schema_check --all --installed-only
-./build/policy_spec_schema_check --spec actions/bfm0/config/generic_bfm_zero.yaml
+./build/policy_spec_schema_check --spec actions/tracking/bfm0/config/generic_bfm_zero.yaml
 ACTION_GO_NET=lo tools/launch/start_dry_run.sh
 ```
 
@@ -51,7 +51,7 @@ ACTION_GO_NET=lo tools/launch/start_dry_run.sh
 以 Unitree mjlab 替代 WALKRUN，支持连续策略切换和状态/当前 E2E 显示。
 环境配置、资产路径与验证范围见 [统一 sim2sim](docs/sim2sim.md)。
 
-新增 [四模型 154k 格斗动作包](actions/fighting154k/README.md)：固定使用已播放对比的
+新增 [四模型 154k 格斗动作包](actions/tracking/fighting154k/README.md)：固定使用已播放对比的
 154000 轮 SuperMimic-Reproduced / AllMimic、各自带 Omni 15% / 不带 Omni 四个模型。
 `R1+Y/X/B` 播放 051/Ma，`R1+上/左/右` 播放功夫侧踢，模型顺序相同。
 `R1+A/下` 使用 SuperMimic 带 Omni 模型，分别播放 wbst_motive / yewendun。
@@ -59,8 +59,8 @@ ACTION_GO_NET=lo tools/launch/start_dry_run.sh
 所有动作沿用 ready/start/complete/release 握手，正常结束自动回官方 walkrun。
 
 Uni-SuperMimic 使用独立的 `uni_supermimic` variant，动作名为 `uni_supermimic_tracking`。
-20 万轮模型的本地导出、MuJoCo 推理与接口说明见 [Uni-SuperMimic 适配](actions/uni_supermimic/README.md)。
-当前 `Right+A/B` 已切换为 [AllMimic](actions/allmimic/README.md) 的
+20 万轮模型的本地导出、MuJoCo 推理与接口说明见 [Uni-SuperMimic 适配](actions/tracking/uni_supermimic/README.md)。
+当前 `Right+A/B` 已切换为 [AllMimic](actions/tracking/allmimic/README.md) 的
 `allmimic_paoxiao` / `allmimic_paoxiao_no_omni`，分别使用带 Omni / 不带 Omni 的
 159000 轮权重，均跟踪 paoxiao。
 Uni-SuperMimic 动作保留，可修改映射切回。
@@ -119,11 +119,11 @@ UDP 群控默认关闭并默认绑定 `127.0.0.1`。空地址、wildcard、非 l
 
 作者已经在 Unitree G1 真机上完成过运行测试；公开版本暂未附每个 adapter 的原始事件日志、固件/SDK manifest 和故障注入记录。英文主页的动作矩阵按已公开证据标注，未归档的项目保留 `Not documented`，不等同于安全认证或所有异常路径验证。
 
-SONIC 当前动作默认使用 v1.1，原版配置仍保留；v1.1 的官方 replay 和板载验收、PHP 真机阶梯验收仍待完成。Bridge/HandoffGuard 开发功能保留，需要另行提供风险模型。详见 [SONIC](actions/sonic/README.md)、[PHP](actions/php/README.md)、[mjlab](actions/mjlab/README.md) 和 [风险切换预览](docs/risk_switch_preview.md)。
+SONIC 当前动作默认使用 v1.1，原版配置仍保留；v1.1 的官方 replay 和板载验收、PHP 真机阶梯验收仍待完成。Bridge/HandoffGuard 开发功能保留，需要另行提供风险模型。详见 [SONIC](actions/tracking/sonic/README.md)、[PHP](actions/perception/php/README.md)、[MJLab](actions/proprio/mjlab/README.md) 和 [风险切换预览](docs/risk_switch_preview.md)。
 
 ## 开发者入口
 
-[P-BFM](actions/pbfm/README.md) 支持真实深度摇杆行走、离线 tracking 和 Pico UDP 全身遥操；
+[P-BFM](actions/perception/pbfm/README.md) 支持真实深度摇杆行走、离线 tracking 和 Pico UDP 全身遥操；
 文本 context 随配置提供，ONNX 通过公开模型目录导入，适用上游 CC-BY-NC-4.0。
 真机动作与 Pico 人体实流仍待验收。
 

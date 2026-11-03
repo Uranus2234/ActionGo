@@ -267,9 +267,9 @@ def main(argv=None):
     initializer(domain, "lo")
     bridge = HELPERS.DDSBridge(model, data, indices)
 
-    spec_source = ACTION_GO_ROOT / ("actions/allmimic/config/generic_allmimic_paoxiao.yaml"
+    spec_source = ACTION_GO_ROOT / ("actions/tracking/allmimic/config/generic_allmimic_paoxiao.yaml"
                                    if args.variant == "allmimic" else
-                                   "actions/uni_supermimic/config/generic_uni_supermimic.yaml")
+                                   "actions/tracking/uni_supermimic/config/generic_uni_supermimic.yaml")
     spec = yaml.safe_load(spec_source.read_text())
     spec.setdefault("runtime", {}).update(duration_sec=0, publish_hz=500)
     spec["robot"]["params"] = str(params_path)

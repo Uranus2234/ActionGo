@@ -13,7 +13,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--pt", default=default_pt,
                     help="TorchScript checkpoint; defaults to $TWIST_ROOT/assets/twist_general_motion_tracker.pt")
-    ap.add_argument("--out", default=str(action_go_root / "actions/twist/model/twist_general_motion_tracker.onnx"))
+    ap.add_argument("--out", default=str(action_go_root / "actions/tracking/twist/model/twist_general_motion_tracker.onnx"))
     ap.add_argument("--opset", type=int, default=17)
     args = ap.parse_args()
     if not args.pt:

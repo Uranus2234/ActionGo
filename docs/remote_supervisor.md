@@ -131,18 +131,18 @@ config/remote_actions.yaml
 ```
 
 上述八个 R1 组合均需持续按住 R1 再按第二个键。模型、参考数据和预检步骤见
-[四模型 154k 格斗动作包](../actions/fighting154k/README.md)。正常播完后保持最后命令，
+[四模型 154k 格斗动作包](../actions/tracking/fighting154k/README.md)。正常播完后保持最后命令，
 通过 complete/release 屏障和 0.30 秒重叠交接回官方 walkrun；八个动作均保留 IMU safety。
 
 Instinct Parkour 额外保护：启动 `g1_parkour` 时会先在官方 walkrun 仍接管的状态下初始化 RealSense、`rt/secondary_imu` torso IMU、ONNX/DDS，并发布当前姿态 hold；ready 后才切 UserCtrl。没有检测到 RealSense 深度相机、没有深度帧或没有 torso IMU 时，不会切 UserCtrl，不会启动策略，并请求保持/回到官方 `walkrun`。切入 UserCtrl 后执行 official ColdStartAgent-style 过渡到 `default_joint_pos`，然后默认直接进入 parkour 模型。
 Instinct parkour 保持官方的 `inference_hz=50`、不做策略帧间插值且不限速；LowCmd
 由独立发布线程以 `publish_hz=50` 重发最新策略目标，避免推理阻塞命令发布。
-当前 `actions/instinct` checkpoint 是官方 InstinctLab onboard 导出，部署时必须使用旧版 `instinct_onboard` 的 shoulder-first 关节顺序；C++ player 已按这个顺序发送和解析 LowCmd/LowState。若改成 InstinctMJ 的 waist-first 顺序，典型现象是 stand 刚开始能顶住一小会儿，随后手、腿、身体乱摆。
+当前 `actions/perception/instinct` checkpoint 是官方 InstinctLab onboard 导出，部署时必须使用旧版 `instinct_onboard` 的 shoulder-first 关节顺序；C++ player 已按这个顺序发送和解析 LowCmd/LowState。若改成 InstinctMJ 的 waist-first 顺序，典型现象是 stand 刚开始能顶住一小会儿，随后手、腿、身体乱摆。
 
 P-BFM 三个入口使用 `generic_sensor_policy_player`，保留 ready/start 和 walkrun 回退。
 相机位置与 Instinct 配置一致，光轴相对躯干下俯约48°；先运行
 `bash tools/launch/check_pbfm.sh offline`。Pico 模式还需 PC 在线 sender，
-人体输入和深度均须新鲜才 ready；配置与延迟说明见 `actions/pbfm/README.md`。
+人体输入和深度均须新鲜才 ready；配置与延迟说明见 `actions/perception/pbfm/README.md`。
 
 ## IMU Safety
 

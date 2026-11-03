@@ -181,7 +181,7 @@ SDK 枚举提示的推荐固件为 05.13.00.50，兼容性仅作为待核查项�
 
 按用户选择，将 `Down+B / pbfm_tracking_dance` 替换为官方同一 checkpoint 的
 `lafan-full-dance1-subject3` 56.52–98.72 秒，2110 帧 / 42.2 秒，包含原 68–78 秒主体。
-新资产位于 `actions/pbfm/motions/lafan_dance_56_52_98_72/`，spec 指向该目录。
+新资产位于 `actions/perception/pbfm/motions/lafan_dance_56_52_98_72/`，spec 指向该目录。
 保留原始 z；heading 与 velocity 仅转换到新初始朝向。仿真使用的参考初态、
 平台位置和循环重置不用于真机。
 

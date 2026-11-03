@@ -26,17 +26,17 @@ def run_case(player, name):
         trace = folder / "trace"
         shm_name = "pbfm_test_" + folder.name.replace("-", "_")
         publisher = None if name == "missing" else DepthPublisher(shm_name)
-        command = [str(player), "--spec", str(ROOT / "actions/pbfm/config/generic_pbfm.yaml"),
+        command = [str(player), "--spec", str(ROOT / "actions/perception/pbfm/config/generic_pbfm.yaml"),
                    "--dry-run", "--offline-dry-run-state", "--duration-sec", "1.2",
                    "--ready-file", str(ready), "--start-file", str(start),
                    "--depth-shm-name", shm_name, "--trace-file", str(trace)]
         sequence_frames = []
         if name == "joystick":
-            command[2] = str(ROOT / "actions/pbfm/config/generic_pbfm_joystick.yaml")
+            command[2] = str(ROOT / "actions/perception/pbfm/config/generic_pbfm_joystick.yaml")
         if name == "handoff":
             command += ["--handoff-complete-file", str(complete), "--handoff-release-file", str(release)]
         if name in {"sequence", "remote", "idle", "directional", "handoff"}:
-            original = ROOT / "actions/pbfm/config/generic_pbfm.yaml"
+            original = ROOT / "actions/perception/pbfm/config/generic_pbfm.yaml"
             spec = yaml.safe_load(original.read_text())
             for section, key in [("model", "path"), ("robot", "params"), ("context", "path")]:
                 spec[section][key] = str((original.parent / spec[section][key]).resolve())
@@ -54,12 +54,12 @@ def run_case(player, name):
                 spec["context"].update(command_source="wireless_remote", max_forward_speed=0.8,
                                        max_backward_speed=0.3, max_lateral_speed=0.4, max_yaw_rate=1.0)
             if name in {"idle", "directional"}:
-                spec["context"].update(idle_path=str(ROOT / "actions/pbfm/config/context_idle.yaml"),
+                spec["context"].update(idle_path=str(ROOT / "actions/perception/pbfm/config/context_idle.yaml"),
                                        command_deadband=0.05)
             if name == "directional":
-                spec["context"]["path"] = str(ROOT / "actions/pbfm/config/keyboard_walk/context.yaml")
+                spec["context"]["path"] = str(ROOT / "actions/perception/pbfm/config/keyboard_walk/context.yaml")
                 spec["context"]["directional_paths"] = {
-                    direction: str(ROOT / f"actions/pbfm/config/context_keyboard_{direction}.yaml")
+                    direction: str(ROOT / f"actions/perception/pbfm/config/context_keyboard_{direction}.yaml")
                     for direction in ("forward", "backward", "left", "right")}
                 spec["context"]["directional_paths"]["forward"] = spec["context"]["path"]
             sequence_spec = folder / "spec.yaml"
@@ -109,7 +109,7 @@ def run_case(player, name):
                 if name in {"idle", "directional", "joystick"}:
                     actual = [json.loads(line) for line in trace.read_text().splitlines()]
                     idle_path = "joystick_walk/idle.yaml" if name == "joystick" else "context_idle.yaml"
-                    idle = yaml.safe_load((ROOT / "actions/pbfm/config" / idle_path).read_text())
+                    idle = yaml.safe_load((ROOT / "actions/perception/pbfm/config" / idle_path).read_text())
                     if len(actual) <= len(sequence_frames):
                         raise RuntimeError("idle reference incorrectly exhausted the walking cache")
                     for frame in actual:
@@ -139,7 +139,7 @@ def run_case(player, name):
 def reject_file_publishing(player):
     with tempfile.TemporaryDirectory(prefix="pbfm-file-") as raw:
         folder = Path(raw)
-        original = ROOT / "actions/pbfm/config/generic_pbfm.yaml"
+        original = ROOT / "actions/perception/pbfm/config/generic_pbfm.yaml"
         spec = yaml.safe_load(original.read_text())
         for section, key in [("model", "path"), ("robot", "params"), ("context", "path")]:
             spec[section][key] = str((original.parent / spec[section][key]).resolve())
@@ -157,7 +157,7 @@ def reject_file_publishing(player):
 def reject_missing_idle(player, directional=False):
     with tempfile.TemporaryDirectory(prefix="pbfm-idle-") as raw:
         folder = Path(raw)
-        original = ROOT / "actions/pbfm/config/generic_pbfm.yaml"
+        original = ROOT / "actions/perception/pbfm/config/generic_pbfm.yaml"
         spec = yaml.safe_load(original.read_text())
         for section, key in [("model", "path"), ("robot", "params"), ("context", "path")]:
             spec[section][key] = str((original.parent / spec[section][key]).resolve())
@@ -166,9 +166,9 @@ def reject_missing_idle(player, directional=False):
                                idle_path=str(folder / "missing_idle.yaml"), command_deadband=0.05)
         missing = "missing_idle.yaml"
         if directional:
-            spec["context"]["idle_path"] = str(ROOT / "actions/pbfm/config/context_keyboard_idle.yaml")
+            spec["context"]["idle_path"] = str(ROOT / "actions/perception/pbfm/config/context_keyboard_idle.yaml")
             spec["context"]["directional_paths"] = {
-                name: str(ROOT / f"actions/pbfm/config/context_keyboard_{name}.yaml")
+                name: str(ROOT / f"actions/perception/pbfm/config/context_keyboard_{name}.yaml")
                 for name in ("forward", "backward", "left", "right")}
             missing = "missing_forward.yaml"
             spec["context"]["directional_paths"]["forward"] = str(folder / missing)
@@ -185,7 +185,7 @@ def reject_missing_idle(player, directional=False):
 def reject_missing_turn(player):
     with tempfile.TemporaryDirectory(prefix="pbfm-turn-") as raw:
         folder = Path(raw)
-        original = ROOT / "actions/pbfm/config/generic_pbfm_joystick.yaml"
+        original = ROOT / "actions/perception/pbfm/config/generic_pbfm_joystick.yaml"
         spec = yaml.safe_load(original.read_text())
         for section, key in [("model", "path"), ("robot", "params"), ("context", "path"), ("context", "idle_path")]:
             spec[section][key] = str((original.parent / spec[section][key]).resolve())

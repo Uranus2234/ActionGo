@@ -16,10 +16,10 @@ class ModelAssetsCheckTest(unittest.TestCase):
         self.addCleanup(self.directory.cleanup)
         self.repo = Path(self.directory.name)
         self.payload = b"fixture asset"
-        self.primary = self.repo / "actions/primary/model/policy.onnx"
+        self.primary = self.repo / "actions/tracking/primary/model/policy.onnx"
         self.primary.parent.mkdir(parents=True)
         self.primary.write_bytes(self.payload)
-        self.secondary = self.repo / "actions/secondary/model/policy.onnx"
+        self.secondary = self.repo / "actions/perception/secondary/model/policy.onnx"
         self.manifest = {
             "schema_version": 1,
             "assets": [

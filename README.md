@@ -90,7 +90,7 @@ Run a package-specific check before simulation or robot use, for example:
 
 ```bash
 ./build/generic_policy_player \
-  --spec actions/bfm0/config/generic_bfm_zero.yaml \
+  --spec actions/tracking/bfm0/config/generic_bfm_zero.yaml \
   --check-only
 ```
 
@@ -109,7 +109,7 @@ package asset check -> schema -> package check-only -> dry-run -> simulation/rep
 
 ## Real-Robot Start
 
-The [four-policy 154k fighting package](actions/fighting154k/README.md) pins the exact
+The [four-policy 154k fighting package](actions/tracking/fighting154k/README.md) pins the exact
 154000-iteration SuperMimic-Reproduced / AllMimic Omni15% / NoOmni exports from the
 comparison videos. All four ONNX files and family-specific 051/Ma, Kungfu side-kick,
 wbst_motive and yewendun references are included as regular Git files on `feature`. Each finite action uses
@@ -187,9 +187,9 @@ This table reports repository evidence, not marketing-level “support.” The p
 | Humanoid-GPT | BYOW; upstream repository recorded, exact asset revision pending | Motion cache; optional MuJoCo FK | Yes | No dedicated viewer documented | Not documented | On | High |
 | SONIC | BYOW; original and v1.1 inventoried, exact asset revision pending | CSV or local G1/PICO ZMQ input | Yes | ActionGo MuJoCo bridge and synthetic PICO input | v1.1 acceptance pending | On | High |
 | PHP | BYOW; package acquisition instructions | RealSense + torso IMU or SHM depth | Yes; camera checks separate | Official Holosoma/ActionGo bridge | Stair acceptance pending | On | High |
-| [P-BFM](actions/pbfm/README.md) | BYOW; pinned public-demo checkpoint, CC-BY-NC-4.0 | RealSense or SHM depth; context, joystick, or Pico UDP | Yes; camera checks separate | C++ actor / MuJoCo bridge | Hardware acceptance pending | On | High |
-| [Uni-SuperMimic](actions/uni_supermimic/README.md) | Local Uni-SuperMimic export; 200000-iteration checkpoint | Packaged future-reference CSV | Yes | C++ actor / DDS / native MuJoCo | Not verified | On | High |
-| [AllMimic](actions/allmimic/README.md) | Local AllMimic exports with / without Omni; both iteration 159000 | IMU-relative future rotations and mixed residual targets | Yes | C++ actor / DDS / native MuJoCo | Not verified | On | High |
+| [P-BFM](actions/perception/pbfm/README.md) | BYOW; pinned public-demo checkpoint, CC-BY-NC-4.0 | RealSense or SHM depth; context, joystick, or Pico UDP | Yes; camera checks separate | C++ actor / MuJoCo bridge | Hardware acceptance pending | On | High |
+| [Uni-SuperMimic](actions/tracking/uni_supermimic/README.md) | Local Uni-SuperMimic export; 200000-iteration checkpoint | Packaged future-reference CSV | Yes | C++ actor / DDS / native MuJoCo | Not verified | On | High |
+| [AllMimic](actions/tracking/allmimic/README.md) | Local AllMimic exports with / without Omni; both iteration 159000 | IMU-relative future rotations and mixed residual targets | Yes | C++ actor / DDS / native MuJoCo | Not verified | On | High |
 | mjlab | BYOW/local export; package source notes | Embedded reference | Yes | C++ Unitree SDK2 MuJoCo bridge | Not documented | On | High |
 
 Read the adapter README under `actions/<adapter>/` before use. SONIC action names currently select v1.1; the original `generic_sonic.yaml` remains available for fallback, with separate TensorRT caches. Official v1.1 replay and board-side acceptance remain pending. PHP real-robot stair acceptance is also pending; check-only and local simulation do not establish it.
@@ -230,7 +230,7 @@ The supervisor command plane supports authenticated non-loopback UDP. Realtime T
 - [Remote supervisor](docs/remote_supervisor.md): controls, authenticated UDP, and deployment behavior.
 - [Runtime logging](docs/runtime_logging.md): live state/policy display, current E2E timing, and session diagnostics.
 - [Simulation](docs/simulation.md): available simulator bridges.
-- [PHP](actions/php/README.md), [mjlab](actions/mjlab/README.md), and [SONIC](actions/sonic/README.md): package setup, runtime contracts, and validation limits.
+- [PHP](actions/perception/php/README.md), [MJLab](actions/proprio/mjlab/README.md), and [SONIC](actions/tracking/sonic/README.md): package setup, runtime contracts, and validation limits.
 - [Runtime troubleshooting](docs/runtime_troubleshooting.md): ONNX Runtime and TensorRT setup.
 - [Contributing](CONTRIBUTING.md): safety and asset requirements for pull requests.
 

@@ -144,7 +144,7 @@ flowchart LR
 
 ### 阶段二：P-BFM 固定 context 与离线一致性
 
-- 新建 `actions/pbfm/`，从官方 config 生成独立 `PBFM.yaml`，保留模型来源和参数差异说明。
+- 新建 `actions/perception/pbfm/`，从官方 config 生成独立 `PBFM.yaml`，保留模型来源和参数差异说明。
 - 导入公开 ONNX 与配套 preset/context；不重新导出网络，也不借用 UFO latent。
 - 实现 `pbfm_policy` 七输入 session 和 `previous_only` history profile。
 - 在 `PolicyContract` 注册 `depth_conditioned_actor / pbfm`，同步协议维数、schema 和 sensor dispatcher。
@@ -200,9 +200,9 @@ flowchart LR
 
 ```bash
 ./build/policy_spec_schema_check --all
-./build/generic_policy_player --spec actions/bfm0/config/generic_bfm_zero.yaml --check-only
-./build/generic_policy_player --spec actions/ufo/config/generic_ufo_stand.yaml --check-only
-./build/generic_sensor_policy_player --spec actions/pbfm/config/generic_pbfm.yaml --check-only
+./build/generic_policy_player --spec actions/tracking/bfm0/config/generic_bfm_zero.yaml --check-only
+./build/generic_policy_player --spec actions/tracking/ufo/config/generic_ufo_stand.yaml --check-only
+./build/generic_sensor_policy_player --spec actions/perception/pbfm/config/generic_pbfm.yaml --check-only
 ACTION_GO_NET=lo tools/launch/start_dry_run.sh
 ```
 
@@ -217,7 +217,7 @@ ACTION_GO_NET=lo tools/launch/start_dry_run.sh
 - 断流复核使用 0.001 秒积分步长：停止深度后非零退出，实际 DDS 最后一条 LowCmd 为 `kp=0,kd=3` 阻尼；距最后深度至进程退出约 0.368 秒，包含 stale 判定和阻尼退出。0.005 秒粗步长下曾出现阻尼数值不稳定，保留为仿真限制，不作为通过结果。
 - 最终 10 秒平地 loopback（积分步长 0.001 秒）：500 次推理、约 10.02 秒物理时间，pelvis 最低 0.7766 m、末态 0.7870 m，状态有限且无自动重置。policy deadline miss=0，publish deadline miss=139，最大发布间隔约 8.64 ms。原始日志位于本地 `outputs/pbfm_smoke_10s/`，断流复核位于 `outputs/pbfm_smoke_dropout_dt001/`。
 
-复现命令、依赖和参数语义见 `actions/pbfm/README.md`。真实相机标定、实机 IMU frame/吊架/切换、板载 50/500 Hz 时序、实时遥操和 backward 离线导出仍待完成。P-BFM 为 non-core 扩展，不改变论文八个核心 policy family 的统计口径，也未实现事务 preview。
+复现命令、依赖和参数语义见 `actions/perception/pbfm/README.md`。真实相机标定、实机 IMU frame/吊架/切换、板载 50/500 Hz 时序、实时遥操和 backward 离线导出仍待完成。P-BFM 为 non-core 扩展，不改变论文八个核心 policy family 的统计口径，也未实现事务 preview。
 
 ### 地形前进演示
 
@@ -508,7 +508,7 @@ loopback supervisor dry-run 加载 88 个动作并等待 LowState，四秒后主
 ### 摇杆比例速度与转向踏步（2026-10-19）
 
 用户要求前进上限降为 1.0 m/s，并让真实摇杆推进幅度连续调速。新增持久 spec
-`actions/pbfm/config/generic_pbfm_joystick.yaml` 与动作 `generic_policy:pbfm_joystick`，
+`actions/perception/pbfm/config/generic_pbfm_joystick.yaml` 与动作 `generic_policy:pbfm_joystick`，
 键盘入口默认直接使用该 spec，不再只在仿真临时覆盖速度。既有 remote 按键映射不变。
 
 | 字段 / 语义 | 来源 | 提取或适配值 | ActionGo 字段 | 状态 |
@@ -527,9 +527,9 @@ loopback supervisor dry-run 加载 88 个动作并等待 LowState，四秒后主
 ```bash
 python3 tools/export/export_pbfm_walk_cycle.py --source /path/to/P-BFM \
   --symmetric --swing-foot-pitch 0.1 --speed 1.0 --turn-rate 0.6 \
-  --turn-gait-amplitude 0.6 --output actions/pbfm/config/joystick_walk
+  --turn-gait-amplitude 0.6 --output actions/perception/pbfm/config/joystick_walk
 ./build/generic_sensor_policy_player \
-  --spec actions/pbfm/config/generic_pbfm_joystick.yaml --check-only
+  --spec actions/perception/pbfm/config/generic_pbfm_joystick.yaml --check-only
 ```
 
 旧 `keyboard_walk` 1.2 m/s 资产保留。首次转向试验使用 0.35 倍踏步和 0.25 rad 领先角，
@@ -583,7 +583,7 @@ loopback supervisor dry-run 加载 89 个动作并等待 LowState，四秒后主
 该片段原始根速度在 body frame 的均值约为 `(−0.871,−0.068,0.020)` m/s，根 yaw 变化约 2.34°，
 属于实际后退运动。与前进参考一样进行周期平滑、左右镜像平均、去根 yaw/侧移及摆动脚姿态修正，
 按 −0.3 m/s 重建 64D state / 463D privileged features，用配套官方 backward encoder 编码，
-未来八帧均值并恢复范数 16。资产保存于 `actions/pbfm/config/joystick_backward/`，
+未来八帧均值并恢复范数 16。资产保存于 `actions/perception/pbfm/config/joystick_backward/`，
 `generic_pbfm_joystick.yaml` 的 `directional_paths.backward` 改为该目录的 `context.yaml`。
 周期为 58 帧 / 1.16 秒，沿用 50 Hz 播放、负轴比例混合和松键站立。未改按键、C++ runtime、
 前进上限、动作解码、安全过滤及 ready/start。导出命令见包 README；这是本地适配参考，不是官方现成 preset。
@@ -615,12 +615,12 @@ tracking 使用同一公开 `364822528` checkpoint，以官方 `lafan-full-dance
 
 | 语义 | 来源 | 提取值 / ActionGo 映射 | 状态 |
 | --- | --- | --- | --- |
-| 相机外参 | `P-BFM/pbfm/perception/instinct_direct_depth.py::RP1DirectDepthConfig`；`actions/instinct/config/env.yaml:scene.camera.offset` | mount `[0.0487988662,0.01,0.4378029938]`，optical quaternion 写入 `sensor.optical_quat_torso_xyzw` | 坐标约定转换后与 Instinct 完全相同；实际安装待标定 |
+| 相机外参 | `P-BFM/pbfm/perception/instinct_direct_depth.py::RP1DirectDepthConfig`；`actions/perception/instinct/config/env.yaml:scene.camera.offset` | mount `[0.0487988662,0.01,0.4378029938]`，optical quaternion 写入 `sensor.optical_quat_torso_xyzw` | 坐标约定转换后与 Instinct 完全相同；实际安装待标定 |
 | 光轴与视场 | 同一 profile | 光轴 `[0.66913165,0.00354942,-0.74313541]`，相对 torso 下俯约 48°，FOV `89.51°/58.29°` | 源码已核对 |
 | 真实深度采集 | RealSense SDK depth intrinsics/Z16 scale；共享 `realsense_depth_stream.cpp` | spec 显式 `848×480@30Hz`，按标定内参映射训练光线，要求覆盖有效 crop | SDK 路径语法编译通过，硬件采集待验 |
 | 预处理与历史 | 上游 optical-Z maxcrop18 profile；`tools/sim/pbfm_depth.py` | C++ `preprocess_pbfm_depth`、`PbfmDepthHistory`：crop、3×3 Gaussian、uint8、一次 `/255`、50 Hz/37 帧环与八帧抽样 | 36 帧 C++/Python 精确对照及环历史测试通过 |
 | camera readiness | 新 spec `sensor.realsense` | 至少 3 帧、启动超时 5 秒；真实帧到达后更新时间，重复读取不能刷新，stale 0.2 秒 | 无 SDK 时 ready 前拒绝；断流沿用异常阻尼 |
-| tracking 来源 | 固定 pages 官方 `lafan-full-dance1-subject3.json.gz` | `actions/pbfm/motions/lafan_dance/context.yaml`；`context.command_source: context` | 1800 帧原始条件已导入 |
+| tracking 来源 | 固定 pages 官方 `lafan-full-dance1-subject3.json.gz` | `actions/perception/pbfm/motions/lafan_dance/context.yaml`；`context.command_source: context` | 1800 帧原始条件已导入 |
 | 末帧交接 | ActionGo 现有 complete/release 协议 | BFM 控制循环末帧保持，`postrun_handoff_hold: true`、walkrun overlap 0.30 秒 | 生命周期等待 release 测试通过；实机官方切换待验 |
 
 Instinct 使用 world-convention WXYZ `[0.9135367613482678,0.004363309284746571,0.4067366430758002,0]`，
@@ -689,7 +689,7 @@ D435i 848×480@30Hz 真实取帧通过；真实 LowState 加相机的 5 秒 dry-
 ## 19. Down+B tracking 片段替换（2026-10-20）
 
 当前 `generic_pbfm_tracking_dance.yaml` 改用
-`actions/pbfm/motions/lafan_dance_56_52_98_72/context.yaml`，替换旧前 36 秒条件。
+`actions/perception/pbfm/motions/lafan_dance_56_52_98_72/context.yaml`，替换旧前 36 秒条件。
 新片段来自同一官方提交与 checkpoint，覆盖 56.52–98.72 秒的 2110 个动作帧，
 完整保留用户选中的 68–78 秒主体。逐帧 z 原样保留；heading 与 velocity 按新初始 yaw
 重表达，速度大小不变。仿真初态取前一 post-action pose，速度由相邻参考帧中心差分估计；

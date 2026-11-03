@@ -17,22 +17,22 @@ ActionGo 源码仓库保存 runtime、配置和资产清单，第三方模型优
 
 | 包 | 上游或获取方式 | 放置位置与限制 |
 |---|---|---|
-| BeyondMimic | [whole_body_tracking](https://github.com/HybridRobotics/whole_body_tracking)；当前 paoxiao 为本地 checkpoint，公开下载待补 | `actions/beyondmimic/model/`；`hlqk` 当前引用 `paoxiao.onnx`，旧 `hlqk.onnx` 单独保留 |
-| BFM-Zero | [BFM-Zero](https://github.com/LeCAR-Lab/BFM-Zero) | `actions/bfm0/model/FBcprAuxModel.onnx`；固定 latent prompt 已随配置提供 |
-| UFO | [UFO G1 权重](https://huggingface.co/xuewang/ufo-g1-policy) | `actions/ufo/model/FBcprAuxModel.onnx`；tracking 还需要 `config/ufo_tracking_zs7.npy` |
-| Instinct | [Instinct](https://project-instinct.github.io/)；取得与旧 instinct_onboard 语义一致的模型对 | `actions/instinct/model/` 和 `stand_onboard/model/`；encoder 与 actor 必须配套 |
-| Holosoma | [Holosoma](https://github.com/amazon-far/holosoma) | `actions/holosoma/model/ppo_g1_29dof_dancing.onnx` |
+| BeyondMimic | [whole_body_tracking](https://github.com/HybridRobotics/whole_body_tracking)；当前 paoxiao 为本地 checkpoint，公开下载待补 | `actions/proprio/beyondmimic/model/`；`hlqk` 使用 `hlqk.onnx` |
+| BFM-Zero | [BFM-Zero](https://github.com/LeCAR-Lab/BFM-Zero) | `actions/tracking/bfm0/model/FBcprAuxModel.onnx`；固定 latent prompt 已随配置提供 |
+| UFO | [UFO G1 权重](https://huggingface.co/xuewang/ufo-g1-policy) | `actions/tracking/ufo/model/FBcprAuxModel.onnx`；tracking 还需要 `config/ufo_tracking_zs7.npy` |
+| Instinct | [Instinct](https://project-instinct.github.io/)；取得与旧 instinct_onboard 语义一致的模型对 | `actions/perception/instinct/model/` 和 `stand_onboard/model/`；encoder 与 actor 必须配套 |
+| Holosoma | [Holosoma](https://github.com/amazon-far/holosoma) | `actions/proprio/holosoma/model/ppo_g1_29dof_dancing.onnx` |
 | Humanoid-GPT | [Humanoid-GPT](https://github.com/GalaxyGeneralRobotics/Humanoid-GPT)；模型已固定 commit 和 SHA256 | `model/pns_wo_priv216.onnx` 可自动下载；`motions/` 和 `assets/` 另行获取 |
-| mjlab | [MJLab](https://github.com/mujocolab/mjlab)；[包说明](../actions/mjlab/README.md) 记录本地训练 checkpoint | `actions/mjlab/model/`；当前没有这些本地导出的公开下载地址 |
-| mjlab combat | [包说明](../actions/mjlab_combat/README.md)；本地四卡 92000 轮 checkpoint | `actions/mjlab_combat/model/policy_92000.onnx` 和修复版 DuoBox 017 / 034 CSV，共用同一策略 |
-| OmniXtreme | [OmniXtreme](https://github.com/Perkins729/OmniXtreme) | 三个 ONNX 和 `actions/omnixtreme/motions/`，包含完整 motion 与各 segment |
-| PHP | [student-assets-v1](https://github.com/amazon-far/php_parkour/releases/tag/student-assets-v1) | `actions/php/model/`，两个文件的本地校验值与上游 release manifest 一致 |
-| P-BFM | [P-BFM public demo](https://github.com/Roboparty/P-BFM/tree/671fbafe71a5f58bab77eeb5d969051fd2d283f4/interactive)；[包说明](../actions/pbfm/README.md) | `actions/pbfm/model/policy.onnx`，checkpoint `364822528`；分片自动合并校验。NC 派生 context 不进入公开快照，按包说明单独导入 |
+| MJLab | [MJLab](https://github.com/mujocolab/mjlab)；[包说明](../actions/proprio/mjlab/README.md) 记录本地训练 checkpoint | `actions/proprio/mjlab/model/`；当前没有这些本地导出的公开下载地址 |
+| MJLab Combat | [包说明](../actions/tracking/mjlab_combat/README.md)；本地四卡 92000 轮 checkpoint | `actions/tracking/mjlab_combat/model/policy_92000.onnx` 和修复版 DuoBox 017 / 034 CSV，共用同一策略 |
+| OmniXtreme | [OmniXtreme](https://github.com/Perkins729/OmniXtreme) | 三个 ONNX 和 `actions/tracking/omnixtreme/motions/`，包含完整 motion 与各 segment |
+| PHP | [student-assets-v1](https://github.com/amazon-far/php_parkour/releases/tag/student-assets-v1) | `actions/perception/php/model/`，两个文件的本地校验值与上游 release manifest 一致 |
+| P-BFM | [P-BFM public demo](https://github.com/Roboparty/P-BFM/tree/671fbafe71a5f58bab77eeb5d969051fd2d283f4/interactive)；[包说明](../actions/perception/pbfm/README.md) | `actions/perception/pbfm/model/policy.onnx`，checkpoint `364822528`；分片自动合并校验。NC 派生 context 不进入公开快照，按包说明单独导入 |
 | ProtoMotions | [ProtoMotions](https://github.com/NVlabs/ProtoMotions) | `model/unified_pipeline.onnx` 和 `motions/*.npz` |
-| SONIC | [GEAR-SONIC](https://huggingface.co/nvidia/GEAR-SONIC)；已固定 HF revision | 原版在 `actions/sonic/model/`，v1.1 在 `model/sonic_v1_1/`；两版共用已记录的 V2 planner |
+| SONIC | [GEAR-SONIC](https://huggingface.co/nvidia/GEAR-SONIC)；已固定 HF revision | 原版在 `actions/tracking/sonic/model/`，v1.1 在 `model/sonic_v1_1/`；两版共用已记录的 V2 planner |
 | SteadyTray | [SteadyTray](https://github.com/AllenHuangGit/SteadyTray) | 可下载上游 `model/policy_9999.pt`；部署用 ONNX 仍需转换验证；标签源图与 printable PDF 也已记录 |
 | TWIST | [TWIST](https://github.com/YanjieZe/TWIST) | 可下载上游 `model/twist_general_motion_tracker.pt`；部署用 ONNX 仍需转换验证，motion 另行获取 |
-| unitree_rl_mjlab | [unitree_rl_mjlab](https://github.com/unitreerobotics/unitree_rl_mjlab)；当前为本地导出 | `actions/unitree_rl_mjlab/model/policy.onnx`；公开 checkpoint 标识待补 |
+| unitree_rl_mjlab | [unitree_rl_mjlab](https://github.com/unitreerobotics/unitree_rl_mjlab)；当前为本地导出 | `actions/proprio/unitree_rl_mjlab/model/policy.onnx`；公开 checkpoint 标识待补 |
 
 这些来源说明项目关系，不保证上游当前默认下载就是清单对应的文件。
 取不到相同版本时，需要先恢复训练和原部署语义，重新验证配置；不能仅按文件名替换。
@@ -79,8 +79,8 @@ python3 tools/assets/fetch_assets.py --policy bfm0 --verify
 ```bash
 python3 tools/assets/fetch_assets.py --policy bfm0
 python3 tools/assets/check_model_assets.py --policy bfm0
-./build/policy_spec_schema_check --spec actions/bfm0/config/generic_bfm_zero.yaml
-./build/generic_policy_player --spec actions/bfm0/config/generic_bfm_zero.yaml --check-only
+./build/policy_spec_schema_check --spec actions/tracking/bfm0/config/generic_bfm_zero.yaml
+./build/generic_policy_player --spec actions/tracking/bfm0/config/generic_bfm_zero.yaml --check-only
 ```
 
 `--policy` 可以重复，例如 `--policy bfm0 --policy ufo`。
@@ -93,8 +93,8 @@ PHP 同样使用统一下载器：
 ```bash
 python3 tools/assets/fetch_assets.py --policy php
 python3 tools/assets/check_model_assets.py --policy php
-./build/policy_spec_schema_check --spec actions/php/config/generic_php.yaml
-./build/generic_sensor_policy_player --spec actions/php/config/generic_php.yaml --check-only
+./build/policy_spec_schema_check --spec actions/perception/php/config/generic_php.yaml
+./build/generic_sensor_policy_player --spec actions/perception/php/config/generic_php.yaml --check-only
 ```
 
 SONIC 下载固定 HF revision 中与本地清单匹配的 original / v1.1 文件，

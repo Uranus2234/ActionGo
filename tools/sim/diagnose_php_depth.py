@@ -39,12 +39,12 @@ def main():
     figure.savefig(args.output / "depth.png", dpi=160)
     plt.close(figure)
 
-    model_root = args.actiongo_root / "actions/php/model"
+    model_root = args.actiongo_root / "actions/perception/php/model"
     options = ort.SessionOptions()
     options.intra_op_num_threads = 2
     encoder = ort.InferenceSession(str(model_root / "depth_backbone.onnx"), options)
     actor = ort.InferenceSession(str(model_root / "student.onnx"), options)
-    robot = yaml.safe_load((args.actiongo_root / "actions/php/config/PHPParams.yaml").read_text())["robot"]
+    robot = yaml.safe_load((args.actiongo_root / "actions/perception/php/config/PHPParams.yaml").read_text())["robot"]
     responses = {}
     for command in (0, 1, 6):
         outputs = {}

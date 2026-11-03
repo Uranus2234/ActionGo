@@ -8,7 +8,7 @@ same button/shell logic and replaces official walkrun with the requested
 unitree_rl_mjlab velocity policy player.
 
 Default walkrun policy:
-actions/unitree_rl_mjlab/model/policy.onnx
+actions/proprio/unitree_rl_mjlab/model/policy.onnx
 """
 from __future__ import annotations
 
@@ -38,7 +38,7 @@ import yaml
 from sim2sim_support import MOTOR_NAMES, KeyboardRemoteInput, SimSession, keyboard_combo_name, motor_layout, resource_overlay, signal_exists, walkrun_pose_accepted, write_signal
 
 ACTION_GO_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_WALKRUN_MODEL = ACTION_GO_ROOT / "actions/unitree_rl_mjlab/model/policy.onnx"
+DEFAULT_WALKRUN_MODEL = ACTION_GO_ROOT / "actions/proprio/unitree_rl_mjlab/model/policy.onnx"
 
 # Instinct parkour is disabled in the unified simulation entry for now.  The
 # real-robot config stays intact, but sim should not launch it from joystick /
@@ -1679,7 +1679,7 @@ def parse_args(argv=None) -> argparse.Namespace:
     p.add_argument("--joystick-device", type=int, default=0)
     p.add_argument("--require-joystick", action="store_true", help="fail if joystick is requested but missing")
     p.add_argument("--walkrun-model", default=str(DEFAULT_WALKRUN_MODEL))
-    p.add_argument("--walkrun-spec", default=str(ACTION_GO_ROOT / "actions/unitree_rl_mjlab/config/generic_unitree_rl_mjlab.yaml"))
+    p.add_argument("--walkrun-spec", default=str(ACTION_GO_ROOT / "actions/proprio/unitree_rl_mjlab/config/generic_unitree_rl_mjlab.yaml"))
     p.add_argument("--walkrun-params", default="", help="default inferred from model path")
     p.add_argument("--walkrun-hz", type=int, default=50)
     p.add_argument("--walkrun-publish-hz", type=int, default=0, help="0 means match 1/--sim-dt lowstate/control cadence")

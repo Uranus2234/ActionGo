@@ -1,6 +1,6 @@
 # BeyondMimic 风险切换预览
 
-`hlqk` 的模型改为 `actions/beyondmimic/model/paoxiao.onnx`；动作名和 `Left+X` 按键保持不变。
+`hlqk` 的模型改为 `actions/proprio/beyondmimic/model/hlqk.onnx`；动作名和 `Left+X` 按键保持不变。
 
 本机运行：
 

@@ -316,8 +316,8 @@ Args parse_args(int argc, char** argv) {
     else if (k == "--ang-vel-negative-range") a.ang_vel_negative_range = parse_pair(i, argc, argv, k);
     else if (k == "--help") {
       std::cout << "Usage:\n"
-                << "  generic_sensor_policy_player --spec actions/instinct/config/generic_instinct_parkour.yaml [runtime overrides]\n"
-                << "  generic_sensor_policy_player --spec actions/instinct/config/generic_instinct_parkour.yaml --depth-camera-check-only --require-depth-camera\n"
+                << "  generic_sensor_policy_player --spec actions/perception/instinct/config/generic_instinct_parkour.yaml [runtime overrides]\n"
+                << "  generic_sensor_policy_player --spec actions/perception/instinct/config/generic_instinct_parkour.yaml --depth-camera-check-only --require-depth-camera\n"
                 << "  --check-only | --dry-run | --camera-check | --dds-dry-run | --depth-camera-check-only\n"
                 << "  --depth-camera-check-only --require-depth-camera checks RealSense presence/frames without DDS/UserCtrl\n"
                 << "  --require-torso-imu waits for rt/secondary_imu and uses torso IMU like official instinct_onboard\n"

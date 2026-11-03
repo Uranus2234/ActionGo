@@ -4,9 +4,9 @@
   "assets": [
     {
       "paths": [
-        "actions/mjlab_combat/model/policy_92000.onnx",
-        "actions/mjlab_combat/motions/duobox_017_ma.csv",
-        "actions/mjlab_combat/motions/a42_8s_generated.csv"
+        "actions/tracking/mjlab_combat/model/policy_92000.onnx",
+        "actions/tracking/mjlab_combat/motions/duobox_017_ma.csv",
+        "actions/tracking/mjlab_combat/motions/a42_8s_generated.csv"
       ],
       "sha256": [
         "def3b00c7e2cceb07b319006f74f5564d9e365cdd3abeb75ce9831a72c8ed7fe",
@@ -14,7 +14,7 @@
         "7b0798f613d8bf691288ea6c1ea874d115b681ff5b2e04975309b3a4d4176d60"
       ],
       "source": "Local mjlab combat-tracker training, repaired DuoBox and A42 generated references",
-      "upstream_revision": "local four-GPU checkpoint 92000; see actions/mjlab_combat/manifest.json",
+      "upstream_revision": "local four-GPU checkpoint 92000; see actions/tracking/mjlab_combat/manifest.json",
       "upstream_code_license": "unverified",
       "weight_license": "local training export; dataset terms apply separately",
       "redistribution": "blocked_pending_review",
@@ -23,12 +23,12 @@
     },
     {
       "paths": [
-        "actions/fighting154k/model/supermimic_omni.onnx",
-        "actions/fighting154k/model/supermimic_no_omni.onnx",
-        "actions/fighting154k/motions/supermimic_051_ma.csv",
-        "actions/fighting154k/motions/supermimic_side_kick.csv",
-        "actions/fighting154k/motions/supermimic_wbst_motive.csv",
-        "actions/fighting154k/motions/supermimic_yewendun.csv"
+        "actions/tracking/fighting154k/model/supermimic_omni.onnx",
+        "actions/tracking/fighting154k/model/supermimic_no_omni.onnx",
+        "actions/tracking/fighting154k/motions/supermimic_051_ma.csv",
+        "actions/tracking/fighting154k/motions/supermimic_side_kick.csv",
+        "actions/tracking/fighting154k/motions/supermimic_wbst_motive.csv",
+        "actions/tracking/fighting154k/motions/supermimic_yewendun.csv"
       ],
       "sha256": [
         "46c88ffd007ddb84530b3319ee8422fb0f51354db0e4e0534add6095d24150c5",
@@ -39,7 +39,7 @@
         "5f500025ecbaf12b5d1a7a67b5e9665b5ac6a9fe90e3015bc48e9197fdff7f1e"
       ],
       "source": "SuperMimic-Reproduced local training",
-      "upstream_revision": "local training; see actions/fighting154k/manifest.json",
+      "upstream_revision": "local training; see actions/tracking/fighting154k/manifest.json",
       "upstream_code_license": "unverified",
       "weight_license": "local training export; dataset terms apply separately",
       "redistribution": "blocked_pending_review",
@@ -48,10 +48,10 @@
     },
     {
       "paths": [
-        "actions/fighting154k/model/allmimic_omni.onnx",
-        "actions/fighting154k/model/allmimic_no_omni.onnx",
-        "actions/fighting154k/motions/allmimic_051_ma.csv",
-        "actions/fighting154k/motions/allmimic_side_kick.csv"
+        "actions/tracking/fighting154k/model/allmimic_omni.onnx",
+        "actions/tracking/fighting154k/model/allmimic_no_omni.onnx",
+        "actions/tracking/fighting154k/motions/allmimic_051_ma.csv",
+        "actions/tracking/fighting154k/motions/allmimic_side_kick.csv"
       ],
       "sha256": [
         "bb49fc03992939580a1f655ca5a73610ce87d6aea11fba1479eb02ec0242f960",
@@ -60,7 +60,7 @@
         "6459447b27f036b3933eeaebbd0cd294a4762c9ad7dfaa3b2ec865abaad2bf54"
       ],
       "source": "https://github.com/Shimingyi/allmimic",
-      "upstream_revision": "local training; see actions/fighting154k/manifest.json",
+      "upstream_revision": "local training; see actions/tracking/fighting154k/manifest.json",
       "upstream_code_license": "unverified",
       "weight_license": "local training export; dataset terms apply separately",
       "redistribution": "blocked_pending_review",
@@ -69,9 +69,9 @@
     },
     {
       "paths": [
-        "actions/allmimic/model/policy.onnx",
-        "actions/allmimic/motions/paoxiao.csv",
-        "actions/allmimic/motions/wbst_motive.csv"
+        "actions/tracking/allmimic/model/policy.onnx",
+        "actions/tracking/allmimic/motions/paoxiao.csv",
+        "actions/tracking/allmimic/motions/wbst_motive.csv"
       ],
       "sha256": [
         "ea87a5a45a539a3d0a97a454139a455ab329e9fda82f5b423f3e30343cb3d570",
@@ -88,7 +88,7 @@
     },
     {
       "paths": [
-        "actions/allmimic/model/policy_no_omni.onnx"
+        "actions/tracking/allmimic/model/policy_no_omni.onnx"
       ],
       "sha256": [
         "ee6972988e1b98433c4ccf2151bcdd44d6ff99216878305233e682a9ba4767cd"
@@ -103,7 +103,7 @@
     },
     {
       "paths": [
-        "actions/pbfm/model/policy.onnx"
+        "actions/perception/pbfm/model/policy.onnx"
       ],
       "sha256": [
         "42872f98404abd7a6e624b871f8b00075ad266146908965afc4dfeb2f6fc910e"
@@ -115,7 +115,7 @@
       "redistribution": "blocked_pending_review",
       "notes": "Official public demo checkpoint 364822528, assembled upstream modelParts without changing weights. Imported locally with tools/export/import_pbfm_public.py; noncommercial terms retained in the model directory.",
       "downloads": {
-        "actions/pbfm/model/policy.onnx": {
+        "actions/perception/pbfm/model/policy.onnx": {
           "kind": "concat",
           "parts": [
             "https://raw.githubusercontent.com/Roboparty/P-BFM/671fbafe71a5f58bab77eeb5d969051fd2d283f4/interactive/pbfm/policy-42872f98404a.part0",
@@ -128,10 +128,10 @@
     },
     {
       "paths": [
-        "actions/beyondmimic/model/hlqk.onnx",
-        "actions/beyondmimic/model/kick_right.onnx",
-        "actions/beyondmimic/model/lie.onnx",
-        "actions/beyondmimic/model/wbst.onnx"
+        "actions/proprio/beyondmimic/model/hlqk.onnx",
+        "actions/proprio/beyondmimic/model/kick_right.onnx",
+        "actions/proprio/beyondmimic/model/lie.onnx",
+        "actions/proprio/beyondmimic/model/wbst.onnx"
       ],
       "sha256": [
         "1915a1425231563a56951be7e1cf03224baa227987cb49eb9ead8b64624ddfe5",
@@ -148,7 +148,7 @@
     },
     {
       "paths": [
-        "actions/bfm0/model/FBcprAuxModel.onnx"
+        "actions/tracking/bfm0/model/FBcprAuxModel.onnx"
       ],
       "sha256": [
         "89f66488fc7d59b02f33d098c65142050219ef3df4aaf778b7d24898a2328365"
@@ -159,7 +159,7 @@
       "weight_license": "unverified",
       "redistribution": "blocked_pending_review",
       "downloads": {
-        "actions/bfm0/model/FBcprAuxModel.onnx": {
+        "actions/tracking/bfm0/model/FBcprAuxModel.onnx": {
           "kind": "file",
           "url": "https://huggingface.co/LeCar-Lab/BFM-Zero/resolve/62b4206d68e026de5e5dc7efb1529bccfb95164c/new_model_for_training_code_inference/exported/FBcprAuxModel.onnx"
         }
@@ -167,7 +167,7 @@
     },
     {
       "paths": [
-        "actions/holosoma/model/ppo_g1_29dof_dancing.onnx"
+        "actions/proprio/holosoma/model/ppo_g1_29dof_dancing.onnx"
       ],
       "sha256": [
         "50c0d577bd950e7a1df74be8fb5e2cef597f8090b1b219b300bbd2711eb23e5f"
@@ -178,7 +178,7 @@
       "weight_license": "unverified",
       "redistribution": "blocked_pending_review",
       "downloads": {
-        "actions/holosoma/model/ppo_g1_29dof_dancing.onnx": {
+        "actions/proprio/holosoma/model/ppo_g1_29dof_dancing.onnx": {
           "kind": "file",
           "url": "https://raw.githubusercontent.com/amazon-far/holosoma/ac810ce65adfa036cb4894a84573cc9fd9b0d642/src/holosoma_inference/holosoma_inference/models/wbt/ppo_g1_29dof_dancing.onnx"
         }
@@ -186,7 +186,7 @@
     },
     {
       "paths": [
-        "actions/humanoid_gpt/model/pns_wo_priv216.onnx"
+        "actions/tracking/humanoid_gpt/model/pns_wo_priv216.onnx"
       ],
       "sha256": [
         "1ca1f475dc647afb736f4cdbd55d45103c36b7f5059d830b05d6aef3a5fc3a1e"
@@ -197,7 +197,7 @@
       "weight_license": "unverified",
       "redistribution": "blocked_pending_review",
       "downloads": {
-        "actions/humanoid_gpt/model/pns_wo_priv216.onnx": {
+        "actions/tracking/humanoid_gpt/model/pns_wo_priv216.onnx": {
           "kind": "file",
           "url": "https://raw.githubusercontent.com/GalaxyGeneralRobotics/Humanoid-GPT/9f9e7b74ecadb532abbb34b6a779d87191a9bbb6/storage/ckpts/pns_wo_priv216.onnx"
         }
@@ -205,10 +205,10 @@
     },
     {
       "paths": [
-        "actions/instinct/model/0-depth_encoder.onnx",
-        "actions/instinct/model/actor.onnx",
-        "actions/instinct/stand_onboard/model/0-depth_encoder.onnx",
-        "actions/instinct/stand_onboard/model/actor.onnx"
+        "actions/perception/instinct/model/0-depth_encoder.onnx",
+        "actions/perception/instinct/model/actor.onnx",
+        "actions/perception/instinct/stand_onboard/model/0-depth_encoder.onnx",
+        "actions/perception/instinct/stand_onboard/model/actor.onnx"
       ],
       "sha256": [
         "6da9f70e7f1cb3b37f02cac73fa16f6698afd427d9e44d833d345277a33b5b69",
@@ -225,9 +225,9 @@
     },
     {
       "paths": [
-        "actions/omnixtreme/model/base_policy_trt.onnx",
-        "actions/omnixtreme/model/fk_trt.onnx",
-        "actions/omnixtreme/model/residual_policy.onnx"
+        "actions/tracking/omnixtreme/model/base_policy_trt.onnx",
+        "actions/tracking/omnixtreme/model/fk_trt.onnx",
+        "actions/tracking/omnixtreme/model/residual_policy.onnx"
       ],
       "sha256": [
         "b050772c0b49c813f457cdf21bb3e4f23a027e2e22c5279ab23423ea264007e2",
@@ -240,15 +240,15 @@
       "weight_license": "unverified",
       "redistribution": "blocked_pending_review",
       "downloads": {
-        "actions/omnixtreme/model/base_policy_trt.onnx": {
+        "actions/tracking/omnixtreme/model/base_policy_trt.onnx": {
           "kind": "file",
           "url": "https://raw.githubusercontent.com/Perkins729/OmniXtreme/6f2716d1b1d1132d513d86beb2193f5b18f11fcd/policy/base_policy_trt.onnx"
         },
-        "actions/omnixtreme/model/fk_trt.onnx": {
+        "actions/tracking/omnixtreme/model/fk_trt.onnx": {
           "kind": "file",
           "url": "https://raw.githubusercontent.com/Perkins729/OmniXtreme/6f2716d1b1d1132d513d86beb2193f5b18f11fcd/policy/fk_trt.onnx"
         },
-        "actions/omnixtreme/model/residual_policy.onnx": {
+        "actions/tracking/omnixtreme/model/residual_policy.onnx": {
           "kind": "file",
           "url": "https://raw.githubusercontent.com/Perkins729/OmniXtreme/6f2716d1b1d1132d513d86beb2193f5b18f11fcd/policy/residual_policy.onnx"
         }
@@ -256,7 +256,7 @@
     },
     {
       "paths": [
-        "actions/protomotions/model/unified_pipeline.onnx"
+        "actions/tracking/protomotions/model/unified_pipeline.onnx"
       ],
       "sha256": [
         "a59baa3e04a951e5cf0b4cc68f24ebaafa9272714226618b99a5017dfc805b4c"
@@ -267,7 +267,7 @@
       "weight_license": "unverified",
       "redistribution": "blocked_pending_review",
       "downloads": {
-        "actions/protomotions/model/unified_pipeline.onnx": {
+        "actions/tracking/protomotions/model/unified_pipeline.onnx": {
           "kind": "file",
           "url": "https://media.githubusercontent.com/media/NVlabs/ProtoMotions/b30eae3c7258292f3e5a7b60ecd8c9d3317e3ed3/data/pretrained_models/motion_tracker/g1-bones-deploy/compiled_models/unified_pipeline.onnx"
         }
@@ -275,7 +275,7 @@
     },
     {
       "paths": [
-        "actions/steadytray/model/policy_9999.onnx"
+        "actions/perception/steadytray/model/policy_9999.onnx"
       ],
       "sha256": [
         "3dad3611a20e3a6b53bddf2c16f673e0b919c09faac56db2f1147c7b781ad85d"
@@ -289,9 +289,9 @@
     },
     {
       "paths": [
-        "actions/sonic/model/model_decoder.onnx",
-        "actions/sonic/model/model_encoder.onnx",
-        "actions/sonic/model/planner_sonic.onnx"
+        "actions/tracking/sonic/model/model_decoder.onnx",
+        "actions/tracking/sonic/model/model_encoder.onnx",
+        "actions/tracking/sonic/model/planner_sonic.onnx"
       ],
       "sha256": [
         "c7241a123eaa36b5d64bad19540efde93cac1ad443bd4572fd12ca99898118ed",
@@ -305,15 +305,15 @@
       "redistribution": "blocked_pending_review",
       "notes": "Original 1762D encoder/decoder and shared V2 planner; kept separately from SONIC v1.1. Exact asset revision remains unresolved.",
       "downloads": {
-        "actions/sonic/model/model_decoder.onnx": {
+        "actions/tracking/sonic/model/model_decoder.onnx": {
           "kind": "file",
           "url": "https://huggingface.co/nvidia/GEAR-SONIC/resolve/6733128a3d8a523b1418b06bca3cdf61c8b0987f/model_decoder.onnx"
         },
-        "actions/sonic/model/model_encoder.onnx": {
+        "actions/tracking/sonic/model/model_encoder.onnx": {
           "kind": "file",
           "url": "https://huggingface.co/nvidia/GEAR-SONIC/resolve/6733128a3d8a523b1418b06bca3cdf61c8b0987f/model_encoder.onnx"
         },
-        "actions/sonic/model/planner_sonic.onnx": {
+        "actions/tracking/sonic/model/planner_sonic.onnx": {
           "kind": "file",
           "url": "https://huggingface.co/nvidia/GEAR-SONIC/resolve/6733128a3d8a523b1418b06bca3cdf61c8b0987f/planner_sonic.onnx"
         }
@@ -321,7 +321,7 @@
     },
     {
       "paths": [
-        "actions/twist/model/twist_general_motion_tracker.onnx"
+        "actions/tracking/twist/model/twist_general_motion_tracker.onnx"
       ],
       "sha256": [
         "ce6f4d39b60d8619b506b4ab3216b839b61440ba59a9eeed82ed69ea3841f61b"
@@ -335,7 +335,7 @@
     },
     {
       "paths": [
-        "actions/ufo/model/FBcprAuxModel.onnx"
+        "actions/tracking/ufo/model/FBcprAuxModel.onnx"
       ],
       "sha256": [
         "e0a67a6e7d40e6bb50253da4f4e25451556de2dba6446ebaa05f424aee118067"
@@ -346,7 +346,7 @@
       "weight_license": "unverified",
       "redistribution": "blocked_pending_review",
       "downloads": {
-        "actions/ufo/model/FBcprAuxModel.onnx": {
+        "actions/tracking/ufo/model/FBcprAuxModel.onnx": {
           "kind": "file",
           "url": "https://huggingface.co/xuewang/ufo-g1-policy/resolve/fc5efb7b3bb7a82270abaeabb0cf3c1194f1c7e6/g1_policy/exported/FBcprAuxModel.onnx"
         }
@@ -354,7 +354,7 @@
     },
     {
       "paths": [
-        "actions/unitree_rl_mjlab/model/policy.onnx"
+        "actions/proprio/unitree_rl_mjlab/model/policy.onnx"
       ],
       "sha256": [
         "6ce5c751bb692e383bffb9bc32c9142518283224e4da9a33ef8dd374b2b63cdb"
@@ -368,7 +368,7 @@
     },
     {
       "paths": [
-        "actions/beyondmimic/model/paoxiao.onnx"
+        "actions/proprio/beyondmimic/model/paoxiao.onnx"
       ],
       "sha256": [
         "1b2f97475885b576023b0a5dc70a073e72e1f202928d246c7649a32870c24d3a"
@@ -383,7 +383,7 @@
     },
     {
       "paths": [
-        "actions/humanoid_gpt/assets/g1_mjx_track_meshless.xml"
+        "actions/tracking/humanoid_gpt/assets/g1_mjx_track_meshless.xml"
       ],
       "sha256": [
         "c5cd50aa2d13abda5c45f17869989463bcf80b8ec6a057b1409146cc90d05887"
@@ -398,7 +398,7 @@
     },
     {
       "paths": [
-        "actions/humanoid_gpt/motions/human_walking_50Hz_29dof.npz"
+        "actions/tracking/humanoid_gpt/motions/human_walking_50Hz_29dof.npz"
       ],
       "sha256": [
         "4ab95256ec8987bea42ae416d949993124ed73ba93763a83b639ff093456e44d"
@@ -413,10 +413,10 @@
     },
     {
       "paths": [
-        "actions/mjlab/model/dance1_subject2_29999.onnx",
-        "actions/mjlab/model/reverse_vault_flat_24000.onnx",
-        "actions/mjlab/model/reverse_vault_flat_28000.onnx",
-        "actions/mjlab/model/reverse_vault_terrain_20000.onnx"
+        "actions/proprio/mjlab/model/dance1_subject2_29999.onnx",
+        "actions/proprio/mjlab/model/reverse_vault_flat_24000.onnx",
+        "actions/proprio/mjlab/model/reverse_vault_flat_28000.onnx",
+        "actions/proprio/mjlab/model/reverse_vault_terrain_20000.onnx"
       ],
       "sha256": [
         "2173f598f295483f86c47079822e53b5d344c98305b6508de60308e4c3be0e63",
@@ -429,27 +429,27 @@
       "upstream_code_license": "unverified",
       "weight_license": "unverified",
       "redistribution": "blocked_pending_review",
-      "notes": "Locally exported checkpoints listed in actions/mjlab/README.md; no public checkpoint download is currently recorded.",
+      "notes": "Locally exported checkpoints listed in actions/proprio/mjlab/README.md; no public checkpoint download is currently recorded.",
       "download_note": "No verified public URL for these exact local or derived assets."
     },
     {
       "paths": [
-        "actions/omnixtreme/motions/motion.npz",
-        "actions/omnixtreme/motions/segments/10_back_hand_flip.npz",
-        "actions/omnixtreme/motions/segments/11_side_flip_roll.npz",
-        "actions/omnixtreme/motions/segments/12_wbst_motive.npz",
-        "actions/omnixtreme/motions/segments/13_ceshoufan_double.npz",
-        "actions/omnixtreme/motions/segments/14_yewendun-kick.npz",
-        "actions/omnixtreme/motions/segments/15_front_paxing.npz",
-        "actions/omnixtreme/motions/segments/1_fuck_floor.npz",
-        "actions/omnixtreme/motions/segments/2_back_hand_flip_roll.npz",
-        "actions/omnixtreme/motions/segments/3_back_hand_flip.npz",
-        "actions/omnixtreme/motions/segments/4_wbst_stand.npz",
-        "actions/omnixtreme/motions/segments/5_side_roll_kick.npz",
-        "actions/omnixtreme/motions/segments/6_front_roll.npz",
-        "actions/omnixtreme/motions/segments/7_back_roll.npz",
-        "actions/omnixtreme/motions/segments/8_none.npz",
-        "actions/omnixtreme/motions/segments/9_back_hand_flip.npz"
+        "actions/tracking/omnixtreme/motions/motion.npz",
+        "actions/tracking/omnixtreme/motions/segments/10_back_hand_flip.npz",
+        "actions/tracking/omnixtreme/motions/segments/11_side_flip_roll.npz",
+        "actions/tracking/omnixtreme/motions/segments/12_wbst_motive.npz",
+        "actions/tracking/omnixtreme/motions/segments/13_ceshoufan_double.npz",
+        "actions/tracking/omnixtreme/motions/segments/14_yewendun-kick.npz",
+        "actions/tracking/omnixtreme/motions/segments/15_front_paxing.npz",
+        "actions/tracking/omnixtreme/motions/segments/1_fuck_floor.npz",
+        "actions/tracking/omnixtreme/motions/segments/2_back_hand_flip_roll.npz",
+        "actions/tracking/omnixtreme/motions/segments/3_back_hand_flip.npz",
+        "actions/tracking/omnixtreme/motions/segments/4_wbst_stand.npz",
+        "actions/tracking/omnixtreme/motions/segments/5_side_roll_kick.npz",
+        "actions/tracking/omnixtreme/motions/segments/6_front_roll.npz",
+        "actions/tracking/omnixtreme/motions/segments/7_back_roll.npz",
+        "actions/tracking/omnixtreme/motions/segments/8_none.npz",
+        "actions/tracking/omnixtreme/motions/segments/9_back_hand_flip.npz"
       ],
       "sha256": [
         "efc8f7fa86df93f00c371d3e9d7d4183d4c72e8dfd08056bd4ddea69fd6d4155",
@@ -479,8 +479,8 @@
     },
     {
       "paths": [
-        "actions/php/model/depth_backbone.onnx",
-        "actions/php/model/student.onnx"
+        "actions/perception/php/model/depth_backbone.onnx",
+        "actions/perception/php/model/student.onnx"
       ],
       "sha256": [
         "5b22466a218944e3b0ab0f4f82a910e3eec35375ee03e7fb94eb65fa88431b56",
@@ -493,7 +493,7 @@
       "redistribution": "blocked_pending_review",
       "notes": "File checksums match the upstream student release manifest; model-specific redistribution terms remain unverified.",
       "downloads": {
-        "actions/php/model/depth_backbone.onnx": {
+        "actions/perception/php/model/depth_backbone.onnx": {
           "kind": "tar",
           "archive": {
             "url": "https://github.com/amazon-far/php_parkour/releases/download/student-assets-v1/php-student-v1.tar.gz",
@@ -501,7 +501,7 @@
           },
           "member": "depth_backbone.onnx"
         },
-        "actions/php/model/student.onnx": {
+        "actions/perception/php/model/student.onnx": {
           "kind": "tar",
           "archive": {
             "url": "https://github.com/amazon-far/php_parkour/releases/download/student-assets-v1/php-student-v1.tar.gz",
@@ -513,8 +513,8 @@
     },
     {
       "paths": [
-        "actions/protomotions/motions/dance1_subject2.50fps.npz",
-        "actions/protomotions/motions/output_walk.50fps.npz"
+        "actions/tracking/protomotions/motions/dance1_subject2.50fps.npz",
+        "actions/tracking/protomotions/motions/output_walk.50fps.npz"
       ],
       "sha256": [
         "5f0772df2b1f6a7a89da3e55aa7f01938aae07f818ae980d91ca3284db402111",
@@ -530,8 +530,8 @@
     },
     {
       "paths": [
-        "actions/sonic/model/sonic_v1_1/model_decoder.onnx",
-        "actions/sonic/model/sonic_v1_1/model_encoder.onnx"
+        "actions/tracking/sonic/model/sonic_v1_1/model_decoder.onnx",
+        "actions/tracking/sonic/model/sonic_v1_1/model_encoder.onnx"
       ],
       "sha256": [
         "34bae8570d4a4421a5391a5c2befd745d4a02d182ec539e5f9da44c091c67509",
@@ -544,11 +544,11 @@
       "redistribution": "blocked_pending_review",
       "notes": "SONIC v1.1 encoder/decoder pinned to the matching HF revision; do not substitute the low-latency variant.",
       "downloads": {
-        "actions/sonic/model/sonic_v1_1/model_decoder.onnx": {
+        "actions/tracking/sonic/model/sonic_v1_1/model_decoder.onnx": {
           "kind": "file",
           "url": "https://huggingface.co/nvidia/GEAR-SONIC/resolve/6733128a3d8a523b1418b06bca3cdf61c8b0987f/sonic_v1_1/model_decoder.onnx"
         },
-        "actions/sonic/model/sonic_v1_1/model_encoder.onnx": {
+        "actions/tracking/sonic/model/sonic_v1_1/model_encoder.onnx": {
           "kind": "file",
           "url": "https://huggingface.co/nvidia/GEAR-SONIC/resolve/6733128a3d8a523b1418b06bca3cdf61c8b0987f/sonic_v1_1/model_encoder.onnx"
         }
@@ -556,12 +556,12 @@
     },
     {
       "paths": [
-        "actions/sonic/motions/squat_001__A359/body_ang_vel.csv",
-        "actions/sonic/motions/squat_001__A359/body_lin_vel.csv",
-        "actions/sonic/motions/squat_001__A359/body_pos.csv",
-        "actions/sonic/motions/squat_001__A359/body_quat.csv",
-        "actions/sonic/motions/squat_001__A359/joint_pos.csv",
-        "actions/sonic/motions/squat_001__A359/joint_vel.csv"
+        "actions/tracking/sonic/motions/squat_001__A359/body_ang_vel.csv",
+        "actions/tracking/sonic/motions/squat_001__A359/body_lin_vel.csv",
+        "actions/tracking/sonic/motions/squat_001__A359/body_pos.csv",
+        "actions/tracking/sonic/motions/squat_001__A359/body_quat.csv",
+        "actions/tracking/sonic/motions/squat_001__A359/joint_pos.csv",
+        "actions/tracking/sonic/motions/squat_001__A359/joint_vel.csv"
       ],
       "sha256": [
         "9de87460d6dedc06cc36214912abd998aed6645658b7340c170b1e4d0f68c08d",
@@ -581,15 +581,15 @@
     },
     {
       "paths": [
-        "actions/steadytray/tags/src/tag41_12_00000.png",
-        "actions/steadytray/tags/src/tag41_12_00001.png",
-        "actions/steadytray/tags/src/tag41_12_00002.png",
-        "actions/steadytray/tags/src/tag41_12_00003.png",
-        "actions/steadytray/tags/tagStandard41h12_id0_tagsize50mm_A4.pdf",
-        "actions/steadytray/tags/tagStandard41h12_id0_tagsize60mm_A4.pdf",
-        "actions/steadytray/tags/tagStandard41h12_id0_tagsize70mm_A4.pdf",
-        "actions/steadytray/tags/tagStandard41h12_id0_tagsize80mm_A4.pdf",
-        "actions/steadytray/tags/tagStandard41h12_ids0-3_tagsize40mm_A4.pdf"
+        "actions/perception/steadytray/tags/src/tag41_12_00000.png",
+        "actions/perception/steadytray/tags/src/tag41_12_00001.png",
+        "actions/perception/steadytray/tags/src/tag41_12_00002.png",
+        "actions/perception/steadytray/tags/src/tag41_12_00003.png",
+        "actions/perception/steadytray/tags/tagStandard41h12_id0_tagsize50mm_A4.pdf",
+        "actions/perception/steadytray/tags/tagStandard41h12_id0_tagsize60mm_A4.pdf",
+        "actions/perception/steadytray/tags/tagStandard41h12_id0_tagsize70mm_A4.pdf",
+        "actions/perception/steadytray/tags/tagStandard41h12_id0_tagsize80mm_A4.pdf",
+        "actions/perception/steadytray/tags/tagStandard41h12_ids0-3_tagsize40mm_A4.pdf"
       ],
       "sha256": [
         "ad5bc161c157634f05afcfd3cfba34334b9303609dd3afc9c000b86e031da02a",
@@ -612,10 +612,10 @@
     },
     {
       "paths": [
-        "actions/twist/motions/01_01.pkl",
-        "actions/twist/motions/125_SLP201.pkl",
-        "actions/twist/motions/A3__Swing_arms.pkl",
-        "actions/twist/motions/A6___lift_box.pkl"
+        "actions/tracking/twist/motions/01_01.pkl",
+        "actions/tracking/twist/motions/125_SLP201.pkl",
+        "actions/tracking/twist/motions/A3__Swing_arms.pkl",
+        "actions/tracking/twist/motions/A6___lift_box.pkl"
       ],
       "sha256": [
         "30ac0a7449d94f0abc3bda28807a5d31ff9935baa484992d4a50824490618535",
@@ -633,7 +633,7 @@
     },
     {
       "paths": [
-        "actions/ufo/config/ufo_tracking_zs7.npy"
+        "actions/tracking/ufo/config/ufo_tracking_zs7.npy"
       ],
       "sha256": [
         "b5929738c544c300c38b963089273f6d3ffdc5259994a626380e1eb17af0c98e"
@@ -648,7 +648,7 @@
     },
     {
       "paths": [
-        "actions/twist/model/twist_general_motion_tracker.pt"
+        "actions/tracking/twist/model/twist_general_motion_tracker.pt"
       ],
       "sha256": [
         "0ec24c54c1e1502f5c7bd27efb39ecc0630c06b5c01dc640a6d493d672fc515c"
@@ -660,7 +660,7 @@
       "redistribution": "blocked_pending_review",
       "notes": "Public upstream TorchScript checkpoint. This is not a replacement for the recorded ONNX deployment model; export and validate the adapter contract separately.",
       "downloads": {
-        "actions/twist/model/twist_general_motion_tracker.pt": {
+        "actions/tracking/twist/model/twist_general_motion_tracker.pt": {
           "kind": "file",
           "url": "https://raw.githubusercontent.com/YanjieZe/TWIST/42d8c134739eee51f28d7cc0ff72a86728afb8dc/assets/twist_general_motion_tracker.pt"
         }
@@ -668,7 +668,7 @@
     },
     {
       "paths": [
-        "actions/steadytray/model/policy_9999.pt"
+        "actions/perception/steadytray/model/policy_9999.pt"
       ],
       "sha256": [
         "9435d02c2f33b96bad067126adaa3db5fcf4f1bdbb41700283b4dc95b30ab957"
@@ -680,7 +680,7 @@
       "redistribution": "blocked_pending_review",
       "notes": "Public upstream TorchScript checkpoint. This is not a replacement for the recorded ONNX deployment model; export and validate the adapter contract separately.",
       "downloads": {
-        "actions/steadytray/model/policy_9999.pt": {
+        "actions/perception/steadytray/model/policy_9999.pt": {
           "kind": "file",
           "url": "https://media.githubusercontent.com/media/AllenHuangGit/SteadyTray/ae781f9f43f9505118c2c434733c57ed1c09dbc3/exported/policy_9999.pt"
         }

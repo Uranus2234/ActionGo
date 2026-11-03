@@ -2,7 +2,7 @@
 """Interactive MuJoCo preview for action_go's BFM-Zero stand action.
 
 This is a simulation-only companion for runtime/players/generic_policy_player.cpp. It reuses
-`actions/bfm0/config/BFMZero.yaml` and the `z_file` configured in `actions/bfm0/config/BFMZero.yaml`, builds the
+`actions/tracking/bfm0/config/BFMZero.yaml` and the `z_file` configured in `actions/tracking/bfm0/config/BFMZero.yaml`, builds the
 same 721-dim BFM-Zero actor input, runs the ONNX policy, then applies the
 resulting q_target through a MuJoCo PD controller.
 
@@ -42,8 +42,8 @@ ACTOR_OBS_DIM = 721
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Interactive MuJoCo preview for action_go BFM-Zero inference")
     p.add_argument("--xml", default=str(BFM_ZERO_ROOT / "data/robots/g1/scene_29dof_freebase.xml"))
-    p.add_argument("--model", default=str(ACTION_GO_ROOT / "actions/bfm0/model/FBcprAuxModel.onnx"))
-    p.add_argument("--params", default=str(ACTION_GO_ROOT / "actions/bfm0/config/BFMZero.yaml"))
+    p.add_argument("--model", default=str(ACTION_GO_ROOT / "actions/tracking/bfm0/model/FBcprAuxModel.onnx"))
+    p.add_argument("--params", default=str(ACTION_GO_ROOT / "actions/tracking/bfm0/config/BFMZero.yaml"))
     p.add_argument("--z", default=None, help="latent txt; defaults to z_file in --params")
     p.add_argument("--duration", type=float, default=0.0, help="simulation seconds; 0 means run until window closes")
     p.add_argument("--sim-dt", type=float, default=0.002)

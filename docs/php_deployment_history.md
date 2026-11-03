@@ -3,7 +3,7 @@
 本文归档原 PHP README 的内容，保存实现来源、测量和阶段性验证记录。
 文中的“当前”、本机路径、设备状态和验收结论均属于各次记录时的情况，可能已经过期；
 本文不作为当前操作指南，也不代表真机运动已验收。
-安装和使用请阅读 [PHP 使用指南](../actions/php/README.md)。
+安装和使用请阅读 [PHP 使用指南](../actions/perception/php/README.md)。
 
 ---
 
@@ -55,18 +55,18 @@ python3 tools/sim/diagnose_php_motion.py --net eth0 --duration 600 \
 ## 模型与构建
 
 模型是同级 PHP 项目公开的 `student-assets-v1` 双 ONNX。
-本机已放入 `actions/php/model/`；模型文件按仓库规则忽略。
+本机已放入 `actions/perception/php/model/`；模型文件按仓库规则忽略。
 重新获取时在同级 `php_parkour` 执行其下载器，再复制到此包：
 
 ```bash
 python ../php_parkour/scripts/download_assets.py student
-mkdir -p actions/php/model
-cp ~/.cache/php-parkour/student/*.onnx actions/php/model/
+mkdir -p actions/perception/php/model
+cp ~/.cache/php-parkour/student/*.onnx actions/perception/php/model/
 sudo apt install libzmq3-dev pkg-config
 cmake -S . -B build
 cmake --build build --target generic_sensor_policy_player policy_spec_schema_check runtime_hardening_test
 ./build/policy_spec_schema_check --all
-./build/generic_sensor_policy_player --spec actions/php/config/generic_php.yaml --check-only
+./build/generic_sensor_policy_player --spec actions/perception/php/config/generic_php.yaml --check-only
 ACTION_GO_NET=lo tools/launch/start_dry_run.sh
 ```
 
@@ -161,7 +161,7 @@ RealSense零读数置far，整帧无测距不更新有效时间；至少3个有�
 
 沿用已验证Instinct的G1 29DoF、Jetson Orin、默认网卡enP8p1s0与SDK安装。
 当前验收机器人DDS实际网卡为`eth0`，通过`ACTION_GO_NET=eth0`指定。
-模型按上节下载与复制，librealsense的Jetson构建见`actions/instinct/README.md`。
+模型按上节下载与复制，librealsense的Jetson构建见`actions/perception/instinct/README.md`。
 
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \

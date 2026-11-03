@@ -37,7 +37,7 @@ type_defaults:
   # - 覆盖已迁移的 self/embedded 类 policy：
   #   single_actor_state: BFM-Zero / unitree_rl_mjlab
   #   embedded_mimic_time: BeyondMimic / Holosoma
-  # - params 字段在该类型下表示 policy spec: actions/<policy>/config/generic_*.yaml。
+  # - params 字段在该类型下表示 policy spec: actions/<category>/<policy>/config/generic_*.yaml。
   # - 使用 prestart handoff，先让 generic_policy_player 完成 ONNX/DDS/lowstate/
   #   初始化并持续发布当前姿态 hold，再切 UserCtrl。
   # ---------------------------------------------------------------------------
@@ -51,7 +51,7 @@ type_defaults:
   # Generic Motion Tracking Runtime 默认值
   # - 覆盖 motion_conditioned_tracking / external_reference_tracking：
   #   ProtoMotions / TWIST / Humanoid-GPT / SONIC
-  # - params 字段在该类型下表示 policy spec: actions/<policy>/config/generic_*.yaml。
+  # - params 字段在该类型下表示 policy spec: actions/<category>/<policy>/config/generic_*.yaml。
   # - 保留 prestart handoff、CommandSafetyFilter、switch-back；motion/reference
   #   source、stale gate 和 action decoder 由 spec/action 命令选择。
   # ---------------------------------------------------------------------------
@@ -80,7 +80,7 @@ type_defaults:
   # - 使用 prestart handoff
   # ---------------------------------------------------------------------------
   omnixtreme:
-    params: actions/omnixtreme/config/generic_omnixtreme.yaml
+    params: actions/tracking/omnixtreme/config/generic_omnixtreme.yaml
     prestart_before_userctrl: true
     # First TensorRT run may build engine caches, so keep the prestart timeout long.
     prestart_ready_timeout_sec: 180.0
@@ -94,7 +94,7 @@ type_defaults:
   # - 无 apriltag C 库时可手动用 --object-source udp/zero 做 smoke test。
   # ---------------------------------------------------------------------------
   steadytray:
-    params: actions/steadytray/config/generic_steadytray.yaml
+    params: actions/perception/steadytray/config/generic_steadytray.yaml
     prestart_before_userctrl: true
     prestart_ready_timeout_sec: 10.0
     command: "{action_go_root}/build/generic_sensor_policy_player --net {net} --cmd-topic rt/user_lowcmd --spec {params} --ready-file {ready_file} --start-file {start_file} --no-damping-on-stop {event_log_arg}"
@@ -119,24 +119,24 @@ type_defaults:
 # 每个动作默认继承 defaults.safety_enable=true；如需禁用某个动作的 IMU safety，
 # 在对应 action 下写 safety_enable: false。
 action_files:
-  fighting154k: actions/fighting154k/fighting154k.yaml
-  allmimic: actions/allmimic/allmimic.yaml
-  uni_supermimic: actions/uni_supermimic/uni_supermimic.yaml
-  supermimic: actions/supermimic/supermimic.yaml
-  php: actions/php/php.yaml
-  pbfm: actions/pbfm/pbfm.yaml
-  beyondmimic: actions/beyondmimic/beyondmimic.yaml                    # generic_policy: kick_right / hlqk / wbst / lie_down_beyondmimic
-  bfm_zero: actions/bfm0/bfm_zero.yaml                                 # generic_policy: bfm_zero_stand
-  ufo: actions/ufo/ufo.yaml                                            # generic_policy: fixed prompts / tracking / recovery
-  instinct_parkour: actions/instinct/instinct_parkour.yaml             # g1_parkour
-  holosoma_wbt: actions/holosoma/holosoma_wbt.yaml                     # generic_policy: holosoma_dance
-  mjlab: actions/mjlab/mjlab.yaml                                      # generic_policy: reverse_vault flat / terrain
-  mjlab_combat: actions/mjlab_combat/mjlab_combat.yaml
-  humanoid_gpt: actions/humanoid_gpt/humanoid_gpt.yaml                  # generic_motion_tracking: humanoid_gpt_offline / humanoid_gpt_realtime
-  sonic: actions/sonic/sonic.yaml                                      # generic_motion_tracking: offline / G1 ZMQ / PICO SMPL teleop
-  protomotions_tracker: actions/protomotions/protomotions_tracker.yaml  # generic_motion_tracking: proto_walk / proto_dance
-  omnixtreme: actions/omnixtreme/omnixtreme.yaml                        # omni_motion_default / omni_seg01..15
-  twist: actions/twist/twist.yaml                                      # generic_motion_tracking: twist_offline_pkl / twist_{udp,zmq,redis}_realtime
-  steadytray: actions/steadytray/steadytray.yaml                         # steadytray_balance / steadytray_zero_test
-  gentle_humanoid: actions/gentle_humanoid/gentle_humanoid.yaml           # gentle_default / gentle_walk / gentle_hug ...
-  unitree_rl_mjlab: actions/unitree_rl_mjlab/unitree_rl_mjlab.yaml         # generic_policy: sim_walkrun
+  fighting154k: actions/tracking/fighting154k/fighting154k.yaml
+  allmimic: actions/tracking/allmimic/allmimic.yaml
+  uni_supermimic: actions/tracking/uni_supermimic/uni_supermimic.yaml
+  supermimic: actions/tracking/supermimic/supermimic.yaml
+  php: actions/perception/php/php.yaml
+  pbfm: actions/perception/pbfm/pbfm.yaml
+  beyondmimic: actions/proprio/beyondmimic/beyondmimic.yaml       # generic_policy: kick_right / hlqk / wbst / lie_down_beyondmimic
+  bfm_zero: actions/tracking/bfm0/bfm_zero.yaml                  # generic_policy: bfm_zero_stand
+  ufo: actions/tracking/ufo/ufo.yaml                             # generic_policy: fixed prompts / tracking / recovery
+  instinct_parkour: actions/perception/instinct/instinct_parkour.yaml # g1_parkour
+  holosoma_wbt: actions/proprio/holosoma/holosoma_wbt.yaml       # generic_policy: holosoma_dance
+  mjlab: actions/proprio/mjlab/mjlab.yaml                         # generic_policy: reverse_vault flat / terrain
+  mjlab_combat: actions/tracking/mjlab_combat/mjlab_combat.yaml
+  humanoid_gpt: actions/tracking/humanoid_gpt/humanoid_gpt.yaml   # generic_motion_tracking: humanoid_gpt_offline / humanoid_gpt_realtime
+  sonic: actions/tracking/sonic/sonic.yaml                        # generic_motion_tracking: offline / G1 ZMQ / PICO SMPL teleop
+  protomotions_tracker: actions/tracking/protomotions/protomotions_tracker.yaml # generic_motion_tracking: proto_walk / proto_dance
+  omnixtreme: actions/tracking/omnixtreme/omnixtreme.yaml         # omni_motion_default / omni_seg01..15
+  twist: actions/tracking/twist/twist.yaml                        # generic_motion_tracking: twist_offline_pkl / twist_{udp,zmq,redis}_realtime
+  steadytray: actions/perception/steadytray/steadytray.yaml      # steadytray_balance / steadytray_zero_test
+  gentle_humanoid: actions/proprio/gentle_humanoid/gentle_humanoid.yaml # gentle_default / gentle_walk / gentle_hug ...
+  unitree_rl_mjlab: actions/proprio/unitree_rl_mjlab/unitree_rl_mjlab.yaml # generic_policy: sim_walkrun

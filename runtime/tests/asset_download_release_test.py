@@ -27,7 +27,7 @@ class AssetDownloadReleaseTest(unittest.TestCase):
         self.addCleanup(self.directory.cleanup)
         self.root = Path(self.directory.name)
         self.cache = self.root / "cache"
-        self.relative = "actions/demo/model/policy.onnx"
+        self.relative = "actions/tracking/demo/model/policy.onnx"
         self.target = self.root / self.relative
         self.payload = b"verified model fixture"
         self.recipe = {"kind": "file", "url": "https://example.invalid/model"}
@@ -150,16 +150,16 @@ class AssetDownloadReleaseTest(unittest.TestCase):
         self.assertNotEqual(unknown.returncode, 0)
 
     def test_pbfm_derived_text_is_excluded_and_checker_rejects_it(self):
-        for relative in ["actions/pbfm/motions/lafan_dance/context.yaml",
-                         "actions/pbfm/motions/lafan_dance/initial_state.json",
-                         "actions/pbfm/config/context_idle.yaml",
-                         "actions/pbfm/config/joystick_walk/context.yaml"]:
+        for relative in ["actions/perception/pbfm/motions/lafan_dance/context.yaml",
+                         "actions/perception/pbfm/motions/lafan_dance/initial_state.json",
+                         "actions/perception/pbfm/config/context_idle.yaml",
+                         "actions/perception/pbfm/config/joystick_walk/context.yaml"]:
             path = Path(relative)
             self.assertTrue(create_public_snapshot.excluded(path, set()))
             output = self.root / path
             output.parent.mkdir(parents=True, exist_ok=True)
             output.write_text("fixture: data\n")
-        self.assertFalse(create_public_snapshot.excluded(Path("actions/pbfm/config/PBFM.yaml"), set()))
+        self.assertFalse(create_public_snapshot.excluded(Path("actions/perception/pbfm/config/PBFM.yaml"), set()))
         result = subprocess.run([sys.executable, str(ROOT / "tools/release/public_snapshot_check.py"),
                                  "--repo", str(self.root)], capture_output=True, text=True)
         self.assertEqual(result.returncode, 1)

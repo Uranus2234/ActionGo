@@ -106,7 +106,7 @@ def run(args):
     domain = secrets.randbelow(140) + 50
     initializer(domain, "lo")
     bridge = helpers.DDSBridge(model, data, indices)
-    spec = yaml.safe_load((ROOT / "actions/allmimic/config/generic_allmimic_paoxiao.yaml").read_text())
+    spec = yaml.safe_load((ROOT / "actions/tracking/allmimic/config/generic_allmimic_paoxiao.yaml").read_text())
     spec["robot"]["params"] = str(args.package / "AllMimic.yaml")
     spec["model"]["path"] = str(args.package / "policy.onnx")
     spec["reference"].update(path=str(args.package / args.clip / "reference.csv"),

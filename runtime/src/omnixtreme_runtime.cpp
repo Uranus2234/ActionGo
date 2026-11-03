@@ -467,7 +467,7 @@ Args parse_args(int argc, char** argv) {
     else if (k == "--damping-on-stop") a.no_damping_on_stop = false;
     else if (k == "--experimental-no-prestart-hold") a.experimental_no_prestart_hold = true;
     else if (k == "--help") {
-      std::cout << "Usage: generic_composite_policy_player --spec actions/omnixtreme/config/generic_omnixtreme.yaml [runtime overrides]\n"
+      std::cout << "Usage: generic_composite_policy_player --spec actions/tracking/omnixtreme/config/generic_omnixtreme.yaml [runtime overrides]\n"
                 << "  C++ ONNXRuntime/Unitree DDS player for OmniXtreme G1 29-DOF policy.\n"
                 << "  --cmd-topic rt/user_lowcmd      G1 UserCtrl command topic; sim uses rt/lowcmd\n"
                 << "  --state-topic rt/lowstate       LowState topic\n"

@@ -213,7 +213,7 @@ def send_depth(args):
             with log_path.open("w") as log:
                 process = subprocess.Popen([
                     str(args.root / "build/generic_sensor_policy_player"),
-                    "--spec", str(args.root / "actions/php/config/generic_php.yaml"),
+                    "--spec", str(args.root / "actions/perception/php/config/generic_php.yaml"),
                     "--net", args.net, "--dds-dry-run", "--duration-sec", "86400",
                     "--hz", "10", "--stats-interval", "10", "--command-source", "fixed",
                     "--command-index", "0", "--trace-file", str(trace),

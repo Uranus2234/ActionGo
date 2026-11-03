@@ -607,31 +607,31 @@ if(DEFINED ACTION_GO_ONNXRUNTIME_LIB AND DEFINED ACTION_GO_ONNXRUNTIME_INCLUDE_D
       WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
     )
     if(NOT ACTION_GO_CODE_ONLY AND
-       EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/actions/fighting154k/model/supermimic_omni.onnx" AND
-       EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/actions/fighting154k/model/supermimic_no_omni.onnx" AND
-       EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/actions/fighting154k/model/allmimic_omni.onnx" AND
-       EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/actions/fighting154k/model/allmimic_no_omni.onnx")
+       EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/actions/tracking/fighting154k/model/supermimic_omni.onnx" AND
+       EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/actions/tracking/fighting154k/model/supermimic_no_omni.onnx" AND
+       EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/actions/tracking/fighting154k/model/allmimic_omni.onnx" AND
+       EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/actions/tracking/fighting154k/model/allmimic_no_omni.onnx")
       add_test(NAME fighting154k_deployment_test COMMAND ${Python3_EXECUTABLE}
         ${CMAKE_CURRENT_SOURCE_DIR}/runtime/tests/fighting154k_deployment_test.py
         --player $<TARGET_FILE:generic_motion_tracking_player>)
       set_tests_properties(fighting154k_deployment_test PROPERTIES TIMEOUT 120)
     endif()
     if(NOT ACTION_GO_CODE_ONLY AND
-       EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/actions/allmimic/model/policy.onnx" AND
-       EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/actions/allmimic/model/policy_no_omni.onnx")
+       EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/actions/tracking/allmimic/model/policy.onnx" AND
+       EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/actions/tracking/allmimic/model/policy_no_omni.onnx")
       add_test(NAME allmimic_dry_run_test COMMAND ${Python3_EXECUTABLE}
         ${CMAKE_CURRENT_SOURCE_DIR}/runtime/tests/allmimic_dry_run_test.py
         --player $<TARGET_FILE:generic_motion_tracking_player>)
       set_tests_properties(allmimic_dry_run_test PROPERTIES TIMEOUT 60)
     endif()
     if(NOT ACTION_GO_CODE_ONLY AND
-       EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/actions/mjlab_combat/model/policy_92000.onnx")
+       EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/actions/tracking/mjlab_combat/model/policy_92000.onnx")
       add_test(NAME mjlab_combat_deployment_test COMMAND ${Python3_EXECUTABLE}
         ${CMAKE_CURRENT_SOURCE_DIR}/runtime/tests/mjlab_combat_deployment_test.py
         --player $<TARGET_FILE:generic_motion_tracking_player>)
       set_tests_properties(mjlab_combat_deployment_test PROPERTIES TIMEOUT 90)
     endif()
-    if(NOT ACTION_GO_CODE_ONLY AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/actions/bfm0/model/FBcprAuxModel.onnx")
+    if(NOT ACTION_GO_CODE_ONLY AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/actions/tracking/bfm0/model/FBcprAuxModel.onnx")
       add_test(
         NAME policy_spec_schema_check_all
         COMMAND policy_spec_schema_check --all
@@ -642,7 +642,7 @@ if(DEFINED ACTION_GO_ONNXRUNTIME_LIB AND DEFINED ACTION_GO_ONNXRUNTIME_INCLUDE_D
       add_test(
         NAME generic_policy_offline_dry_run
         COMMAND generic_policy_player
-                --spec actions/bfm0/config/generic_bfm_zero.yaml
+                --spec actions/tracking/bfm0/config/generic_bfm_zero.yaml
                 --duration-sec 0.05
                 --dry-run
                 --offline-dry-run-state
@@ -653,9 +653,9 @@ if(DEFINED ACTION_GO_ONNXRUNTIME_LIB AND DEFINED ACTION_GO_ONNXRUNTIME_INCLUDE_D
       )
     endif()
     if(NOT ACTION_GO_CODE_ONLY AND
-       EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/actions/bfm0/model/FBcprAuxModel.onnx" AND
-       EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/actions/beyondmimic/model/kick_right.onnx" AND
-       EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/actions/protomotions/model/unified_pipeline.onnx")
+       EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/actions/tracking/bfm0/model/FBcprAuxModel.onnx" AND
+       EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/actions/proprio/beyondmimic/model/kick_right.onnx" AND
+       EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/actions/tracking/protomotions/model/unified_pipeline.onnx")
       add_test(
         NAME generic_preview_integration
         COMMAND ${Python3_EXECUTABLE}
@@ -668,9 +668,9 @@ if(DEFINED ACTION_GO_ONNXRUNTIME_LIB AND DEFINED ACTION_GO_ONNXRUNTIME_INCLUDE_D
     endif()
     if(NOT ACTION_GO_CODE_ONLY AND
        EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tools/experiments/failure_injection.py" AND
-       EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/actions/bfm0/model/FBcprAuxModel.onnx" AND
-       EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/actions/twist/model/twist_general_motion_tracker.onnx" AND
-       EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/actions/protomotions/model/unified_pipeline.onnx")
+       EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/actions/tracking/bfm0/model/FBcprAuxModel.onnx" AND
+       EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/actions/tracking/twist/model/twist_general_motion_tracker.onnx" AND
+       EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/actions/tracking/protomotions/model/unified_pipeline.onnx")
       add_test(
         NAME failure_injection_quick
         COMMAND ${Python3_EXECUTABLE}
@@ -813,7 +813,7 @@ if(DEFINED ACTION_GO_ONNXRUNTIME_LIB AND DEFINED ACTION_GO_ONNXRUNTIME_INCLUDE_D
       INSTALL_RPATH "$ORIGIN;$ORIGIN/../lib;${ACTION_GO_ONNXRUNTIME_DIR}/lib"
     )
     list(APPEND ACTION_GO_ONNX_TARGETS generic_sensor_policy_player)
-    if(BUILD_TESTING AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/actions/pbfm/model/policy.onnx")
+    if(BUILD_TESTING AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/actions/perception/pbfm/model/policy.onnx")
       add_test(NAME pbfm_lifecycle_test COMMAND ${Python3_EXECUTABLE}
         ${CMAKE_CURRENT_SOURCE_DIR}/runtime/tests/pbfm_lifecycle_test.py
         --player $<TARGET_FILE:generic_sensor_policy_player>)
@@ -853,9 +853,9 @@ if(BUILD_TESTING AND TARGET generic_policy_player)
     set_tests_properties(sim2sim_perception_test PROPERTIES SKIP_RETURN_CODE 77)
     add_test(NAME pbfm_keyboard_test COMMAND ${Python3_EXECUTABLE}
       ${CMAKE_CURRENT_SOURCE_DIR}/runtime/tests/pbfm_keyboard_test.py)
-    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/actions/pbfm/model/policy.onnx" AND
-       EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/actions/bfm0/model/FBcprAuxModel.onnx" AND
-       EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/actions/ufo/model/FBcprAuxModel.onnx")
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/actions/perception/pbfm/model/policy.onnx" AND
+       EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/actions/tracking/bfm0/model/FBcprAuxModel.onnx" AND
+       EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/actions/tracking/ufo/model/FBcprAuxModel.onnx")
       add_test(NAME pbfm_onnx_parity COMMAND ${Python3_EXECUTABLE}
         ${CMAKE_CURRENT_SOURCE_DIR}/runtime/tests/pbfm_onnx_parity.py --test-binary $<TARGET_FILE:bfm_policy_test>)
       set_tests_properties(pbfm_onnx_parity PROPERTIES TIMEOUT 90)

@@ -51,6 +51,13 @@ def is_lfs_pointer(path: Path) -> bool:
     return path.read_bytes().startswith(b"version https://git-lfs.github.com/spec/v1")
 
 
+def asset_package(relative: str) -> str:
+    parts = Path(relative).parts
+    if len(parts) >= 4 and parts[0] == "actions" and parts[1] in {"proprio", "tracking", "perception"}:
+        return parts[2]
+    return parts[1] if len(parts) > 1 else ""
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repo", type=Path, default=Path(__file__).resolve().parents[2])
@@ -62,19 +69,19 @@ def main() -> int:
     parser.add_argument("--installed-only", action="store_true",
                         help="verify present assets and report absent ones without failing")
     parser.add_argument("--policy", action="append", default=[],
-                        help="check one actions/<policy> package; may be repeated")
+                        help="check one package under actions/<category>; may be repeated")
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
 
     repo = args.repo.resolve()
     manifest_path = args.manifest if args.manifest.is_absolute() else repo / args.manifest
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    known_policies = {path.split("/")[1] for group in manifest["assets"] for path in group["paths"]
+    known_policies = {asset_package(path) for group in manifest["assets"] for path in group["paths"]
                       if path.startswith("actions/")}
     unknown_policies = set(args.policy) - known_policies
     if unknown_policies:
         parser.error("unknown asset package(s): " + ", ".join(sorted(unknown_policies)))
-    selected_prefixes = tuple(f"actions/{policy}/" for policy in args.policy)
+    selected_policies = set(args.policy)
     permit_missing = args.permit_missing or args.installed_only
     results = []
     failures = 0
@@ -86,7 +93,7 @@ def main() -> int:
             raise SystemExit(f"paths/hash count mismatch for {group.get('source')}")
         release_allowed = group.get("redistribution") == "allowed"
         for relative, expected in zip(paths, hashes):
-            if selected_prefixes and not relative.startswith(selected_prefixes):
+            if selected_policies and asset_package(relative) not in selected_policies:
                 continue
             if relative in declared_paths:
                 failures += 1
@@ -116,7 +123,7 @@ def main() -> int:
 
     unmanaged = sorted(tracked_managed_assets(repo) - declared_paths)
     for relative in unmanaged:
-        if selected_prefixes and not relative.startswith(selected_prefixes):
+        if selected_policies and asset_package(relative) not in selected_policies:
             continue
         failures += 1
         results.append({

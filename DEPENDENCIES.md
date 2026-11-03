@@ -41,5 +41,5 @@ the full JetPack, CUDA, TensorRT, ONNX Runtime, camera firmware, robot firmware,
 and kernel versions in every real-robot experiment manifest.
 
 Do not globally prepend an unrelated ONNX Runtime through `LD_LIBRARY_PATH`.
-The default launchers use each binary's RPATH; see `actions/omnixtreme/README.md`
+The default launchers use each binary's RPATH; see `actions/tracking/omnixtreme/README.md`
 for the separate TensorRT build.

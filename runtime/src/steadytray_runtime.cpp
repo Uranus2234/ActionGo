@@ -387,7 +387,7 @@ Args parse_args(int argc, char** argv) {
     else if (k == "--experimental-no-prestart-hold") a.experimental_no_prestart_hold = true;
     else if (k == "--damping-on-stop") a.no_damping_on_stop = false;
     else if (k == "--help") {
-      std::cout << "Usage: generic_sensor_policy_player --spec actions/steadytray/config/generic_steadytray.yaml [runtime overrides]\n"
+      std::cout << "Usage: generic_sensor_policy_player --spec actions/perception/steadytray/config/generic_steadytray.yaml [runtime overrides]\n"
                 << "  --object-source apriltag|udp|zero\n"
                 << "  --domain-id ID selects the DDS domain (default 0)\n"
                 << "  --udp-bind ADDRESS selects the UDP listener address (default 0.0.0.0)\n"

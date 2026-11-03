@@ -1,0 +1,441 @@
+# OmniXtreme split motion segments using the renamed .npz files.
+#
+# Canonical action names follow the renamed data fragments:
+#   omni_segNN_<file-stem-without-number>
+# Compatibility aliases with original frame ranges are kept below.
+# max_frames is motion_frames - 1 because the player consumes frame+1 as ref.
+actions:
+  omnixtreme:
+    # Default OmniXtreme segment for real-robot remote binding.
+    omni_motion_default:
+      safety_enable: false
+      max_frames: 465
+      switch_back: true
+      switch_back_mode: walkrun
+      model: actions/tracking/omnixtreme/model/base_policy_trt.onnx
+      params: config/generic_omnixtreme.yaml
+      trajectory: motions/segments/4_wbst_stand.npz
+
+    # Canonical renamed segment actions.
+    # 1: 1_fuck_floor.npz
+    omni_seg01_fuck_floor:
+      safety_enable: false
+      max_frames: 850
+      switch_back: true
+      switch_back_mode: walkrun
+      model: actions/tracking/omnixtreme/model/base_policy_trt.onnx
+      params: config/generic_omnixtreme.yaml
+      trajectory: motions/segments/1_fuck_floor.npz
+
+    # 2: 2_back_hand_flip_roll.npz
+    omni_seg02_back_hand_flip_roll:
+      safety_enable: false
+      max_frames: 485
+      switch_back: true
+      switch_back_mode: walkrun
+      model: actions/tracking/omnixtreme/model/base_policy_trt.onnx
+      params: config/generic_omnixtreme.yaml
+      trajectory: motions/segments/2_back_hand_flip_roll.npz
+
+    # 3: 3_back_hand_flip.npz
+    omni_seg03_back_hand_flip:
+      safety_enable: false
+      max_frames: 393
+      switch_back: true
+      switch_back_mode: walkrun
+      model: actions/tracking/omnixtreme/model/base_policy_trt.onnx
+      params: config/generic_omnixtreme.yaml
+      trajectory: motions/segments/3_back_hand_flip.npz
+
+    # 4: 4_wbst_stand.npz
+    omni_seg04_wbst_stand:
+      safety_enable: false
+      max_frames: 465
+      switch_back: true
+      switch_back_mode: walkrun
+      model: actions/tracking/omnixtreme/model/base_policy_trt.onnx
+      params: config/generic_omnixtreme.yaml
+      trajectory: motions/segments/4_wbst_stand.npz
+
+    # 5: 5_side_roll_kick.npz
+    omni_seg05_side_roll_kick:
+      safety_enable: false
+      max_frames: 414
+      switch_back: true
+      switch_back_mode: walkrun
+      model: actions/tracking/omnixtreme/model/base_policy_trt.onnx
+      params: config/generic_omnixtreme.yaml
+      trajectory: motions/segments/5_side_roll_kick.npz
+
+    # 6: 6_front_roll.npz
+    omni_seg06_front_roll:
+      safety_enable: false
+      max_frames: 503
+      switch_back: true
+      switch_back_mode: walkrun
+      model: actions/tracking/omnixtreme/model/base_policy_trt.onnx
+      params: config/generic_omnixtreme.yaml
+      trajectory: motions/segments/6_front_roll.npz
+
+    # 7: 7_back_roll.npz
+    omni_seg07_back_roll:
+      safety_enable: false
+      max_frames: 482
+      switch_back: true
+      switch_back_mode: walkrun
+      model: actions/tracking/omnixtreme/model/base_policy_trt.onnx
+      params: config/generic_omnixtreme.yaml
+      trajectory: motions/segments/7_back_roll.npz
+
+    # 8: 8_none.npz
+    omni_seg08_none:
+      safety_enable: false
+      max_frames: 123
+      switch_back: true
+      switch_back_mode: walkrun
+      model: actions/tracking/omnixtreme/model/base_policy_trt.onnx
+      params: config/generic_omnixtreme.yaml
+      trajectory: motions/segments/8_none.npz
+
+    # 9: 9_back_hand_flip.npz
+    omni_seg09_back_hand_flip:
+      safety_enable: false
+      max_frames: 587
+      switch_back: true
+      switch_back_mode: walkrun
+      model: actions/tracking/omnixtreme/model/base_policy_trt.onnx
+      params: config/generic_omnixtreme.yaml
+      trajectory: motions/segments/9_back_hand_flip.npz
+
+    # 10: 10_back_hand_flip.npz
+    omni_seg10_back_hand_flip:
+      safety_enable: false
+      max_frames: 473
+      switch_back: true
+      switch_back_mode: walkrun
+      model: actions/tracking/omnixtreme/model/base_policy_trt.onnx
+      params: config/generic_omnixtreme.yaml
+      trajectory: motions/segments/10_back_hand_flip.npz
+
+    # 11: 11_side_flip_roll.npz
+    omni_seg11_side_flip_roll:
+      safety_enable: false
+      max_frames: 364
+      switch_back: true
+      switch_back_mode: walkrun
+      model: actions/tracking/omnixtreme/model/base_policy_trt.onnx
+      params: config/generic_omnixtreme.yaml
+      trajectory: motions/segments/11_side_flip_roll.npz
+
+    # 12: 12_wbst_motive.npz
+    omni_seg12_wbst_motive:
+      safety_enable: false
+      max_frames: 573
+      switch_back: true
+      switch_back_mode: walkrun
+      model: actions/tracking/omnixtreme/model/base_policy_trt.onnx
+      params: config/generic_omnixtreme.yaml
+      trajectory: motions/segments/12_wbst_motive.npz
+
+    # 13: 13_ceshoufan_double.npz
+    omni_seg13_ceshoufan_double:
+      safety_enable: false
+      max_frames: 410
+      switch_back: true
+      switch_back_mode: walkrun
+      model: actions/tracking/omnixtreme/model/base_policy_trt.onnx
+      params: config/generic_omnixtreme.yaml
+      trajectory: motions/segments/13_ceshoufan_double.npz
+
+    # 14: 14_yewendun-kick.npz
+    omni_seg14_yewendun_kick:
+      safety_enable: false
+      max_frames: 916
+      switch_back: true
+      switch_back_mode: walkrun
+      model: actions/tracking/omnixtreme/model/base_policy_trt.onnx
+      params: config/generic_omnixtreme.yaml
+      trajectory: motions/segments/14_yewendun-kick.npz
+
+    # 15: 15_front_paxing.npz
+    omni_seg15_front_paxing:
+      safety_enable: false
+      max_frames: 429
+      switch_back: true
+      switch_back_mode: passive
+      model: actions/tracking/omnixtreme/model/base_policy_trt.onnx
+      params: config/generic_omnixtreme.yaml
+      trajectory: motions/segments/15_front_paxing.npz
+
+    # Raw filename-stem aliases, so remote_actions.yaml can use e.g. 12_wbst_motive directly.
+    "1_fuck_floor":
+      safety_enable: false
+      max_frames: 850
+      switch_back: true
+      switch_back_mode: walkrun
+      model: actions/tracking/omnixtreme/model/base_policy_trt.onnx
+      params: config/generic_omnixtreme.yaml
+      trajectory: motions/segments/1_fuck_floor.npz
+
+    "2_back_hand_flip_roll":
+      safety_enable: false
+      max_frames: 485
+      switch_back: true
+      switch_back_mode: walkrun
+      model: actions/tracking/omnixtreme/model/base_policy_trt.onnx
+      params: config/generic_omnixtreme.yaml
+      trajectory: motions/segments/2_back_hand_flip_roll.npz
+
+    "3_back_hand_flip":
+      safety_enable: false
+      max_frames: 393
+      switch_back: true
+      switch_back_mode: walkrun
+      model: actions/tracking/omnixtreme/model/base_policy_trt.onnx
+      params: config/generic_omnixtreme.yaml
+      trajectory: motions/segments/3_back_hand_flip.npz
+
+    "4_wbst_stand":
+      safety_enable: false
+      max_frames: 465
+      switch_back: true
+      switch_back_mode: walkrun
+      model: actions/tracking/omnixtreme/model/base_policy_trt.onnx
+      params: config/generic_omnixtreme.yaml
+      trajectory: motions/segments/4_wbst_stand.npz
+
+    "5_side_roll_kick":
+      safety_enable: false
+      max_frames: 414
+      switch_back: true
+      switch_back_mode: walkrun
+      model: actions/tracking/omnixtreme/model/base_policy_trt.onnx
+      params: config/generic_omnixtreme.yaml
+      trajectory: motions/segments/5_side_roll_kick.npz
+
+    "6_front_roll":
+      safety_enable: false
+      max_frames: 503
+      switch_back: true
+      switch_back_mode: walkrun
+      model: actions/tracking/omnixtreme/model/base_policy_trt.onnx
+      params: config/generic_omnixtreme.yaml
+      trajectory: motions/segments/6_front_roll.npz
+
+    "7_back_roll":
+      safety_enable: false
+      max_frames: 482
+      switch_back: true
+      switch_back_mode: walkrun
+      model: actions/tracking/omnixtreme/model/base_policy_trt.onnx
+      params: config/generic_omnixtreme.yaml
+      trajectory: motions/segments/7_back_roll.npz
+
+    "8_none":
+      safety_enable: false
+      max_frames: 123
+      switch_back: true
+      switch_back_mode: walkrun
+      model: actions/tracking/omnixtreme/model/base_policy_trt.onnx
+      params: config/generic_omnixtreme.yaml
+      trajectory: motions/segments/8_none.npz
+
+    "9_back_hand_flip":
+      safety_enable: false
+      max_frames: 587
+      switch_back: true
+      switch_back_mode: walkrun
+      model: actions/tracking/omnixtreme/model/base_policy_trt.onnx
+      params: config/generic_omnixtreme.yaml
+      trajectory: motions/segments/9_back_hand_flip.npz
+
+    "10_back_hand_flip":
+      safety_enable: false
+      max_frames: 473
+      switch_back: true
+      switch_back_mode: walkrun
+      model: actions/tracking/omnixtreme/model/base_policy_trt.onnx
+      params: config/generic_omnixtreme.yaml
+      trajectory: motions/segments/10_back_hand_flip.npz
+
+    "11_side_flip_roll":
+      safety_enable: false
+      max_frames: 364
+      switch_back: true
+      switch_back_mode: walkrun
+      model: actions/tracking/omnixtreme/model/base_policy_trt.onnx
+      params: config/generic_omnixtreme.yaml
+      trajectory: motions/segments/11_side_flip_roll.npz
+
+    "12_wbst_motive":
+      safety_enable: false
+      max_frames: 573
+      switch_back: true
+      switch_back_mode: walkrun
+      model: actions/tracking/omnixtreme/model/base_policy_trt.onnx
+      params: config/generic_omnixtreme.yaml
+      trajectory: motions/segments/12_wbst_motive.npz
+
+    "13_ceshoufan_double":
+      safety_enable: false
+      max_frames: 410
+      switch_back: true
+      switch_back_mode: walkrun
+      model: actions/tracking/omnixtreme/model/base_policy_trt.onnx
+      params: config/generic_omnixtreme.yaml
+      trajectory: motions/segments/13_ceshoufan_double.npz
+
+    "14_yewendun-kick":
+      safety_enable: false
+      max_frames: 916
+      switch_back: true
+      switch_back_mode: walkrun
+      model: actions/tracking/omnixtreme/model/base_policy_trt.onnx
+      params: config/generic_omnixtreme.yaml
+      trajectory: motions/segments/14_yewendun-kick.npz
+
+    "15_front_paxing":
+      safety_enable: false
+      max_frames: 429
+      switch_back: true
+      switch_back_mode: passive
+      model: actions/tracking/omnixtreme/model/base_policy_trt.onnx
+      params: config/generic_omnixtreme.yaml
+      trajectory: motions/segments/15_front_paxing.npz
+
+    # Compatibility aliases from the previous frame-range naming scheme.
+    omni_seg01_0000_0850:
+      safety_enable: false
+      max_frames: 850
+      switch_back: true
+      switch_back_mode: walkrun
+      model: actions/tracking/omnixtreme/model/base_policy_trt.onnx
+      params: config/generic_omnixtreme.yaml
+      trajectory: motions/segments/1_fuck_floor.npz
+
+    omni_seg02_0850_1335:
+      safety_enable: false
+      max_frames: 485
+      switch_back: true
+      switch_back_mode: walkrun
+      model: actions/tracking/omnixtreme/model/base_policy_trt.onnx
+      params: config/generic_omnixtreme.yaml
+      trajectory: motions/segments/2_back_hand_flip_roll.npz
+
+    omni_seg03_1335_1728:
+      safety_enable: false
+      max_frames: 393
+      switch_back: true
+      switch_back_mode: walkrun
+      model: actions/tracking/omnixtreme/model/base_policy_trt.onnx
+      params: config/generic_omnixtreme.yaml
+      trajectory: motions/segments/3_back_hand_flip.npz
+
+    omni_seg04_1728_2193:
+      safety_enable: false
+      max_frames: 465
+      switch_back: true
+      switch_back_mode: walkrun
+      model: actions/tracking/omnixtreme/model/base_policy_trt.onnx
+      params: config/generic_omnixtreme.yaml
+      trajectory: motions/segments/4_wbst_stand.npz
+
+    omni_seg05_2193_2607:
+      safety_enable: false
+      max_frames: 414
+      switch_back: true
+      switch_back_mode: walkrun
+      model: actions/tracking/omnixtreme/model/base_policy_trt.onnx
+      params: config/generic_omnixtreme.yaml
+      trajectory: motions/segments/5_side_roll_kick.npz
+
+    omni_seg06_2607_3110:
+      safety_enable: false
+      max_frames: 503
+      switch_back: true
+      switch_back_mode: walkrun
+      model: actions/tracking/omnixtreme/model/base_policy_trt.onnx
+      params: config/generic_omnixtreme.yaml
+      trajectory: motions/segments/6_front_roll.npz
+
+    omni_seg07_3110_3592:
+      safety_enable: false
+      max_frames: 482
+      switch_back: true
+      switch_back_mode: walkrun
+      model: actions/tracking/omnixtreme/model/base_policy_trt.onnx
+      params: config/generic_omnixtreme.yaml
+      trajectory: motions/segments/7_back_roll.npz
+
+    omni_seg08_3592_3715:
+      safety_enable: false
+      max_frames: 123
+      switch_back: true
+      switch_back_mode: walkrun
+      model: actions/tracking/omnixtreme/model/base_policy_trt.onnx
+      params: config/generic_omnixtreme.yaml
+      trajectory: motions/segments/8_none.npz
+
+    omni_seg09_3715_4302:
+      safety_enable: false
+      max_frames: 587
+      switch_back: true
+      switch_back_mode: walkrun
+      model: actions/tracking/omnixtreme/model/base_policy_trt.onnx
+      params: config/generic_omnixtreme.yaml
+      trajectory: motions/segments/9_back_hand_flip.npz
+
+    omni_seg10_4302_4775:
+      safety_enable: false
+      max_frames: 473
+      switch_back: true
+      switch_back_mode: walkrun
+      model: actions/tracking/omnixtreme/model/base_policy_trt.onnx
+      params: config/generic_omnixtreme.yaml
+      trajectory: motions/segments/10_back_hand_flip.npz
+
+    omni_seg11_4775_5139:
+      safety_enable: false
+      max_frames: 364
+      switch_back: true
+      switch_back_mode: walkrun
+      model: actions/tracking/omnixtreme/model/base_policy_trt.onnx
+      params: config/generic_omnixtreme.yaml
+      trajectory: motions/segments/11_side_flip_roll.npz
+
+    omni_seg12_5139_5712:
+      safety_enable: false
+      max_frames: 573
+      switch_back: true
+      switch_back_mode: walkrun
+      model: actions/tracking/omnixtreme/model/base_policy_trt.onnx
+      params: config/generic_omnixtreme.yaml
+      trajectory: motions/segments/12_wbst_motive.npz
+
+    omni_seg13_5712_6122:
+      safety_enable: false
+      max_frames: 410
+      switch_back: true
+      switch_back_mode: walkrun
+      model: actions/tracking/omnixtreme/model/base_policy_trt.onnx
+      params: config/generic_omnixtreme.yaml
+      trajectory: motions/segments/13_ceshoufan_double.npz
+
+    omni_seg14_6122_7038:
+      safety_enable: false
+      max_frames: 916
+      switch_back: true
+      switch_back_mode: walkrun
+      model: actions/tracking/omnixtreme/model/base_policy_trt.onnx
+      params: config/generic_omnixtreme.yaml
+      trajectory: motions/segments/14_yewendun-kick.npz
+
+    omni_seg15_7038_7467:
+      safety_enable: false
+      max_frames: 429
+      switch_back: true
+      switch_back_mode: passive
+      model: actions/tracking/omnixtreme/model/base_policy_trt.onnx
+      params: config/generic_omnixtreme.yaml
+      trajectory: motions/segments/15_front_paxing.npz
+

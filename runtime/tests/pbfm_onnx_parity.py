@@ -88,7 +88,7 @@ def main():
         latent = np.loadtxt(folder / "config" / spec["observation"]["latent_file"], dtype=np.float32)
         cases.append(make_scenario(package, folder / "config" / params,
                                    folder / "model/FBcprAuxModel.onnx", latent))
-    folder = ROOT / "actions/pbfm"
+    folder = ROOT / "actions/perception/pbfm"
     for filename in ["context_arms-up.yaml", "context_forward08-arms-spread.yaml", "context_rotate-inplace.yaml"]:
         context = yaml.safe_load((folder / "config" / filename).read_text())
         cases.append(make_scenario(filename, folder / "config/PBFM.yaml", folder / "model/policy.onnx",

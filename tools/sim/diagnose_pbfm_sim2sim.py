@@ -241,7 +241,7 @@ def main():
     options = ort.SessionOptions()
     options.intra_op_num_threads = 2
     options.inter_op_num_threads = 1
-    model = Path(__file__).resolve().parents[2] / "actions/pbfm/model/policy.onnx"
+    model = Path(__file__).resolve().parents[2] / "actions/perception/pbfm/model/policy.onnx"
     session = ort.InferenceSession(str(model), sess_options=options, providers=["CPUExecutionProvider"])
     summaries = [run_case(args, config, motion, session, case) for case in args.cases]
     (args.output / "summary.json").write_text(json.dumps(summaries, indent=2) + "\n")

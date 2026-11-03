@@ -76,8 +76,8 @@ def run_model(args, name):
     directory = args.log_dir / name
     directory.mkdir(parents=True, exist_ok=False)
     suffix = "_no_omni" if name == "no-omni" else ""
-    spec = ROOT / f"actions/allmimic/config/generic_allmimic_paoxiao{suffix}.yaml"
-    model = ROOT / f"actions/allmimic/model/policy{suffix}.onnx"
+    spec = ROOT / f"actions/tracking/allmimic/config/generic_allmimic_paoxiao{suffix}.yaml"
+    model = ROOT / f"actions/tracking/allmimic/model/policy{suffix}.onnx"
     command = [str(args.player), "--spec", str(spec), "--net", args.net,
                "--domain-id", str(args.domain_id), "--dry-run", "--dry-run-latency",
                "--duration-sec", str(args.duration_sec), "--no-damping-on-stop",

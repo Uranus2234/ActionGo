@@ -16,7 +16,7 @@ ROOT = Path(__file__).resolve().parents[2]
 def run_case(player, case):
     with tempfile.TemporaryDirectory(prefix="pbfm-realtime-") as temporary:
         directory = Path(temporary)
-        original = ROOT / "actions/pbfm/config/generic_pbfm_pico.yaml"
+        original = ROOT / "actions/perception/pbfm/config/generic_pbfm_pico.yaml"
         spec = yaml.safe_load(original.read_text())
         for section, key in [("model", "path"), ("robot", "params")]:
             spec[section][key] = str((original.parent / spec[section][key]).resolve())

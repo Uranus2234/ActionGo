@@ -9,7 +9,7 @@ import numpy as np
 
 ACTION_GO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_SOURCE = ACTION_GO_ROOT.parent / "UFO/model/g1_policy/tracking_inference_mjlab/zs_7.pkl"
-DEFAULT_OUTPUT = ACTION_GO_ROOT / "actions/ufo/config/ufo_tracking_zs7.npy"
+DEFAULT_OUTPUT = ACTION_GO_ROOT / "actions/tracking/ufo/config/ufo_tracking_zs7.npy"
 
 
 def parse_args() -> argparse.Namespace:

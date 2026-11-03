@@ -73,7 +73,7 @@ def run(args):
         model.actuator_ctrllimited[actuator_ids] = False
     spec_path = args.log_dir / "spec.yaml"
     motion_name = "wbst_motive" if args.clip == "12_wbst_motive" else args.clip
-    spec = yaml.safe_load((ROOT / f"actions/allmimic/config/generic_allmimic_{motion_name}.yaml").read_text())
+    spec = yaml.safe_load((ROOT / f"actions/tracking/allmimic/config/generic_allmimic_{motion_name}.yaml").read_text())
     spec["robot"]["params"] = str(args.package / "AllMimic.yaml")
     spec["model"]["path"] = str(args.package / "policy.onnx")
     spec["reference"].update(path=str(args.package / args.clip / "reference.csv"), trace=True)

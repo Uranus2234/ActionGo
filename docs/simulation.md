@@ -39,7 +39,7 @@ python3 tools/sim/bfm_zero_mujoco_preview.py \
   --net lo \
   --cmd-topic rt/lowcmd \
   --state-topic rt/lowstate \
-  --spec actions/bfm0/config/generic_bfm_zero.yaml \
+  --spec actions/tracking/bfm0/config/generic_bfm_zero.yaml \
   --duration-sec 10
 ```
 
@@ -149,7 +149,7 @@ walkrun，直立时 ARM 不启动恢复，之后按 `T` 启动 tracking。当前
   --net lo \
   --cmd-topic rt/lowcmd \
   --state-topic rt/lowstate \
-  --spec actions/ufo/config/generic_ufo_idle.yaml \
+  --spec actions/tracking/ufo/config/generic_ufo_idle.yaml \
   --duration-sec 10
 ```
 
@@ -174,7 +174,7 @@ supervisor，但在 `tools/sim/action_go_sim_remote.py` 中会被过滤禁用。
 默认模型：
 
 ```text
-actions/unitree_rl_mjlab/model/policy.onnx
+actions/proprio/unitree_rl_mjlab/model/policy.onnx
 ```
 
 推荐用 system Python 启动仿真 supervisor，因为 unitree_mujoco 的 CycloneDDS Python 依赖通常装在 `/usr/bin/python3`。walkrun player 本身是 C++ binary，默认直接使用已导出的 ONNX；如果手动传 `.pt`，则仍会尝试解析同目录导出的 ONNX 做推理：
@@ -203,7 +203,7 @@ timeout 8s /usr/bin/python3 tools/sim/action_go_sim_remote.py \
 
 ```bash
 ./build/generic_policy_player \
-  --spec actions/unitree_rl_mjlab/config/generic_unitree_rl_mjlab.yaml \
+  --spec actions/proprio/unitree_rl_mjlab/config/generic_unitree_rl_mjlab.yaml \
   --check-only
 ```
 
@@ -219,7 +219,7 @@ timeout 8s /usr/bin/python3 tools/sim/action_go_sim_remote.py \
 
 ```bash
 python3 tools/sim/protomotions_unitree_mujoco_viewer.py \
-  --motion actions/protomotions/motions/output_walk.50fps.npz
+  --motion actions/tracking/protomotions/motions/output_walk.50fps.npz
 ```
 
 ## Holosoma 官方 MuJoCo player

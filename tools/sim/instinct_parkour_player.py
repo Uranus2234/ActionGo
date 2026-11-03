@@ -60,7 +60,7 @@ if not hasattr(argparse, "BooleanOptionalAction"):
 
 # -----------------------------------------------------------------------------
 # Robot constants: copied from upstream instinct_onboard.robot_cfgs.G1_29Dof_TorsoBase.
-# The bundled actions/instinct checkpoints are InstinctLab onboard exports and
+# The bundled actions/perception/instinct checkpoints are InstinctLab onboard exports and
 # use the older shoulder-first simulation/policy order.  DDS motor_state/cmd is
 # Unitree real motor order, therefore JOINT_MAP/SIGNS must always be applied.
 # -----------------------------------------------------------------------------

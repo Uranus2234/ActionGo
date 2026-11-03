@@ -19,6 +19,13 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 
 
+def asset_package(relative: str) -> str:
+    parts = Path(relative).parts
+    if len(parts) >= 4 and parts[0] == "actions" and parts[1] in {"proprio", "tracking", "perception"}:
+        return parts[2]
+    return parts[1] if len(parts) > 1 else ""
+
+
 def sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as stream:
@@ -136,7 +143,8 @@ def main() -> int:
     parser.add_argument("--repo", type=Path, default=ROOT)
     parser.add_argument("--manifest", type=Path, default=Path("MODEL_ASSETS.json"))
     parser.add_argument("--cache", type=Path, help="default: <repo>/.cache/assets (or ACTION_GO_ASSET_CACHE)")
-    parser.add_argument("--policy", action="append", default=[], help="repeatable actions/<policy> package")
+    parser.add_argument("--policy", action="append", default=[],
+                        help="repeatable package name under actions/<category>")
     parser.add_argument("--all", action="store_true", help="fetch all registered downloadable assets")
     parser.add_argument("--list", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
@@ -159,14 +167,14 @@ def main() -> int:
             if len(expected) != 64 or any(character not in "0123456789abcdef" for character in expected):
                 parser.error(f"invalid SHA256: {relative}")
             assets[relative] = (expected, downloads.get(relative), group)
-    known = {Path(relative).parts[1] for relative in assets}
+    known = {asset_package(relative) for relative in assets}
     if set(args.policy) - known:
         parser.error("unknown policy: " + ", ".join(sorted(set(args.policy) - known)))
     if not (args.policy or args.all or args.list):
         parser.error("choose --policy NAME, --all or --list")
     cache = (args.cache or Path(os.environ.get("ACTION_GO_ASSET_CACHE", str(root / ".cache/assets")))).resolve()
     selected = [(relative, values) for relative, values in assets.items()
-                if not args.policy or Path(relative).parts[1] in args.policy]
+                if not args.policy or asset_package(relative) in args.policy]
     failures = 0
     available = 0
     for relative, (expected, recipe, group) in selected:

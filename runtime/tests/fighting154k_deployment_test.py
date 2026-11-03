@@ -11,7 +11,7 @@ import yaml
 
 
 ROOT = Path(__file__).resolve().parents[2]
-PACKAGE = ROOT / "actions/fighting154k"
+PACKAGE = ROOT / "actions/tracking/fighting154k"
 MODEL_KEYS = ("supermimic_omni", "supermimic_no_omni", "allmimic_omni", "allmimic_no_omni")
 
 
@@ -29,7 +29,7 @@ def run(player):
     bindings = yaml.safe_load((ROOT / "config/remote_actions.yaml").read_text())["bindings"]
     registered = yaml.safe_load((PACKAGE / "fighting154k.yaml").read_text())["actions"]["generic_motion_tracking"]
     config = yaml.safe_load((ROOT / "config/motion_actions.yaml").read_text())
-    assert config["action_files"]["fighting154k"] == "actions/fighting154k/fighting154k.yaml"
+    assert config["action_files"]["fighting154k"] == "actions/tracking/fighting154k/fighting154k.yaml"
     assert len(registered) == len(manifest["actions"]) == 10
     assert bindings["R1+A"] == "fighting154k_supermimic_omni_wbst_motive"
     assert bindings["R1+Down"] == "fighting154k_supermimic_omni_yewendun"

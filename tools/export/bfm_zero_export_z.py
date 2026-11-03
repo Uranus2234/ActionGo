@@ -13,7 +13,7 @@ Examples:
   # Export a get-up goal latent
   tools/export/bfm_zero_export_z.py --mode goal \
     --key fallAndGetUp1_subject4_2193 \
-    --output actions/bfm0/config/bfm_zero_goal_getup_z.txt
+    --output actions/tracking/bfm0/config/bfm_zero_goal_getup_z.txt
 
   # Export the original reward idle latent used by reward mode
   tools/export/bfm_zero_export_z.py --mode reward --key move-ego-0-0 --z-id 0
@@ -21,7 +21,7 @@ Examples:
   # Infer a fixed standing reward latent:
   #   R = (head_height = 1.2m) ∧ (base_vel = 0m/s)
   ../BFM-Zero/.venv/bin/python tools/export/bfm_zero_export_z.py \
-    --mode stand-reward --output actions/bfm0/config/bfm_zero_reward_head1p2_base0_z.txt
+    --mode stand-reward --output actions/tracking/bfm0/config/bfm_zero_reward_head1p2_base0_z.txt
 """
 
 from __future__ import annotations

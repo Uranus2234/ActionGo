@@ -86,7 +86,7 @@ config/remote_actions.yaml
 
 ```text
 config/motion_actions.yaml
-actions/<policy>/<policy>.yaml
+actions/<category>/<policy>/<policy>.yaml
 ```
 
 ## 2. 先给新模型分类
@@ -105,15 +105,15 @@ actions/<policy>/<policy>.yaml
 现有参考配置：
 
 ```text
-single_actor_state              actions/bfm0/config/generic_bfm_zero.yaml
-single_actor_state              actions/unitree_rl_mjlab/config/generic_unitree_rl_mjlab.yaml
-embedded_mimic_time             actions/beyondmimic/config/generic_beyondmimic.yaml
-embedded_mimic_time             actions/holosoma/config/generic_holosoma.yaml
-motion_conditioned_tracking     actions/protomotions/config/generic_protomotions.yaml
-motion_conditioned_tracking     actions/twist/config/generic_twist.yaml
-depth_conditioned_actor         actions/instinct/config/generic_instinct_parkour.yaml
-object_conditioned_actor        actions/steadytray/config/generic_steadytray.yaml
-composite_motion_policy         actions/omnixtreme/config/generic_omnixtreme.yaml
+single_actor_state              actions/tracking/bfm0/config/generic_bfm_zero.yaml
+single_actor_state              actions/proprio/unitree_rl_mjlab/config/generic_unitree_rl_mjlab.yaml
+embedded_mimic_time             actions/proprio/beyondmimic/config/generic_beyondmimic.yaml
+embedded_mimic_time             actions/proprio/holosoma/config/generic_holosoma.yaml
+motion_conditioned_tracking     actions/tracking/protomotions/config/generic_protomotions.yaml
+motion_conditioned_tracking     actions/tracking/twist/config/generic_twist.yaml
+depth_conditioned_actor         actions/perception/instinct/config/generic_instinct_parkour.yaml
+object_conditioned_actor        actions/perception/steadytray/config/generic_steadytray.yaml
+composite_motion_policy         actions/tracking/omnixtreme/config/generic_omnixtreme.yaml
 ```
 
 如果新模型能归入上述模板，就不要新增专用 C++ player。优先新增 spec 和 action 配置。

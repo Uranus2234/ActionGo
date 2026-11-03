@@ -17,7 +17,7 @@ def run(player):
     with tempfile.TemporaryDirectory(prefix="allmimic-dry-run-") as temporary:
         for model in ("paoxiao", "paoxiao_no_omni"):
             events_path = Path(temporary) / f"{model}.jsonl"
-            command = [str(player), "--spec", str(ROOT / f"actions/allmimic/config/generic_allmimic_{model}.yaml"),
+            command = [str(player), "--spec", str(ROOT / f"actions/tracking/allmimic/config/generic_allmimic_{model}.yaml"),
                        "--dry-run", "--dry-run-latency", "--offline-dry-run-state",
                        "--duration-sec", "0.12", "--lowstate-timeout-sec", "1",
                        "--event-log", str(events_path)]

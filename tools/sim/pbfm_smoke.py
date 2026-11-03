@@ -218,7 +218,7 @@ def main():
 
     keyboard_control = args.keyboard or args.keyboard_script is not None
     if args.spec is None:
-        args.spec = ROOT / "actions/pbfm/config" / ("generic_pbfm_joystick.yaml" if keyboard_control else "generic_pbfm.yaml")
+        args.spec = ROOT / "actions/perception/pbfm/config" / ("generic_pbfm_joystick.yaml" if keyboard_control else "generic_pbfm.yaml")
     args.output.mkdir(parents=True, exist_ok=False)
     spec = yaml.safe_load(args.spec.read_text())
     if args.context:

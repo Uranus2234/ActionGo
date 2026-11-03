@@ -104,7 +104,7 @@ def test_stale_commit_rejected(repo: pathlib.Path, player: pathlib.Path) -> None
             [
                 str(player),
                 "--spec",
-                "actions/bfm0/config/generic_bfm_zero.yaml",
+                "actions/tracking/bfm0/config/generic_bfm_zero.yaml",
                 "--dry-run",
                 "--offline-dry-run-state",
                 "--preview-file",
@@ -133,7 +133,7 @@ def test_real_topic_rejected(repo: pathlib.Path, player: pathlib.Path) -> None:
             [
                 str(player),
                 "--spec",
-                "actions/bfm0/config/generic_bfm_zero.yaml",
+                "actions/tracking/bfm0/config/generic_bfm_zero.yaml",
                 "--dry-run",
                 "--offline-dry-run-state",
                 "--preview-file",
@@ -166,25 +166,25 @@ def main() -> None:
     run_transaction(
         repo,
         policy_player,
-        "actions/bfm0/config/generic_bfm_zero.yaml",
+        "actions/tracking/bfm0/config/generic_bfm_zero.yaml",
         "commit",
     )
     run_transaction(
         repo,
         policy_player,
-        "actions/beyondmimic/config/generic_beyondmimic.yaml",
+        "actions/proprio/beyondmimic/config/generic_beyondmimic.yaml",
         "commit",
     )
     run_transaction(
         repo,
         motion_player,
-        "actions/protomotions/config/generic_protomotions.yaml",
+        "actions/tracking/protomotions/config/generic_protomotions.yaml",
         "commit",
     )
     run_transaction(
         repo,
         policy_player,
-        "actions/bfm0/config/generic_bfm_zero.yaml",
+        "actions/tracking/bfm0/config/generic_bfm_zero.yaml",
         "discard",
     )
     test_stale_commit_rejected(repo, policy_player)

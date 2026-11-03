@@ -1,3 +1,5 @@
+#include "action_go/runtime/signal_file.h"
+#include "action_go/runtime/command_timing.h"
 #include "action_go/runtime/activation_blend.h"
 #include "action_go/runtime/async_trace_writer.h"
 #include "action_go/runtime/command_safety_filter.h"
@@ -791,11 +793,7 @@ int run_depth_camera_check_only(const Args& args) {
 
 void touch_file(const std::string& path) {
   if (path.empty()) return;
-  const fs::path p(path);
-  if (p.has_parent_path()) fs::create_directories(p.parent_path());
-  std::ofstream out(path);
-  if (!out.good()) throw std::runtime_error("failed to touch file: " + path);
-  out << "ready\n";
+  action_go::runtime::write_signal_file(path, "ready\n");
 }
 
 std::string hash_float_vector(const std::vector<float>& values) {
@@ -1328,7 +1326,7 @@ class UnitreeDDS {
         joint_map_(std::move(joint_map)),
         joint_signs_(std::move(joint_signs)),
         activation_blend_(args.activation_blend_sec) {
-    event_log_.open_append(args_.event_log);
+    event_log_.open_append(args_.event_log.empty() ? "" : args_.event_log + ".dds.jsonl");
     yamlc::require_permutation("robot.joint_map", joint_map_, kNumJoints);
     yamlc::require_size("robot.joint_signs", kNumJoints, joint_signs_.size());
     yamlc::require_size("robot.joint_pos_lower_limit", kNumJoints, lower_limits.size());
@@ -1402,7 +1400,8 @@ class UnitreeDDS {
   }
   void publish(const std::vector<float>& target, const std::vector<float>& kp, const std::vector<float>& kd,
                bool allow_stale_state = false, bool active_command = true,
-               bool bypass_activation = false) {
+               bool bypass_activation = false,
+               action_go::runtime::CommandTiming timing = {}) {
     if (!publish_enabled_ || !publisher_) return;
     std::lock_guard<std::mutex> publish_lock(publish_mtx_);
     if (!active_command && args_.experimental_no_prestart_hold) {
@@ -1475,7 +1474,11 @@ class UnitreeDDS {
       cmd.motor_cmd()[real].kp() = filtered.kp[sim]; cmd.motor_cmd()[real].kd() = filtered.kd[sim];
     }
     cmd.crc() = crc32_core((uint32_t*)&cmd, (sizeof(cmd) >> 2) - 1);
-    publisher_->Write(cmd);
+    if (!publisher_->Write(cmd)) {
+      event_log_.log("publish_failed", {event_string("reason", "dds_write_failed")});
+      return;
+    }
+    if (active_command) timing_reporter_.published(event_log_, timing);
     if (command_trace_ && command_trace_count_++ % 10 == 0) {
       const auto time_unix_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
           std::chrono::system_clock::now().time_since_epoch()).count();
@@ -1599,6 +1602,7 @@ class UnitreeDDS {
   std::unique_ptr<action_go::runtime::AsyncTraceWriter> command_trace_;
   uint64_t command_trace_count_{0};
   RuntimeEventLogger event_log_;
+  action_go::runtime::CommandTimingReporter timing_reporter_;
   ActivationBlend activation_blend_;
   bool first_command_logged_{false};
   bool first_hold_logged_{false};
@@ -1706,8 +1710,9 @@ class Runtime {
     while (!g_stop_requested.load()) {
       if (args_.duration_sec > 0 && std::chrono::duration<double>(std::chrono::steady_clock::now()-start).count() >= args_.duration_sec) break;
       auto t0=std::chrono::steady_clock::now(); RobotState s = dds ? dds->snapshot() : fake_state();
+      action_go::runtime::begin_command_timing(s.recv_stamp, s.seq);
       Command cmd = joystick_command(s.wireless_remote, args_); auto depth = depth_->observation(); auto action = policy_.infer(s, cmd, depth); auto target = policy_.action_to_target(action, s); target = limit_target_rate(target, s.q_sim);
-      update_stats(s, action, target); set_latest(target, policy_.kp(), policy_.kd());
+      update_stats(s, action, target); set_latest(target, policy_.kp(), policy_.kd(), action_go::runtime::finish_command_timing());
       const double ms=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-t0).count(); ++count; avg += (ms-avg)/count; mx=std::max(mx,ms);
       if (count % std::max(1,args_.stats_interval)==0) {
         auto [mn,mxv,mean] = min_max_mean(depth);
@@ -1776,25 +1781,26 @@ class Runtime {
     }
     return {best, idx};
   }
-  void set_latest(const std::vector<float>& q, const std::vector<float>& kp, const std::vector<float>& kd) { std::lock_guard<std::mutex> lk(target_mtx_); latest_q_=q; latest_kp_=kp; latest_kd_=kd; ++seq_; }
-  bool get_latest(std::vector<float>& q, std::vector<float>& kp, std::vector<float>& kd, uint64_t& seq) { std::lock_guard<std::mutex> lk(target_mtx_); if (latest_q_.empty()) return false; q=latest_q_; kp=latest_kp_; kd=latest_kd_; seq=seq_; return true; }
+  void set_latest(const std::vector<float>& q, const std::vector<float>& kp, const std::vector<float>& kd, action_go::runtime::CommandTiming timing = {}) { std::lock_guard<std::mutex> lk(target_mtx_); latest_q_=q; latest_kp_=kp; latest_kd_=kd; latest_timing_=timing; ++seq_; }
+  bool get_latest(std::vector<float>& q, std::vector<float>& kp, std::vector<float>& kd, uint64_t& seq, action_go::runtime::CommandTiming* timing = nullptr) { std::lock_guard<std::mutex> lk(target_mtx_); if (latest_q_.empty()) return false; q=latest_q_; kp=latest_kp_; kd=latest_kd_; seq=seq_; if(timing) *timing=latest_timing_; return true; }
   void wait_for_start_file() {
     if (args_.start_file.empty()) return;
     std::cout << "[generic_sensor_policy_player][" << args_.variant << "] holding current pose until start file: "
               << args_.start_file << "\n";
-    while (!g_stop_requested.load() && !fs::exists(args_.start_file)) {
+    while (!g_stop_requested.load() && !action_go::runtime::signal_file_exists(args_.start_file)) {
       if (args_.variant == "php") depth_->observation();
       std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
   }
   void publish_loop() {
+    action_go::runtime::CommandTiming timing;
     std::vector<float> q,kp,kd,last_q,from,to; uint64_t seq=0,last_seq=0; get_latest(q,kp,kd,seq); from=to=q; last_q=q; auto interp_start=std::chrono::steady_clock::now(); auto next=std::chrono::steady_clock::now(); auto previous_publish=std::chrono::steady_clock::time_point{};
     while (!g_stop_requested.load() && !publish_stop_.load()) {
-      if (get_latest(q,kp,kd,seq) && seq!=last_seq) { from=last_q.empty()?q:last_q; to=q; interp_start=std::chrono::steady_clock::now(); last_seq=seq; }
+      if (get_latest(q,kp,kd,seq,&timing) && seq!=last_seq) { from=last_q.empty()?q:last_q; to=q; interp_start=std::chrono::steady_clock::now(); last_seq=seq; }
       double a = args_.target_interp_sec > 1e-6 ? std::chrono::duration<double>(std::chrono::steady_clock::now()-interp_start).count()/args_.target_interp_sec : 1.0; a=std::clamp(a,0.0,1.0); last_q=from; if (from.size()==to.size()) for(size_t i=0;i<from.size();++i) last_q[i]=static_cast<float>(from[i]+a*(to[i]-from[i])); else last_q=to;
-      const bool waiting_for_start = !args_.start_file.empty() && !fs::exists(args_.start_file);
+      const bool waiting_for_start = !args_.start_file.empty() && !action_go::runtime::signal_file_exists(args_.start_file);
       if (waiting_for_start) last_q = dds_->snapshot().q_sim;
-      dds_->publish(last_q,kp,kd,waiting_for_start,!waiting_for_start,preview_mode_active_); auto published_at=std::chrono::steady_clock::now(); if(previous_publish.time_since_epoch().count()!=0) { const double interval_ms=std::chrono::duration<double,std::milli>(published_at-previous_publish).count(); double observed=max_publish_interval_ms_.load(); while(interval_ms>observed && !max_publish_interval_ms_.compare_exchange_weak(observed,interval_ms)) {} } previous_publish=published_at; ++publish_count_; next += std::chrono::duration_cast<std::chrono::steady_clock::duration>(std::chrono::duration<double>(1.0/std::max(args_.publish_hz,args_.hz))); auto now=std::chrono::steady_clock::now(); if(next<now) { ++publish_deadline_miss_; next=now; } std::this_thread::sleep_until(next);
+      dds_->publish(last_q,kp,kd,waiting_for_start,!waiting_for_start,preview_mode_active_,timing); auto published_at=std::chrono::steady_clock::now(); if(previous_publish.time_since_epoch().count()!=0) { const double interval_ms=std::chrono::duration<double,std::milli>(published_at-previous_publish).count(); double observed=max_publish_interval_ms_.load(); while(interval_ms>observed && !max_publish_interval_ms_.compare_exchange_weak(observed,interval_ms)) {} } previous_publish=published_at; ++publish_count_; next += std::chrono::duration_cast<std::chrono::steady_clock::duration>(std::chrono::duration<double>(1.0/std::max(args_.publish_hz,args_.hz))); auto now=std::chrono::steady_clock::now(); if(next<now) { ++publish_deadline_miss_; next=now; } std::this_thread::sleep_until(next);
     }
   }
   void run_startup_transition() {
@@ -2140,7 +2146,7 @@ class Runtime {
     } else {
       wait_for_start_file();
     }
-    if (!args_.start_file.empty() && fs::exists(args_.start_file)) {
+    if (!args_.start_file.empty() && action_go::runtime::signal_file_exists(args_.start_file)) {
       event_log_.log("start_file_seen",
                      {event_string("player", "generic_sensor_policy_player"),
                       event_string("variant", args_.variant),
@@ -2184,6 +2190,7 @@ class Runtime {
   std::atomic<double> max_publish_interval_ms_{0.0};
   std::atomic<bool> publish_stop_{false};
   bool preview_mode_active_{false};
+  action_go::runtime::CommandTiming latest_timing_;
   std::mutex target_mtx_; std::vector<float> latest_q_, latest_kp_, latest_kd_, filtered_target_; uint64_t seq_{0}; std::chrono::steady_clock::time_point filtered_time_{};
 };
 

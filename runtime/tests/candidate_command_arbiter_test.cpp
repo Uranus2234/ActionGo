@@ -348,6 +348,7 @@ void test_nonfinite_event_numbers_are_valid_json_null() {
                   "positive_inf", std::numeric_limits<double>::infinity()),
               action_go::runtime::event_number(
                   "not_a_number", std::numeric_limits<double>::quiet_NaN())});
+  logger.flush();
   std::ifstream input(path);
   const std::string line((std::istreambuf_iterator<char>(input)),
                          std::istreambuf_iterator<char>());

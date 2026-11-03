@@ -5,7 +5,11 @@ from __future__ import annotations
 
 import argparse
 import re
+import sys
 from pathlib import Path
+
+sys.dont_write_bytecode = True
+from create_public_snapshot import pbfm_context
 
 
 FORBIDDEN_NAMES = {".git", "outputs", "experiments", "paper", "README_GITHUB_DRAFT.md"}
@@ -24,12 +28,6 @@ SECRET_PATTERNS = [
 # user-home paths usually reveal a development machine or stale private layout.
 PRIVATE_PATH = re.compile(r"/(?:home|Users)/[^/\s]+/")
 
-LARGE_CONTEXT_FILES = {
-    "actions/pbfm/motions/lafan_dance/context.yaml",
-    "actions/pbfm/motions/lafan_dance_56_52_98_72/context.yaml",
-}
-
-
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repo", type=Path, default=Path("."))
@@ -39,6 +37,9 @@ def main() -> int:
 
     for path in repo.rglob("*"):
         relative = path.relative_to(repo)
+        if pbfm_context(relative):
+            failures.append(f"upstream P-BFM context data: {relative}")
+            continue
         if any(part in FORBIDDEN_NAMES for part in relative.parts):
             failures.append(f"forbidden path: {relative}")
             continue
@@ -48,7 +49,7 @@ def main() -> int:
         if any(lowered.endswith(suffix) for suffix in FORBIDDEN_SUFFIXES):
             failures.append(f"forbidden binary/asset: {relative}")
             continue
-        if path.stat().st_size > 5 * 1024 * 1024 and relative.as_posix() not in LARGE_CONTEXT_FILES:
+        if path.stat().st_size > 5 * 1024 * 1024:
             failures.append(f"unexpected file over 5 MiB: {relative}")
             continue
         with path.open("rb") as stream:

@@ -49,14 +49,17 @@ OpenCV and ZeroMQ are required to build `generic_sensor_policy_player`. RealSens
 
 Policy weights, motion files, tags, and datasets are not distributed in the code-only release unless their asset-specific redistribution rights are verified. A source-code license does not automatically license a checkpoint or dataset.
 
-The [asset acquisition guide](docs/model_assets.md) and [MODEL_ASSETS.json](MODEL_ASSETS.json) inventory 84 files from the local policy packages, including the four-policy 154k fighting package, current BeyondMimic `paoxiao`, PHP, P-BFM, mjlab, original SONIC, SONIC v1.1, and motion/reference data. Download third-party assets from their upstream provider or supply your own matching exports; unresolved checkpoint origins remain explicitly recorded. The optional HandoffGuard risk model was not found locally and remains separately supplied. `blocked_pending_review` means **bring your own weights/data**, not permission to redistribute it. Validate the packages you install:
+The [asset acquisition guide](docs/model_assets.md) and [MODEL_ASSETS.json](MODEL_ASSETS.json) record policy weights and reference data. The downloader supports 11 policy families with pinned upstream URLs and SHA256 verification, including original SONIC and v1.1. TWIST and SteadyTray provide upstream TorchScript checkpoints; their matching deployment ONNX exports still require separate validation. Other local exports and unresolved sources remain manually supplied. The optional HandoffGuard risk model also remains separately supplied. `blocked_pending_review` restricts bundling assets in a public snapshot; downloading from upstream does not change their license. Fetch and validate one package first:
 
 ```bash
+python3 tools/assets/fetch_assets.py --list
+python3 tools/assets/fetch_assets.py --policy bfm0
 python3 tools/assets/check_model_assets.py --policy bfm0
 python3 tools/assets/check_model_assets.py --installed-only
 ```
 
-ActionGo does not provide an uncontrolled downloader for assets with unclear terms.
+Use `fetch_assets.py --all` to fetch all registered public assets. Missing motion,
+context, sensor, and robot assets still need separate preparation as documented per adapter.
 The build generates a source-owned constant-output ONNX fixture for unit tests.
 It is marked by design as check-only/simulation test material, is not registered
 as a robot action, and must never be used to publish real-robot commands.
@@ -224,6 +227,7 @@ The supervisor command plane supports authenticated non-loopback UDP. Realtime T
 - [Policy onboarding](docs/new_policy_onboarding.md): semantic reconnaissance and spec authoring.
 - [Runtime architecture](docs/runtime_architecture.md): contracts, players, safety, and handoff boundaries.
 - [Remote supervisor](docs/remote_supervisor.md): controls, authenticated UDP, and deployment behavior.
+- [Runtime logging](docs/runtime_logging.md): live state/policy display, current E2E timing, and session diagnostics.
 - [Simulation](docs/simulation.md): available simulator bridges.
 - [PHP](actions/php/README.md), [mjlab](actions/mjlab/README.md), and [SONIC](actions/sonic/README.md): package setup, runtime contracts, and validation limits.
 - [Runtime troubleshooting](docs/runtime_troubleshooting.md): ONNX Runtime and TensorRT setup.

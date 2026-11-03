@@ -1,3 +1,5 @@
+#include "action_go/runtime/signal_file.h"
+#include "action_go/runtime/log_provenance.h"
 #include "generic_policy_runtime_internal.h"
 
 namespace action_go::runtime::generic_policy_runtime {
@@ -47,7 +49,9 @@ void GenericPolicyPlayer::run() {
                    {event_string("player", player_label()),
                     event_string("template", template_),
                     event_string("variant", variant_),
-                    event_string("model", variant_ == "sonic" ? sonic_decoder_path_.string() : runtime_model_path_.string())});
+                    event_string("model", variant_ == "sonic" ? sonic_decoder_path_.string() : runtime_model_path_.string()),
+                    event_string("model_sha256", log_file_sha256(variant_ == "sonic" ? sonic_decoder_path_.string() : runtime_model_path_.string())),
+                    event_string("config_sha256", log_file_sha256(spec_path_.string()))});
     post_load_variant();
     if (args_.check_only) {
       check_only();
@@ -427,8 +431,8 @@ void GenericPolicyPlayer::load_spec() {
         throw std::runtime_error(
             "transactional preview requires a private --candidate-topic; refusing the real LowCmd topic");
       }
-      if (fs::exists(commit_file_) ||
-          (!discard_file_.empty() && fs::exists(discard_file_))) {
+      if (action_go::runtime::signal_file_exists(commit_file_) ||
+          (!discard_file_.empty() && action_go::runtime::signal_file_exists(discard_file_))) {
         throw std::runtime_error(
             "stale preview lifecycle input exists; remove commit/discard files before launch");
       }
@@ -673,11 +677,7 @@ void GenericPolicyPlayer::wait_for_state() {
 
 void GenericPolicyPlayer::touch_file(const std::string& path) {
     if (path.empty()) return;
-    fs::path p(path);
-    if (p.has_parent_path()) fs::create_directories(p.parent_path());
-    std::ofstream out(path);
-    if (!out.good()) throw std::runtime_error("failed to touch file: " + path);
-    out << "ready\n";
+    action_go::runtime::write_signal_file(path, "ready\n");
     event_log_.log("ready_file_touched",
                    {event_string("player", player_label()),
                     event_string("template", template_),
@@ -704,13 +704,7 @@ GenericPolicyPlayer::PreviewDecision GenericPolicyPlayer::wait_preview_decision(
     auto next_publish = start;
     publish(q, kp, kd, mode_machine, false, CommandPhase::kPreview);
     {
-      fs::path preview_path(preview_file_);
-      if (preview_path.has_parent_path()) fs::create_directories(preview_path.parent_path());
-      std::ofstream preview_stream(preview_file_, std::ios::out | std::ios::trunc);
-      if (!preview_stream.good()) {
-        throw std::runtime_error("failed to write preview file: " + preview_file_);
-      }
-      preview_stream << "preview_ready\n";
+      action_go::runtime::write_signal_file(preview_file_, "preview_ready\n");
     }
     event_log_.log("preview_ready",
                    {event_string("player", player_label()),
@@ -721,7 +715,7 @@ GenericPolicyPlayer::PreviewDecision GenericPolicyPlayer::wait_preview_decision(
                     event_int("warmup_steps", warmup_steps)});
 
     while (!g_stop_requested.load()) {
-      if (!discard_file_.empty() && fs::exists(discard_file_)) {
+      if (!discard_file_.empty() && action_go::runtime::signal_file_exists(discard_file_)) {
         event_log_.log("preview_discarded",
                        {event_string("player", player_label()),
                         event_string("template", template_),
@@ -729,7 +723,7 @@ GenericPolicyPlayer::PreviewDecision GenericPolicyPlayer::wait_preview_decision(
                         event_string("discard_file", discard_file_)});
         return PreviewDecision::kDiscard;
       }
-      if (fs::exists(commit_file_)) {
+      if (action_go::runtime::signal_file_exists(commit_file_)) {
         event_log_.log("preview_committed",
                        {event_string("player", player_label()),
                         event_string("template", template_),
@@ -760,7 +754,7 @@ void GenericPolicyPlayer::publish(const std::vector<float>& q,
                const std::vector<float>& kd,
                int mode_machine,
                bool allow_stale_state,
-               CommandPhase phase) {
+               CommandPhase phase, CommandTiming timing) {
     if (!args_.dry_run_latency && (args_.dry_run || !publisher_)) return;
     if (phase == CommandPhase::kHold && args_.experimental_no_prestart_hold) {
       if (!prestart_hold_suppressed_logged_) {
@@ -847,10 +841,16 @@ void GenericPolicyPlayer::publish(const std::vector<float>& q,
       }
       return;
     }
-    publisher_->Write(cmd);
+    if (!publisher_->Write(cmd)) {
+      event_log_.log("publish_failed", {event_string("reason", "dds_write_failed")});
+      return;
+    }
     if (phase == CommandPhase::kActive) {
+      if (!timing.command_sequence) timing = finish_command_timing();
+      timing_reporter_.published(event_log_, timing);
+      const auto published_at = std::chrono::steady_clock::now();
       const int64_t now_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
-          std::chrono::steady_clock::now().time_since_epoch()).count();
+          published_at.time_since_epoch()).count();
       const int64_t previous_ns = last_active_publish_ns_.exchange(now_ns);
       active_publish_count_.fetch_add(1);
       if (previous_ns > 0) {
@@ -997,14 +997,14 @@ void GenericPolicyPlayer::wait_postrun_handoff(int publish_hz) {
     publish(target_q, target_kp, target_kd, snapshot().mode_machine, false, CommandPhase::kHold);
     touch_file(handoff_complete_file_);
     auto next = std::chrono::steady_clock::now();
-    while (!g_stop_requested.load() && !fs::exists(handoff_release_file_)) {
+    while (!g_stop_requested.load() && !action_go::runtime::signal_file_exists(handoff_release_file_)) {
       publish(target_q, target_kp, target_kd, snapshot().mode_machine, false, CommandPhase::kHold);
       advance_deadline(next, interval, std::chrono::steady_clock::now());
       std::this_thread::sleep_until(next);
     }
     event_log_.log("handoff_hold_stopped",
                    {event_string("player", player_label()), event_string("template", template_),
-                    event_string("variant", variant_), event_bool("released", fs::exists(handoff_release_file_)),
+                    event_string("variant", variant_), event_bool("released", action_go::runtime::signal_file_exists(handoff_release_file_)),
                     event_string("reason", g_stop_requested.load() ? "signal" : "release_file")});
   }
 
@@ -1019,7 +1019,7 @@ void GenericPolicyPlayer::wait_start_file(std::vector<float>& hold_q,
     const auto dt = std::chrono::duration_cast<std::chrono::steady_clock::duration>(
         std::chrono::duration<double>(1.0 / std::max(1, publish_hz)));
     auto next = std::chrono::steady_clock::now();
-    while (!g_stop_requested.load() && !fs::exists(start_file_)) {
+    while (!g_stop_requested.load() && !action_go::runtime::signal_file_exists(start_file_)) {
       if (standby_health_check) standby_health_check();
       const auto s = snapshot();
       if (follow_current_pose) {
@@ -1031,7 +1031,7 @@ void GenericPolicyPlayer::wait_start_file(std::vector<float>& hold_q,
       if (next < std::chrono::steady_clock::now()) next = std::chrono::steady_clock::now();
       std::this_thread::sleep_until(next);
     }
-    if (!start_file_seen_logged_ && fs::exists(start_file_)) {
+    if (!start_file_seen_logged_ && action_go::runtime::signal_file_exists(start_file_)) {
       if (standby_health_check) standby_health_check();
       if (follow_current_pose) {
         hold_q = snapshot().q;

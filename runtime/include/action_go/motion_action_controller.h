@@ -104,6 +104,11 @@ public:
               const std::string& network_interface_override = "",
               bool dry_run = false);
     void setEventLogPath(const std::string& path);
+    void flushLogs() { event_log_.flush(); }
+    bool logsHealthy() const { return event_log_.healthy(); }
+    unsigned long long droppedLogRecords() const { return event_log_.dropped(); }
+    std::string currentActionEventLog() const;
+    std::string controlState() const;
 
     bool startAction(const std::string& action_name);
     Status update();
@@ -183,6 +188,8 @@ private:
     std::unordered_map<std::string, ActionConfig> actions_;
 
     mutable std::mutex mutex_;
+    std::mutex start_mutex_;
+    bool official_stop_in_progress_{false};
     std::mutex worker_mutex_;
     std::mutex process_mutex_;
     std::mutex control_mode_mutex_;
@@ -193,7 +200,10 @@ private:
     std::atomic<bool> handoff_release_sent_{false};
     std::atomic<Status> status_{Status::Idle};
     std::atomic<pid_t> running_pid_{-1};
+    std::atomic<int> control_state_{0};
     std::string current_action_;
+    ActionConfig active_action_;
+    std::string handshake_directory_;
     uint64_t current_action_seq_{0};
     std::string current_trial_id_;
     action_go::runtime::ActionLifecycleEventV1 current_event_context_;

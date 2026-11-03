@@ -31,6 +31,7 @@ def main():
         output_names=["action"],
         opset_version=args.opset,
         do_constant_folding=True,
+        dynamo=False,
     )
     print(f"wrote {args.out} ({os.path.getsize(args.out)} bytes)")
 

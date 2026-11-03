@@ -5,6 +5,13 @@
 #include <mutex>
 #include <string>
 #include <utility>
+#include <atomic>
+#include <condition_variable>
+#include <deque>
+#include <fstream>
+#include <thread>
+#include <future>
+#include <memory>
 
 namespace action_go::runtime {
 
@@ -43,10 +50,14 @@ RuntimeEventField event_bool(std::string key, bool value);
 class RuntimeEventLogger {
  public:
   RuntimeEventLogger();
+  ~RuntimeEventLogger();
 
   void open(const std::string& path);
   void open_append(const std::string& path);
   bool enabled() const;
+  bool healthy() const { return !failed_.load(); }
+  unsigned long long dropped() const { return dropped_.load(); }
+  void flush();
   void set_context(ActionLifecycleEventV1 context);
   ActionLifecycleEventV1 context() const;
 
@@ -55,11 +66,27 @@ class RuntimeEventLogger {
 
  private:
   static std::string json_escape(const std::string& value);
+  void start(const std::string& path, bool append);
+  void stop();
+  void write_loop();
+  struct Record {
+    std::string json; std::string text; bool critical{false}; bool timing{false};
+    std::shared_ptr<std::promise<void>> barrier;
+  };
 
   std::string path_;
   std::chrono::steady_clock::time_point t0_;
   ActionLifecycleEventV1 context_;
   mutable std::mutex mtx_;
+  std::mutex queue_mutex_;
+  std::condition_variable condition_;
+  std::deque<Record> queue_;
+  std::thread writer_;
+  bool stopping_{false};
+  bool append_{false};
+  std::atomic<unsigned long long> dropped_{0};
+  std::atomic<bool> failed_{false};
+  std::atomic<bool> overloaded_{false};
 };
 
 }  // namespace action_go::runtime

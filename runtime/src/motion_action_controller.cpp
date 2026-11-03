@@ -711,6 +711,20 @@ void MotionActionController::setEventLogPath(const std::string& path)
     }
 }
 
+std::string MotionActionController::currentActionEventLog() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return active_action_.payload_event_log;
+}
+
+std::string MotionActionController::controlState() const {
+    switch (control_state_.load()) {
+    case 1: return "USER_CTRL";
+    case 2: return "WALKRUN";
+    case 3: return "DAMPING";
+    default: return "UNKNOWN";
+    }
+}
+
 bool MotionActionController::init(unitree::robot::g1::LocoClient* loco_client,
                                   const std::string& config_path,
                                   const std::string& network_interface_override,
@@ -828,9 +842,20 @@ bool MotionActionController::loadConfig(const std::string& config_path)
 
         std::string line;
         while (std::getline(input, line)) {
-            const auto hash_pos = line.find('#');
-            if (hash_pos != std::string::npos) {
-                line = line.substr(0, hash_pos);
+            bool single_quoted = false;
+            bool double_quoted = false;
+            bool escaped = false;
+            for (size_t index = 0; index < line.size(); ++index) {
+                const char character = line[index];
+                if (escaped) { escaped = false; continue; }
+                if (character == '\\' && double_quoted) { escaped = true; continue; }
+                if (character == '\'' && !double_quoted) single_quoted = !single_quoted;
+                if (character == '"' && !single_quoted) double_quoted = !double_quoted;
+                if (character == '#' && !single_quoted && !double_quoted &&
+                    (index == 0 || std::isspace(static_cast<unsigned char>(line[index - 1])))) {
+                    line.resize(index);
+                    break;
+                }
             }
             if (trim(line).empty()) {
                 continue;
@@ -994,22 +1019,6 @@ bool MotionActionController::loadConfig(const std::string& config_path)
             !action.model.empty() && !action.params.empty() && !action.trajectory.empty()) {
             action.command = "{player} --net {net} --cmd-topic rt/user_lowcmd --model {model} --params {params} --trajectory {trajectory}";
         }
-        if (action.prestart_before_userctrl) {
-            if (action.ready_file.empty()) {
-                action.ready_file = "/tmp/action_go_" + action.name + "_ready";
-            }
-            if (action.start_file.empty()) {
-                action.start_file = "/tmp/action_go_" + action.name + "_start";
-            }
-        }
-        if (action.postrun_handoff_hold) {
-            if (action.handoff_complete_file.empty()) {
-                action.handoff_complete_file = "/tmp/action_go_" + action.name + "_complete";
-            }
-            if (action.handoff_release_file.empty()) {
-                action.handoff_release_file = "/tmp/action_go_" + action.name + "_release";
-            }
-        }
     }
 
     if (actions_.empty()) {
@@ -1062,6 +1071,10 @@ void MotionActionController::prepareActionEventLog(ActionConfig& action)
     const std::string name = safeFileComponent(action.name);
     action.payload_event_log =
         (dir / (stem + "_payload_" + std::to_string(action.action_seq) + "_" + name + ".jsonl")).string();
+    if (const char* session = std::getenv("ACTION_GO_SESSION_DIR")) {
+        action.payload_event_log = (fs::path(session) / "actions" /
+            (std::to_string(action.action_seq) + "_" + name + ".jsonl")).string();
+    }
     action.event_log_arg = "--event-log " + shellQuote(action.payload_event_log);
 }
 
@@ -1083,11 +1096,12 @@ void MotionActionController::logActionEvent(const std::string& event,
 
 bool MotionActionController::startAction(const std::string& action_name)
 {
+    std::lock_guard<std::mutex> admission_lock(start_mutex_);
     ActionConfig action;
     {
         std::lock_guard<std::mutex> lock(mutex_);
         const Status current_status = status_.load();
-        if (current_status == Status::SwitchingToUserCtrl ||
+        if (official_stop_in_progress_ || current_status == Status::SwitchingToUserCtrl ||
             current_status == Status::Running ||
             current_status == Status::SwitchingBack ||
             current_status == Status::SwitchBackBlocked) {
@@ -1102,14 +1116,42 @@ bool MotionActionController::startAction(const std::string& action_name)
             return false;
         }
         action = it->second;
-        prepareActionEventLog(action);
     }
 
     joinWorkerIfJoinable();
 
+    try {
+        if (action.prestart_before_userctrl || action.postrun_handoff_hold) {
+            std::string directory = (fs::temp_directory_path() / "action_go_XXXXXX").string();
+            if (!mkdtemp(directory.data())) {
+                throw std::runtime_error("cannot create private handshake directory");
+            }
+            {
+                std::lock_guard<std::mutex> lock(worker_mutex_);
+                handshake_directory_ = directory;
+            }
+            if (action.prestart_before_userctrl) {
+                if (action.ready_file.empty()) action.ready_file = directory + "/ready";
+                if (action.start_file.empty()) action.start_file = directory + "/start";
+            }
+            if (action.postrun_handoff_hold) {
+                if (action.handoff_complete_file.empty()) action.handoff_complete_file = directory + "/complete";
+                if (action.handoff_release_file.empty()) action.handoff_release_file = directory + "/release";
+            }
+        }
+        prepareActionEventLog(action);
+        expandCommandTemplate(action);
+        expandCommandTemplate(action, action.preflight_command);
+    } catch (const std::exception& exception) {
+        setFailed(exception.what());
+        joinWorkerIfJoinable();
+        return false;
+    }
+
     {
         std::lock_guard<std::mutex> lock(mutex_);
         current_action_ = action_name;
+        active_action_ = action;
         current_action_seq_ = action.action_seq;
         current_trial_id_ = action.trial_id;
         current_event_context_ = event_log_.context();
@@ -1122,15 +1164,20 @@ bool MotionActionController::startAction(const std::string& action_name)
     }
     logActionEvent("action_triggered", action,
                    action.prestart_before_userctrl ? "prestart" : "direct");
-    {
+    try {
         std::lock_guard<std::mutex> lock(worker_mutex_);
         worker_ = std::thread(&MotionActionController::workerMain, this, action);
+    } catch (const std::exception& exception) {
+        setFailed("cannot start action worker: " + std::string(exception.what()));
+        joinWorkerIfJoinable();
+        return false;
     }
     return true;
 }
 
 MotionActionController::Status MotionActionController::update()
 {
+    std::lock_guard<std::mutex> admission_lock(start_mutex_);
     const Status s = status_.load();
     if (s == Status::Done || s == Status::Failed || s == Status::Idle) {
         joinWorkerIfJoinable();
@@ -1140,6 +1187,7 @@ MotionActionController::Status MotionActionController::update()
 
 void MotionActionController::cancel()
 {
+    std::lock_guard<std::mutex> admission_lock(start_mutex_);
     suppress_switch_back_on_cancel_.store(false);
     cancel_requested_.store(true);
     terminateRunningProcess(false);
@@ -1151,6 +1199,7 @@ void MotionActionController::cancel()
 
 void MotionActionController::interruptForRecovery()
 {
+    std::lock_guard<std::mutex> admission_lock(start_mutex_);
     std::cerr << "[MotionActionController] safety recovery interrupt requested" << std::endl;
     if (dry_run_) {
         cancel_requested_.store(true);
@@ -1184,6 +1233,7 @@ void MotionActionController::interruptForRecovery()
 
 void MotionActionController::dampingStop()
 {
+    std::lock_guard<std::mutex> admission_lock(start_mutex_);
     std::cerr << "[MotionActionController] dampingStop requested" << std::endl;
     if (dry_run_) {
         cancel_requested_.store(true);
@@ -1227,6 +1277,8 @@ void MotionActionController::dampingStop()
 
 bool MotionActionController::stopAndSwitchToOfficial(const std::string& mode)
 {
+    std::unique_lock<std::mutex> admission_lock(start_mutex_);
+    if (official_stop_in_progress_) return false;
     const std::string normalized_mode = normalizeInternalMode(mode);
     std::cerr << "[MotionActionController] normal stop requested, switch to official "
               << normalized_mode << std::endl;
@@ -1255,9 +1307,14 @@ bool MotionActionController::stopAndSwitchToOfficial(const std::string& mode)
     // and the configured overlap window.
     suppress_switch_back_on_cancel_.store(true);
     if (cancel_before_rpc) cancel_requested_.store(true);
+    setStatus(Status::SwitchingBack);
+    official_stop_in_progress_ = true;
+    admission_lock.unlock();
     std::string switch_error;
     const bool ok = completeSwitchBack(action, normalized_mode,
                                        "external_normal_stop", switch_error);
+    admission_lock.lock();
+    official_stop_in_progress_ = false;
     if (!ok) {
         // The payload remains active and can be retried.  This is deliberately
         // not Failed: dampingStop must remain available.
@@ -1292,8 +1349,7 @@ bool MotionActionController::stopAndSwitchToOfficial(const std::string& mode)
 MotionActionController::ActionConfig MotionActionController::currentActionConfig() const
 {
     std::lock_guard<std::mutex> lock(mutex_);
-    const auto it = actions_.find(current_action_);
-    ActionConfig action = it == actions_.end() ? ActionConfig{} : it->second;
+    ActionConfig action = active_action_;
     action.name = current_action_;
     action.action_seq = current_action_seq_;
     action.trial_id = current_trial_id_;
@@ -1617,7 +1673,9 @@ bool MotionActionController::switchToUserCtrl(std::string& error_message, bool p
         error_message = "control backend is null";
         return false;
     }
-    return control_backend_->switch_to_user_ctrl(publish_prearm, error_message);
+    const bool switched = control_backend_->switch_to_user_ctrl(publish_prearm, error_message);
+    control_state_.store(switched ? 1 : 0);
+    return switched;
 }
 
 bool MotionActionController::switchBackToOfficial(std::string& error_message,
@@ -1628,9 +1686,11 @@ bool MotionActionController::switchBackToOfficial(std::string& error_message,
         error_message = "control backend is null";
         return false;
     }
-    return control_backend_->switch_to_internal(
+    const bool switched = control_backend_->switch_to_internal(
         static_cast<action_go::runtime::OfficialControlMode>(internalModeId(mode)),
         error_message);
+    control_state_.store(switched ? (mode == "passive" ? 3 : mode == "walkrun" ? 2 : 0) : 0);
+    return switched;
 }
 
 bool MotionActionController::switchBackToOfficialLogged(std::string& error_message,
@@ -1727,7 +1787,9 @@ bool MotionActionController::enterOfficialDamping(std::string& error_message)
         error_message = "control backend is null";
         return false;
     }
-    return control_backend_->enter_damping(error_message);
+    const bool damped = control_backend_->enter_damping(error_message);
+    control_state_.store(damped ? 3 : 0);
+    return damped;
 }
 
 bool MotionActionController::runActionPayload(const ActionConfig& action, std::string& error_message)
@@ -1817,7 +1879,16 @@ bool MotionActionController::startCommandStringAsync(const std::string& command,
     export_context("ACTION_GO_MODEL_SHA256", child_context.model_sha256);
     export_context("ACTION_GO_HARDWARE_ID", child_context.hardware_id);
     export_context("ACTION_GO_MANIFEST_SHA256", child_context.manifest_sha256);
-    child_command += command;
+    const char* console_mode = std::getenv("ACTION_GO_CONSOLE");
+    if (const char* session = std::getenv("ACTION_GO_SESSION_DIR");
+        session && (!console_mode || std::string(console_mode) != "debug")) {
+        const auto output_path = fs::path(session) / "actions" /
+            (std::to_string(currentActionConfig().action_seq) +
+             "_" + safeFileComponent(child_policy) + ".output.log");
+        child_command += "{ " + command + "\n} >> " + shellQuote(output_path.string()) + " 2>&1";
+    } else {
+        child_command += command;
+    }
     if (!supervisor_platform_) {
         error_message = "supervisor platform is null";
         return false;
@@ -1879,6 +1950,10 @@ bool MotionActionController::waitRunningCommand(const std::string& command, std:
             }
         }
         if (process_result.state == action_go::runtime::SupervisorProcessState::kExited) {
+            event_log_.log("payload_exited", {event_int("pid", pid),
+                event_int("exit_code", process_result.exit_code),
+                event_int("signal", process_result.signal),
+                event_bool("expected", cancel_requested_.load())});
             break;
         }
         if (process_result.state == action_go::runtime::SupervisorProcessState::kError) {
@@ -1984,6 +2059,12 @@ void MotionActionController::joinWorkerIfJoinable()
     std::lock_guard<std::mutex> lock(worker_mutex_);
     if (worker_.joinable()) {
         worker_.join();
+        event_log_.flush();
+    }
+    if (running_pid_.load() <= 0 && !handshake_directory_.empty()) {
+        std::error_code error;
+        fs::remove_all(handshake_directory_, error);
+        handshake_directory_.clear();
     }
 }
 
@@ -2000,7 +2081,11 @@ bool MotionActionController::waitDurationOrCancel(double duration_sec)
 
 void MotionActionController::setStatus(Status status)
 {
-    status_.store(status);
+    const auto previous = status_.exchange(status);
+    if (previous != status) {
+        event_log_.log("action_status_changed", {event_string("from", statusToString(previous)),
+            event_string("to", statusToString(status)), event_string("control_state", controlState())});
+    }
 }
 
 void MotionActionController::setFailed(const std::string& error_message)
@@ -2090,6 +2175,21 @@ std::string MotionActionController::expandCommandTemplate(const ActionConfig& ac
                                                           const std::string& command_template) const
 {
     std::string command = command_template;
+    const std::pair<const char*, std::string> required_values[] = {
+        {"model", action.model}, {"params", action.params}, {"trajectory", action.trajectory},
+        {"net", action.network_interface}, {"network_interface", action.network_interface},
+        {"ready_file", action.ready_file}, {"start_file", action.start_file},
+        {"handoff_complete_file", action.handoff_complete_file},
+        {"handoff_release_file", action.handoff_release_file},
+        {"payload_event_log", action.payload_event_log},
+        {"supervisor_event_log", action.supervisor_event_log},
+    };
+    for (const auto& value : required_values) {
+        const std::string placeholder = std::string("{") + value.first + "}";
+        if (value.second.empty() && command_template.find(placeholder) != std::string::npos) {
+            throw std::runtime_error("empty command placeholder " + placeholder + " in action " + action.name);
+        }
+    }
     replaceAll(command, "{name}", action.name);
     replaceAll(command, "{action_dir}", action.resource_base_dir);
     replaceAll(command, "{resource_base_dir}", action.resource_base_dir);

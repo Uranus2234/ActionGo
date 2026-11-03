@@ -1,6 +1,7 @@
 #include "action_go/runtime/activation_blend.h"
 #include "action_go/runtime/command_safety_filter.h"
 #include "action_go/runtime/event_logger.h"
+#include "action_go/runtime/command_timing.h"
 #include "action_go/runtime/npy_reader.h"
 #include "action_go/runtime/policy_protocol.h"
 #include "action_go/runtime/preview_lifecycle.h"
@@ -583,6 +584,7 @@ public:
     std::vector<float> q, dq;
     int mode_machine{0};
     std::chrono::steady_clock::time_point recv_stamp{};
+    uint64_t seq{0};
   };
 
   explicit OmniXtremePolicy(const Args& args)
@@ -1015,7 +1017,7 @@ public:
         friction_fs_(std::move(friction_fs)),
         friction_fd_(std::move(friction_fd)),
         activation_blend_(args.activation_blend_sec) {
-    event_log_.open_append(args_.event_log);
+    event_log_.open_append(args_.event_log.empty() ? "" : args_.event_log + ".dds.jsonl");
     yamlc::require_size("safety.friction.va", kNumJoints, friction_va_.size());
     yamlc::require_size("safety.friction.fs", kNumJoints, friction_fs_.size());
     yamlc::require_size("safety.friction.fd", kNumJoints, friction_fd_.size());
@@ -1050,7 +1052,8 @@ public:
 
   void publish(const std::vector<float>& q, const std::vector<float>& kp, const std::vector<float>& kd,
                bool allow_stale_state = false, bool active_command = true,
-               bool bypass_activation = false) {
+               bool bypass_activation = false,
+               action_go::runtime::CommandTiming timing = {}) {
     if (args_.dry_run) return;
     if (!active_command && args_.experimental_no_prestart_hold) {
       if (!prestart_hold_suppressed_logged_) {
@@ -1066,7 +1069,7 @@ public:
     CommandSafetyState safety_state;
     safety_state.connected = connected_.load();
     safety_state.stamp = s.recv_stamp;
-    safety_state.seq = sequence_.load(std::memory_order_relaxed);
+    safety_state.seq = s.seq;
     safety_state.q = s.q;
     JointCommand command{q, kp, kd};
     action_go::runtime::ActivationBlendResult blend_result;
@@ -1129,7 +1132,11 @@ public:
       cmd.motor_cmd()[i].kd() = filtered.kd[i];
     }
     cmd.crc() = crc32_core(reinterpret_cast<uint32_t*>(&cmd), (sizeof(cmd) >> 2) - 1);
-    publisher_->Write(cmd);
+    if (!publisher_->Write(cmd)) {
+      event_log_.log("publish_failed");
+      return;
+    }
+    if (active_command) timing_reporter_.published(event_log_, timing);
     if (!active_command) {
       activation_blend_.observe_hold({filtered.q, filtered.kp, filtered.kd});
     } else if (blend_result.completed && !blend_result.bypassed &&
@@ -1206,7 +1213,7 @@ private:
       if (!finite(state_.q[i]) || !finite(state_.dq[i])) return;
     }
     connected_.store(true);
-    sequence_.fetch_add(1, std::memory_order_relaxed);
+    state_.seq = sequence_.fetch_add(1, std::memory_order_relaxed) + 1;
   }
 
   const Args& args_;
@@ -1218,6 +1225,7 @@ private:
   CommandSafetyFilter safety_filter_;
   CommandSafetyLimits safety_limits_;
   RuntimeEventLogger event_log_;
+  action_go::runtime::CommandTimingReporter timing_reporter_;
   ActivationBlend activation_blend_;
   bool first_command_logged_{false};
   bool first_hold_logged_{false};
@@ -1396,6 +1404,7 @@ int run_omnixtreme_runtime(int argc, char** argv) {
       // LowState, the player computes/publishes one LowCmd, then MuJoCo steps.
       // This intentionally lets the simulator wait for ONNX inference.
       bool committed_candidate_pending = preview_committed;
+      action_go::runtime::CommandTiming command_timing;
       while (!g_stop_requested.load()) {
         while (!g_stop_requested.load()) {
             const uint64_t seq = dds.sequence();
@@ -1409,7 +1418,9 @@ int run_omnixtreme_runtime(int argc, char** argv) {
         if (!committed_candidate_pending && tick_count % infer_interval == 0) {
           const auto s = dds.snapshot();
           q_from = q_to;
+          action_go::runtime::begin_command_timing(s.recv_stamp, s.seq);
           q_to = policy.infer(s);
+          command_timing = action_go::runtime::finish_command_timing();
           target_set_time = now;
           policy.advance(false);
           ++infer_count;
@@ -1439,7 +1450,7 @@ int run_omnixtreme_runtime(int argc, char** argv) {
           const double a = elapsed / args.startup_interp_sec;
           q_cmd = lerp_vec(startup_q, q_cmd, a);
         }
-        dds.publish(q_cmd, kp, kd, false, true, preview_committed);
+        dds.publish(q_cmd, kp, kd, false, true, preview_committed, command_timing);
         committed_candidate_pending = false;
 
         if (max_frames_reached) break;
@@ -1468,6 +1479,7 @@ int run_omnixtreme_runtime(int argc, char** argv) {
       int e2e_count = 0;
       uint64_t target_seq = 0;
       std::chrono::steady_clock::time_point target_source_stamp = s0.recv_stamp;
+      action_go::runtime::CommandTiming target_timing;
 
       auto command_at_locked = [&](const std::chrono::steady_clock::time_point& now) {
         std::vector<float> out = q_to;
@@ -1491,13 +1503,15 @@ int run_omnixtreme_runtime(int argc, char** argv) {
           const auto now = std::chrono::steady_clock::now();
           uint64_t local_target_seq = 0;
           std::chrono::steady_clock::time_point local_source_stamp{};
+          action_go::runtime::CommandTiming publish_timing;
           {
             std::lock_guard<std::mutex> lock(cmd_mtx);
             q_cmd = command_at_locked(now);
             local_target_seq = target_seq;
             local_source_stamp = target_source_stamp;
+            publish_timing = target_timing;
           }
-          dds.publish(q_cmd, kp, kd, false, true, preview_committed);
+          dds.publish(q_cmd, kp, kd, false, true, preview_committed, publish_timing);
           const auto after_publish = std::chrono::steady_clock::now();
           {
             std::lock_guard<std::mutex> stats_lock(stats_mtx);
@@ -1549,6 +1563,7 @@ int run_omnixtreme_runtime(int argc, char** argv) {
         while (!g_stop_requested.load()) {
           const auto infer_begin = std::chrono::steady_clock::now();
           const auto s = dds.snapshot();
+          action_go::runtime::begin_command_timing(s.recv_stamp, s.seq);
           const auto next_target = policy.infer(s);
           const auto infer_end = std::chrono::steady_clock::now();
           infer_ms_last = std::chrono::duration<double, std::milli>(infer_end - infer_begin).count();
@@ -1561,6 +1576,7 @@ int run_omnixtreme_runtime(int argc, char** argv) {
             q_to = next_target;
             target_set_time = infer_end;
             target_source_stamp = s.recv_stamp;
+            target_timing = action_go::runtime::finish_command_timing();
             ++target_seq;
           }
 

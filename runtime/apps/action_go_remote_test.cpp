@@ -2,6 +2,7 @@
 #include "action_go/runtime/network_command.h"
 #include "action_go/runtime/bridge_gate.h"
 #include "action_go/runtime/bridge_risk_monitor.h"
+#include "action_go/runtime/runtime_session.h"
 
 #include <unitree/idl/hg/LowState_.hpp>
 #include <unitree/robot/channel/channel_factory.hpp>
@@ -765,7 +766,7 @@ int main(int argc, char** argv) {
   std::signal(SIGQUIT, damping_signal_handler);
 
   try {
-    const Args args = parseArgs(argc, argv);
+    Args args = parseArgs(argc, argv);
     if (args.udp_listen && args.udp_bind.empty()) {
       throw std::runtime_error("--udp-bind must be explicit; use 127.0.0.1 for local control");
     }
@@ -775,6 +776,10 @@ int main(int argc, char** argv) {
       throw std::runtime_error(
           "non-loopback or multicast UDP control requires --udp-auth-key-file");
     }
+    action_go::runtime::RuntimeSession runtime_session(
+        args.event_log, args.config, args.remote_map, args.net, args.dry_run);
+    args.event_log = runtime_session.event_path();
+    try {
     AuthenticatedNetworkCommandParser::Config udp_auth_config;
     if (args.udp_listen && !args.udp_auth_key_file.empty()) {
       udp_auth_config.key = action_go::runtime::load_udp_auth_key_file(args.udp_auth_key_file);
@@ -800,6 +805,8 @@ int main(int argc, char** argv) {
     MotionActionController controller;
     controller.setEventLogPath(args.event_log);
     if (!controller.init(&loco, args.config, args.net, args.dry_run)) {
+      runtime_session.notice("ERROR", "Initialization failed: " + controller.lastError());
+      runtime_session.result("initialization_failed");
       std::cerr << "[action_go_remote_test] init failed: " << controller.lastError() << std::endl;
       return 1;
     }
@@ -867,6 +874,8 @@ int main(int argc, char** argv) {
               << "no action/safety takeover until "
               << comboName(args.remote.shell_start_combo) << " or "
               << comboName(args.remote.shell_start_alt_combo) << " is pressed\n";
+    runtime_session.notice("INFO", "Remote ready; waiting for ARM");
+    runtime_session.render(controller.controlState(), "", "");
 
     if (args.startup_delay_sec > 0.0) {
       std::cout << "[action_go_remote_test] startup delay "
@@ -916,6 +925,7 @@ int main(int argc, char** argv) {
                 << " provider=" << bridge_risk->risk_percent() << " B=" << args.b_action << std::endl;
     }
     std::string selected_safety_action = args.remote.safety.action;
+    bool logging_failure_reported = false;
 
     auto requestAction = [&](const std::string& action,
                              std::chrono::steady_clock::time_point when,
@@ -946,6 +956,7 @@ int main(int argc, char** argv) {
                   << controller.lastError() << std::endl;
       } else {
         active_action = action;
+        runtime_session.notice("INFO", "Starting " + action);
         last_status = MotionActionController::Status::SwitchingToUserCtrl;
       }
     };
@@ -968,6 +979,7 @@ int main(int argc, char** argv) {
         return false;
       }
       active_action = selected_safety_action;
+      runtime_session.notice("WARN", "Safety recovery: " + selected_safety_action);
       last_status = MotionActionController::Status::SwitchingToUserCtrl;
       return true;
     };
@@ -983,6 +995,7 @@ int main(int argc, char** argv) {
       shell_armed = false;
       active_action.clear();
       controller.dampingStop();
+      runtime_session.notice("WARN", "Robot fall detected; requesting DAMPING");
       if (args.remote.safety.auto_recovery) {
         shell_armed = true;
         safety_state = SafetyState::Recovering;
@@ -1190,6 +1203,7 @@ int main(int argc, char** argv) {
         std::cerr << "[action_go_remote_test][shell] walkrun switch warning: "
                   << controller.lastError() << std::endl;
       }
+      else runtime_session.notice("INFO", "WALKRUN confirmed");
       g_stop_level.store(0);
       last_status = controller.update();
     };
@@ -1208,6 +1222,7 @@ int main(int argc, char** argv) {
       std::cout << "[action_go_remote_test][shell] ARMED by " << source
                 << ": actions and IMU safety enabled, recovery="
                 << selected_safety_action << std::endl;
+      runtime_session.notice("INFO", "ARMED by " + source);
       fall_timer_active = false;
       recover_timer_active = false;
       if (imu.valid && imu.tilt_deg >= args.remote.safety.recover_angle_deg) {
@@ -1254,8 +1269,16 @@ int main(int argc, char** argv) {
         return true;
       }
       if (cmd.type == NetworkCommandType::kWalkrunExit) {
+        if (!shell_armed) {
+          std::cerr << "[action_go_remote_test] ignore udp walkrun_exit while unarmed" << std::endl;
+          return false;
+        }
         std::cerr << "[action_go_remote_test] udp normal exit requested" << std::endl;
-        controller.stopAndSwitchToOfficial("walkrun");
+        if (!controller.stopAndSwitchToOfficial("walkrun")) {
+          std::cerr << "[action_go_remote_test] official switch failed; keep supervisor active: "
+                    << controller.lastError() << std::endl;
+          return false;
+        }
         return true;
       }
       if (!shell_armed) {
@@ -1358,11 +1381,24 @@ int main(int argc, char** argv) {
       }
 
       const auto status = controller.update();
+      if ((!controller.logsHealthy() || controller.droppedLogRecords()) && !logging_failure_reported) {
+        logging_failure_reported = true;
+        runtime_session.notice("ERROR", "Supervisor event logging is incomplete");
+      }
+      std::string displayed_state = controller.controlState();
+      if (status == MotionActionController::Status::SwitchingToUserCtrl) displayed_state = "SWITCHING_TO_USER_CTRL";
+      else if (status == MotionActionController::Status::SwitchingBack) displayed_state += " -> OFFICIAL";
+      else if (status == MotionActionController::Status::SwitchBackBlocked) displayed_state = "SWITCH_BACK_BLOCKED";
+      const std::string timing_path = active_action.empty() ? "" : controller.currentActionEventLog();
+      const auto status_imu = remote.imu();
+      runtime_session.render(args.dry_run ? "DRY_RUN" : displayed_state, active_action, timing_path,
+          !status_imu.valid || std::chrono::steady_clock::now() - status_imu.stamp > std::chrono::seconds(1));
       if (status != last_status) {
         std::cout << "[action_go_remote_test] status="
                   << MotionActionController::statusToString(status) << std::endl;
         if (status == MotionActionController::Status::Done) {
           const std::string finished_action = active_action;
+          runtime_session.notice("INFO", "Completed " + finished_action);
           std::cout << "[action_go_remote_test] action done: " << finished_action << std::endl;
           active_action.clear();
           if (lie_action_active || finished_action == args.remote.lie_action) {
@@ -1381,6 +1417,7 @@ int main(int argc, char** argv) {
             continue;
           }
         } else if (status == MotionActionController::Status::Failed) {
+          runtime_session.notice("ERROR", active_action + ": " + controller.lastError());
           std::cerr << "[action_go_remote_test] action failed: "
                     << controller.lastError() << std::endl;
           const std::string failed_action = active_action;
@@ -1406,6 +1443,11 @@ int main(int argc, char** argv) {
 
       prev_mask = now_mask;
       std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+    } catch (const std::exception& error) {
+      runtime_session.notice("ERROR", error.what());
+      runtime_session.result("exception");
+      throw;
     }
   } catch (const std::exception& e) {
     std::cerr << "[action_go_remote_test] ERROR: " << e.what() << std::endl;

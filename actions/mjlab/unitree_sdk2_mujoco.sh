@@ -7,19 +7,16 @@ case "$VARIANT" in
   flat)
     default_model="$ACTION_GO_ROOT/actions/mjlab/model/reverse_vault_flat_28000.onnx"
     default_spec="$ACTION_GO_ROOT/actions/mjlab/config/generic_reverse_vault_sim.yaml"
-    default_scene="/root/epfs/program/wbc/mimic/mjlab/logs/actiongo_reverse_vault_24000_golden/reverse_vault_flat_24000_exact.mjb"
     default_max_frames=368
     ;;
   terrain)
     default_model="$ACTION_GO_ROOT/actions/mjlab/model/reverse_vault_terrain_20000.onnx"
     default_spec="$ACTION_GO_ROOT/actions/mjlab/config/generic_reverse_vault_terrain_sim.yaml"
-    default_scene="/root/epfs/program/wbc/mimic/mjlab/logs/actiongo_reverse_vault_24000_terrain_golden/reverse_vault_flat_24000_exact.mjb"
     default_max_frames=368
     ;;
   dance1_subject2)
     default_model="$ACTION_GO_ROOT/actions/mjlab/model/dance1_subject2_29999.onnx"
     default_spec="$ACTION_GO_ROOT/actions/mjlab/config/generic_dance1_subject2_sim.yaml"
-    default_scene="/root/epfs/program/wbc/mimic/mjlab/logs/actiongo_reverse_vault_24000_golden/reverse_vault_flat_24000_exact.mjb"
     default_max_frames=6574
     ;;
   *)
@@ -29,13 +26,11 @@ case "$VARIANT" in
 esac
 MODEL="${MJLAB_ACTION_MODEL:-$default_model}"
 SPEC="${MJLAB_ACTION_SPEC:-$default_spec}"
-SIM_BIN="${UNITREE_MUJOCO_BIN:-/root/epfs/program/vendor/unitree_mujoco_tar/simulate/build/unitree_mujoco}"
-SCENE="${MJLAB_MUJOCO_SCENE:-$default_scene}"
+SIM_BIN="${UNITREE_MUJOCO_BIN:?Set UNITREE_MUJOCO_BIN to the unitree_mujoco executable}"
+SCENE="${MJLAB_MUJOCO_SCENE:?Set MJLAB_MUJOCO_SCENE to the matching exported MJB scene}"
 INTERFACE="${UNITREE_DDS_INTERFACE:-lo}"
 DOMAIN_ID="${UNITREE_DDS_DOMAIN_ID:-0}"
 MAX_FRAMES="${MJLAB_ACTION_MAX_FRAMES:-$default_max_frames}"
-START_FILE="${MJLAB_START_FILE:-/tmp/action_go_mjlab_${VARIANT}_start}"
-READY_FILE="${MJLAB_READY_FILE:-/tmp/action_go_mjlab_${VARIANT}_ready}"
 
 if [[ ! -x "$SIM_BIN" ]]; then
   echo "unitree_mujoco binary not found: $SIM_BIN" >&2
@@ -54,7 +49,9 @@ if [[ ! -f "$SCENE" ]]; then
   exit 1
 fi
 
-rm -f "$START_FILE" "$READY_FILE"
+SIGNAL_DIR="$(mktemp -d "${TMPDIR:-/tmp}/action_go_mjlab.XXXXXX")"
+START_FILE="${MJLAB_START_FILE:-$SIGNAL_DIR/start}"
+READY_FILE="${MJLAB_READY_FILE:-$SIGNAL_DIR/ready}"
 sim_pid=""
 player_pid=""
 cleanup() {
@@ -64,6 +61,7 @@ cleanup() {
   [[ -n "$player_pid" ]] && wait "$player_pid" 2>/dev/null || true
   [[ -n "$sim_pid" ]] && wait "$sim_pid" 2>/dev/null || true
   rm -f "$START_FILE" "$READY_FILE"
+  rmdir "$SIGNAL_DIR" 2>/dev/null || true
 }
 trap cleanup EXIT INT TERM
 

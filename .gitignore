@@ -2,6 +2,8 @@ build
 __pycache__
 **/.vscode
 logs/
+!tools/logs/
+!tools/logs/*.py
 .cache/
 experiments/runs/
 paper/build/

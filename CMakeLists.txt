@@ -144,6 +144,12 @@ target_link_libraries(action_go_remote_test
 )
 
 if(BUILD_TESTING)
+  add_executable(runtime_logging_test runtime/tests/runtime_logging_test.cpp)
+  target_link_libraries(runtime_logging_test action_go ${ACTION_GO_NLOHMANN_JSON_TARGET})
+  target_compile_options(runtime_logging_test PRIVATE -UNDEBUG)
+  add_test(NAME runtime_logging_test COMMAND runtime_logging_test)
+  add_test(NAME log_manager_test COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_CURRENT_SOURCE_DIR}/runtime/tests/log_manager_test.py)
   add_test(
     NAME simulation_recovery_test
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/runtime/tests/simulation_recovery_test.py
@@ -151,6 +157,10 @@ if(BUILD_TESTING)
   add_test(
     NAME model_assets_check_test
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/runtime/tests/model_assets_check_test.py
+  )
+  add_test(
+    NAME asset_download_release_test
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/runtime/tests/asset_download_release_test.py
   )
   add_executable(depth_monitor_publisher_test runtime/tests/depth_monitor_publisher_test.cpp)
   target_include_directories(depth_monitor_publisher_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/runtime/include)
@@ -438,6 +448,7 @@ if(DEFINED ACTION_GO_ONNXRUNTIME_LIB AND DEFINED ACTION_GO_ONNXRUNTIME_INCLUDE_D
     ${ACTION_GO_ONNXRUNTIME_INCLUDE_DIR}
   )
   target_link_libraries(generic_policy_player
+    OpenSSL::Crypto
     unitree_sdk2
     ddsc
     ddscxx
@@ -481,6 +492,7 @@ if(DEFINED ACTION_GO_ONNXRUNTIME_LIB AND DEFINED ACTION_GO_ONNXRUNTIME_INCLUDE_D
     ${ACTION_GO_MOTION_ONNXRUNTIME_INCLUDE_DIR}
   )
   target_link_libraries(generic_motion_tracking_player
+    OpenSSL::Crypto
     unitree_sdk2
     ddsc
     ddscxx
@@ -742,6 +754,7 @@ if(DEFINED ACTION_GO_ONNXRUNTIME_LIB AND DEFINED ACTION_GO_ONNXRUNTIME_INCLUDE_D
       ${LIBZMQ_INCLUDE_DIRS}
     )
     target_link_libraries(generic_sensor_policy_player
+      OpenSSL::Crypto
       unitree_sdk2
       ddsc
       ddscxx

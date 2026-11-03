@@ -1,4 +1,5 @@
 #include "action_go/runtime/supervisor_platform.h"
+#include "action_go/runtime/signal_file.h"
 
 #include <cerrno>
 #include <csignal>
@@ -41,9 +42,7 @@ class PosixSupervisorPlatform final : public SupervisorPlatform {
   }
 
   bool file_exists(const std::string& path) override {
-    std::error_code error;
-    const bool exists = fs::exists(path, error);
-    return !error && exists;
+    return signal_file_exists(path);
   }
 
   bool remove_file(const std::string& path, std::string& error) override {
@@ -61,15 +60,8 @@ class PosixSupervisorPlatform final : public SupervisorPlatform {
                   std::string& error) override {
     if (path.empty()) return true;
     try {
-      const fs::path file(path);
-      if (file.has_parent_path()) fs::create_directories(file.parent_path());
-      std::ofstream output(path);
-      if (!output) {
-        error = "failed to create file: " + path;
-        return false;
-      }
-      output << contents;
-      return output.good();
+      write_signal_file(path, contents);
+      return true;
     } catch (const std::exception& exception) {
       error = "failed to touch file " + path + ": " + exception.what();
       return false;

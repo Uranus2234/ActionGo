@@ -43,6 +43,14 @@ MANAGED_SUFFIXES = {
 EXCLUDED_DIRECTORY_PREFIXES = ("thirdparty/onnxruntime-",)
 
 
+def pbfm_context(path: Path) -> bool:
+    text = path.as_posix()
+    return (text.startswith("actions/pbfm/motions/") and path.name in {"context.yaml", "initial_state.json"} or
+            text.startswith("actions/pbfm/config/context_") and path.suffix == ".yaml" or
+            text.startswith(("actions/pbfm/config/joystick_", "actions/pbfm/config/keyboard_")) and
+            path.name in {"context.yaml", "idle.yaml", "turn_left.yaml", "turn_right.yaml"})
+
+
 def tracked_paths(repo: Path) -> list[Path]:
     output = subprocess.check_output([
         "git", "-C", str(repo), "ls-files", "-z", "--cached", "--others",
@@ -57,6 +65,8 @@ def manifest_assets(repo: Path) -> set[Path]:
 
 
 def excluded(path: Path, assets: set[Path]) -> bool:
+    if pbfm_context(path):
+        return True
     path_text = path.as_posix()
     if (path in assets or path.suffix.lower() in COMPILED_SUFFIXES or
             any(path_text.lower().endswith(suffix) for suffix in MANAGED_SUFFIXES)):

@@ -2554,7 +2554,8 @@ class GenericPolicyPlayer {
                const std::vector<float>& kd,
                int mode_machine,
                bool allow_stale_state = false,
-               CommandPhase phase = CommandPhase::kActive);
+               CommandPhase phase = CommandPhase::kActive,
+               CommandTiming timing = {});
 
   void publish_damping_for_stop(bool allow_stale_state = false);
   void wait_postrun_handoff(int publish_hz);
@@ -2911,6 +2912,7 @@ class GenericPolicyPlayer {
   CommandSafetyFilter safety_filter_;
   CommandSafetyLimits safety_limits_;
   RuntimeEventLogger event_log_;
+  CommandTimingReporter timing_reporter_;
   ActivationBlend activation_blend_;
   OnnxRunner onnx_;
   unitree::robot::ChannelPublisherPtr<LowCmd> publisher_;

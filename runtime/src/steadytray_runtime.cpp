@@ -1,6 +1,7 @@
 #include "action_go/runtime/activation_blend.h"
 #include "action_go/runtime/command_safety_filter.h"
 #include "action_go/runtime/event_logger.h"
+#include "action_go/runtime/command_timing.h"
 #include "action_go/runtime/policy_protocol.h"
 #include "action_go/runtime/preview_lifecycle.h"
 #include "action_go/runtime/yaml_contract.h"
@@ -960,7 +961,7 @@ class UnitreeDDS {
                       const std::vector<float>& lower_limits,
                       const std::vector<float>& upper_limits)
       : args_(args), activation_blend_(args.activation_blend_sec) {
-    event_log_.open_append(args_.event_log);
+    event_log_.open_append(args_.event_log.empty() ? "" : args_.event_log + ".dds.jsonl");
     CommandSafetyConfig safety_cfg;
     safety_cfg.lowstate_timeout_sec = 0.2;
     safety_filter_.set_config(safety_cfg);
@@ -997,7 +998,8 @@ class UnitreeDDS {
 
   void publish(const std::vector<float>& q, const std::vector<float>& kp, const std::vector<float>& kd,
                bool allow_stale_state = false, bool active_command = true,
-               bool bypass_activation = false) {
+               bool bypass_activation = false,
+               action_go::runtime::CommandTiming timing = {}) {
     if (args_.dry_run || !publisher_) return;
     if (!active_command && args_.experimental_no_prestart_hold) {
       if (!prestart_hold_suppressed_logged_) {
@@ -1067,7 +1069,11 @@ class UnitreeDDS {
       cmd.motor_cmd()[i].kd() = filtered.kd[i];
     }
     cmd.crc() = crc32_core((uint32_t*)&cmd, (sizeof(cmd) >> 2) - 1);
-    publisher_->Write(cmd);
+    if (!publisher_->Write(cmd)) {
+      event_log_.log("publish_failed");
+      return;
+    }
+    if (active_command) timing_reporter_.published(event_log_, timing);
     if (!active_command) {
       activation_blend_.observe_hold({filtered.q, filtered.kp, filtered.kd});
     } else if (blend_result.completed && !blend_result.bypassed &&
@@ -1153,6 +1159,7 @@ class UnitreeDDS {
   CommandSafetyFilter safety_filter_;
   CommandSafetyLimits safety_limits_;
   RuntimeEventLogger event_log_;
+  action_go::runtime::CommandTimingReporter timing_reporter_;
   ActivationBlend activation_blend_;
   bool first_command_logged_{false};
   bool first_hold_logged_{false};
@@ -1325,6 +1332,7 @@ class SteadyTrayRunner {
     std::atomic<double> max_publish_interval_ms{0.0};
     std::mutex command_mutex;
     bool command_active = preview_mode;
+    action_go::runtime::CommandTiming target_timing;
     std::atomic<bool> publisher_stop{false};
     std::exception_ptr publisher_error;
     std::mutex publisher_error_mutex;
@@ -1338,6 +1346,7 @@ class SteadyTrayRunner {
           const auto now = std::chrono::steady_clock::now();
           std::vector<float> publish_target;
           bool publish_active = false;
+          action_go::runtime::CommandTiming publish_timing;
           {
             std::lock_guard<std::mutex> lock(command_mutex);
             const double a = args_.target_interp_sec > 1e-6
@@ -1353,9 +1362,10 @@ class SteadyTrayRunner {
             }
             target = publish_target;
             publish_active = command_active;
+            publish_timing = target_timing;
           }
           dds.publish(publish_target, cfg_.kp, cfg_.kd, false, publish_active,
-                      preview_mode);
+                      preview_mode, publish_timing);
           const auto published_at = std::chrono::steady_clock::now();
           if (previous_publish.time_since_epoch().count() != 0) {
             const double interval_ms =
@@ -1390,6 +1400,7 @@ class SteadyTrayRunner {
       if (now >= next_infer) {
         const auto infer_begin = std::chrono::steady_clock::now();
         const auto s = dds.snapshot();
+        action_go::runtime::begin_command_timing(s.recv_stamp, s.seq);
         if (s.q.size() < kNumJoints || s.dq.size() < kNumJoints) throw std::runtime_error("lowstate motor count too small");
         ObjectPose op = object_source_->latest();
         if (!op.valid || op.age_sec > args_.pose_timeout_sec) {
@@ -1412,6 +1423,7 @@ class SteadyTrayRunner {
           to = std::move(next_target);
           interp_start = now;
           command_active = next_active;
+          target_timing = action_go::runtime::finish_command_timing();
         }
         ++infer_count;
         const auto infer_end = std::chrono::steady_clock::now();

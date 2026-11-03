@@ -13,18 +13,27 @@ tools/launch/start_unsafe.sh    # 禁用 IMU safety
 tools/launch/start_dry_run.sh   # dry-run：不切 UserCtrl，不发 LowCmd
 ```
 
-默认网卡是 `enP8p1s0`。如需临时覆盖：
+真机启动必须显式设置 DDS 网卡；dry-run 默认使用 `lo`：
 
 ```bash
 ACTION_GO_NET=eth0 tools/launch/start_safe.sh
-ACTION_GO_NET=enP8p1s0 tools/launch/start_safe.sh
+ACTION_GO_NET=lo tools/launch/start_dry_run.sh
 ```
 
-脚本顶部已经把常见/当前机器网卡名集中成变量：`enP8p1s0`、`eth0`、`usb0`、`usb1`、`wlx782288b51cae`、`lo`、`docker0`。
+systemd 部署时设置 service 中的 `Environment=ACTION_GO_NET=...` 为实际网卡。
 
 Dry-run 模式说明：`--dry-run` 不会 `StopMove`、不会切 `UserCtrl`、不会请求官方 `walkrun/passive` 切换；动作 player 会加无 LowCmd dry-run 参数运行，用来检查模型/DDS/相机启动链路。
 
+每次动作的默认 ready/start/complete/release 信号使用独立的随机临时目录（权限 `0700`），
+子进程退出并 join 后清理。自定义信号路径必须放入当前用户拥有且其他用户不可写的目录；
+使用 `mktemp -d` 准备该目录，不能直接写入共享 `/tmp`。创建信号时拒绝符号链接、
+硬链接和符号链接父目录。命令引用的必需占位符为空时，在启动或切控制权前报错；
+`{event_log_arg}` 作为可选整段参数允许为空。
+
 ## tmux 后台 / 开机自启动
+
+日志会自动记录到独立运行目录，终端只显示控制状态、策略名、当前 E2E 和关键提示。
+计时范围、存储格式和查询命令见 [runtime logging](runtime_logging.md)。
 
 `tools/launch/start.sh` 用 tmux 后台运行 `tools/launch/start_safe.sh`：
 
@@ -259,6 +268,9 @@ python3 tools/remote/action_go_udp_send.py --host <机器人IP> --cmd emergency 
 `emergency` / `stop` 兼容命令和 `Select+Start` 都调用 `dampingStop()`：强制停止
 当前策略，进入官方 passive/damping 并回到 `SHELL_IDLE`，程序继续监听。
 停止不设置急停锁存；重新按 ARM 后可启动动作。`damping_exit` 使用同一停止实现，随后退出程序。
+
+`emergency` 和 `damping_exit` 在未 ARM 时仍可请求阻尼。`walkrun_exit` 必须先 ARM，
+且只有成功切回官方 walkrun 后才退出；切换失败时保持进程运行，允许重试或阻尼。
 
 UDP 只能选择 `MotionActionController` 已加载的 action，不能上传 command、路径、
 模型、YAML 或 shell 片段。action YAML 的 `command` 本身等同本机可执行代码，必须只

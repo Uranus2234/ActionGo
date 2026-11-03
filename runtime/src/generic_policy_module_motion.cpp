@@ -1129,6 +1129,7 @@ void GenericPolicyPlayer::control_loop_sonic() {
     // makes that tick one current frame with the older nine frames zero-padded.
     reset_sonic_runtime(state);
     std::vector<float> target = default_q_;
+    CommandTiming target_timing;
     const auto start = std::chrono::steady_clock::now();
     std::mutex target_mutex;
     std::atomic<bool> worker_stop{false};
@@ -1151,12 +1152,14 @@ void GenericPolicyPlayer::control_loop_sonic() {
           }
           policy_deadline_miss.fetch_add(advance_deadline(next_policy, policy_dt, now));
           const auto inference_state = snapshot();
+          begin_command_timing(inference_state.stamp, inference_state.seq);
           std::vector<float> action;
           const int64_t step = inference_count.load();
           if (!build_sonic_target(inference_state, step, worker_target, action)) break;
           {
             std::lock_guard<std::mutex> lock(target_mutex);
             target = worker_target;
+            target_timing = finish_command_timing();
           }
           const int64_t completed = inference_count.fetch_add(1) + 1;
           if (stats_interval_ > 0 && completed % stats_interval_ == 0 && !worker_target.empty()) {
@@ -1192,12 +1195,15 @@ void GenericPolicyPlayer::control_loop_sonic() {
         if (now >= next_publish) {
           publish_deadline_miss.fetch_add(advance_deadline(next_publish, publish_dt, now));
           std::vector<float> publish_target;
+          CommandTiming publish_timing;
           {
             std::lock_guard<std::mutex> lock(target_mutex);
             publish_target = target;
+            publish_timing = target_timing;
           }
           const auto publish_state = snapshot();
-          publish(publish_target, kp_, kd_, publish_state.mode_machine);
+          publish(publish_target, kp_, kd_, publish_state.mode_machine, false,
+                  CommandPhase::kActive, publish_timing);
           publish_count.fetch_add(1);
         }
         if (next_publish > std::chrono::steady_clock::now()) std::this_thread::sleep_until(next_publish);
@@ -1239,6 +1245,7 @@ std::array<float, 4> GenericPolicyPlayer::protomotions_anchor_quat(const Generic
   }
 
 std::vector<float> GenericPolicyPlayer::protomotions_infer(const GenericPolicyPlayer::RobotState& s) {
+    CommandTimingScope timing_scope(s.stamp, s.seq);
     if (s.q.size() < motor_count_ || s.dq.size() < motor_count_) {
       throw std::runtime_error("lowstate motor count too small");
     }
@@ -1378,7 +1385,7 @@ void GenericPolicyPlayer::control_loop_protomotions() {
           }
           const auto state = snapshot();
           publish(q_cmd, command.kp, command.kd, state.mode_machine, false,
-                  active ? CommandPhase::kActive : CommandPhase::kHold);
+                  active ? CommandPhase::kActive : CommandPhase::kHold, command.timing);
         },
         preview_committed);
     std::cout << player_log_prefix() << " start motion_conditioned_tracking/protomotions model="
@@ -1564,6 +1571,7 @@ std::vector<float> GenericPolicyPlayer::twist_infer(const std::vector<float>& ob
 GenericPolicyPlayer::TwistTargetStatus GenericPolicyPlayer::build_twist_target(const GenericPolicyPlayer::RobotState& s, int64_t policy_step,
                                        std::vector<float>& q, std::vector<float>& kp, std::vector<float>& kd,
                                        std::vector<float>& raw_action) {
+    CommandTimingScope timing_scope(s.stamp, s.seq);
     bool offline_finished = false;
     auto sample = current_twist_mimic(policy_step, offline_finished);
     if (offline_finished && twist_input_source_ != "realtime") return TwistTargetStatus::kStop;
@@ -1725,7 +1733,7 @@ void GenericPolicyPlayer::control_loop_twist() {
         [this](const JointCommand& command, bool active) {
           const auto state = snapshot();
           publish(command.q, command.kp, command.kd, state.mode_machine, false,
-                  active ? CommandPhase::kActive : CommandPhase::kHold);
+                  active ? CommandPhase::kActive : CommandPhase::kHold, command.timing);
         },
         preview_committed);
 
@@ -1965,6 +1973,7 @@ std::vector<float> GenericPolicyPlayer::humanoid_gpt_infer(const std::vector<flo
 GenericPolicyPlayer::HumanoidGptTargetStatus GenericPolicyPlayer::build_humanoid_gpt_target(const GenericPolicyPlayer::RobotState& s, int64_t policy_step,
                                                     std::vector<float>& q, std::vector<float>& kp, std::vector<float>& kd,
                                                     std::vector<float>& raw_action) {
+    CommandTimingScope timing_scope(s.stamp, s.seq);
     const auto ref_status = update_humanoid_gpt_reference(s, policy_step);
     if (ref_status != HumanoidGptTargetStatus::kCommand) return ref_status;
     const auto obs = build_humanoid_gpt_obs(s, humanoid_gpt_ref_curr_, humanoid_gpt_ref_next_);
@@ -2025,7 +2034,7 @@ void GenericPolicyPlayer::control_loop_humanoid_gpt() {
         [this](const JointCommand& command, bool active) {
           const auto state = snapshot();
           publish(command.q, command.kp, command.kd, state.mode_machine, false,
-                  active ? CommandPhase::kActive : CommandPhase::kHold);
+                  active ? CommandPhase::kActive : CommandPhase::kHold, command.timing);
         });
 
     std::cout << player_log_prefix() << " start motion_conditioned_tracking/humanoid_gpt model="

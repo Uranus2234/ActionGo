@@ -118,7 +118,7 @@ From the ActionGo repository, using the combat-tracker environment:
 
 ```bash
 export MUJOCO_GL=egl
-export XDG_CACHE_HOME=/root/epfs/program/wbc/combat-tracker/.cache
+export XDG_CACHE_HOME="$PWD/../combat-tracker/.cache"
 ../combat-tracker/.venv/bin/python tools/sim/mjlab_combat_mujoco.py \
   --training-repo ../combat-tracker \
   --checkpoint ../combat-tracker/runs/g1_mixed_combat_wo_state_future40ms/2026-11-01_12-11-21_mixed_future40ms_4gpu_8192_resume56000_200k/model_92000.pt \

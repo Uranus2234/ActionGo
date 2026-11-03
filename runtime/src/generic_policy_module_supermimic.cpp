@@ -274,6 +274,7 @@ void GenericPolicyPlayer::control_loop_motion_controller(Controller& controller)
                     event_int("onnx_threads", onnx_threads_), event_int("publish_hz", publish_hz)});
   }
   auto infer = [&](const RobotState& policy_state) {
+    CommandTimingScope timing_scope(policy_state.stamp, policy_state.seq);
     const auto pipeline_start = Clock::now();
     require_fresh(policy_state);
     const auto reference_frame = controller.reference_index();
@@ -403,7 +404,7 @@ void GenericPolicyPlayer::control_loop_motion_controller(Controller& controller)
           const auto command_started_at = Clock::now();
           const auto current_state = snapshot();
           publish(command.q, command.kp, command.kd, current_state.mode_machine, false,
-                  active ? CommandPhase::kActive : CommandPhase::kHold);
+                  active ? CommandPhase::kActive : CommandPhase::kHold, command.timing);
           const auto command_ready_at = Clock::now();
           if (active) record_latency(command.sequence, command_started_at, command_ready_at);
         }, preview_committed);

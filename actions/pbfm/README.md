@@ -133,11 +133,14 @@ ACTION_GO_NET=eth0 tools/launch/check_pbfm.sh dds
 
 ## 资产与构建
 
-本仓库同步 Vincent feature 的 P-BFM 代码、配置和文本 context，不包含 ONNX 权重、
-编码前的 `reference.npz`、机器人模型或训练依赖。文本 context 保留各文件的上游来源；
+本地开发树包含 P-BFM 代码、配置和派生 context；公开代码快照排除 ONNX、
+派生 context、LaFAN 初始状态和 `reference.npz`，也不包含机器人模型或训练依赖。
 模型及其衍生 context 遵循上游 CC-BY-NC-4.0，LaFAN 参考运动另遵循其数据许可，
 不适用 ActionGo 源码的 Apache-2.0。许可证保留在 `model/LICENSE`。
 `reference.npz` 用于重新编码和分析，已有 context 的推理不需要它。
+
+`python3 tools/assets/fetch_assets.py --policy pbfm` 从固定上游版本下载并组装权重，
+校验最终 SHA256。context 需按下述导入/编码步骤单独准备，不能把仅下载模型视为完整包。
 
 从已准备好的官方公开推理目录导入，不需要训练框架在线运行：
 

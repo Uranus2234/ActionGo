@@ -1,3 +1,4 @@
+#include "action_go/runtime/signal_file.h"
 #include "action_go/runtime/candidate_command_arbiter.h"
 #include "action_go/runtime/event_logger.h"
 #include "action_go/runtime/yaml_contract.h"
@@ -227,15 +228,7 @@ class HrmOnnxEvaluator {
 
 void touch_file(const std::string& path, const std::string& value) {
   if (path.empty()) return;
-  fs::path output(path);
-  if (output.has_parent_path()) fs::create_directories(output.parent_path());
-  const fs::path temporary = output.string() + ".tmp";
-  {
-    std::ofstream stream(temporary, std::ios::out | std::ios::trunc);
-    if (!stream) throw std::runtime_error("failed to write lifecycle file: " + path);
-    stream << value << '\n';
-  }
-  fs::rename(temporary, output);
+  action_go::runtime::write_signal_file(path, value + "\n", true);
 }
 
 void remove_file(const std::string& path) {
@@ -434,7 +427,7 @@ class DdsArbiter {
 
   void poll_files() {
     poll_source_exit_status();
-    if (!preview_seen_ && !args_.preview_file.empty() && fs::exists(args_.preview_file)) {
+    if (!preview_seen_ && !args_.preview_file.empty() && action_go::runtime::signal_file_exists(args_.preview_file)) {
       std::lock_guard<std::mutex> lock(mutex_);
       arbiter_.request_preview();
       preview_seen_ = true;
@@ -442,13 +435,13 @@ class DdsArbiter {
                   {event_string("source_policy", args_.source_policy),
                    event_string("target_policy", args_.target_policy)});
     }
-    if (!commit_seen_ && !args_.commit_file.empty() && fs::exists(args_.commit_file)) {
+    if (!commit_seen_ && !args_.commit_file.empty() && action_go::runtime::signal_file_exists(args_.commit_file)) {
       std::lock_guard<std::mutex> lock(mutex_);
       arbiter_.request_commit();
       commit_seen_ = true;
       logger_.log("commit_requested");
     }
-    if (!discard_seen_ && !args_.discard_file.empty() && fs::exists(args_.discard_file)) {
+    if (!discard_seen_ && !args_.discard_file.empty() && action_go::runtime::signal_file_exists(args_.discard_file)) {
       std::lock_guard<std::mutex> lock(mutex_);
       arbiter_.request_discard();
       discard_seen_ = true;
@@ -465,7 +458,7 @@ class DdsArbiter {
 
  private:
   void poll_source_exit_status() {
-    if (args_.source_exit_file.empty() || !fs::exists(args_.source_exit_file)) return;
+    if (args_.source_exit_file.empty() || !action_go::runtime::signal_file_exists(args_.source_exit_file)) return;
     std::error_code error;
     const auto modified = fs::last_write_time(args_.source_exit_file, error);
     if (error) return;

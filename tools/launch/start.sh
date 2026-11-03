@@ -27,7 +27,7 @@ Usage: $0 [start|stop|restart|status|attach|logs]
 
 Environment:
   ACTION_GO_TMUX_SESSION   tmux session name, default: action_go
-  ACTION_GO_NET            DDS net interface, default comes from tools/launch/start_safe.sh
+  ACTION_GO_NET            required DDS network interface
   ACTION_GO_CONFIG         default: config/motion_actions.yaml
   ACTION_GO_REMOTE_MAP     default: config/remote_actions.yaml
   ACTION_GO_ORT_MODE       clean(default): use per-player RPATH; prepend: force one ORT globally
@@ -73,23 +73,29 @@ write_runner() {
     printf 'export ACTION_GO_NET=%q\n' "${ACTION_GO_NET:-}"
     printf 'export ACTION_GO_CONFIG=%q\n' "${ACTION_GO_CONFIG:-config/motion_actions.yaml}"
     printf 'export ACTION_GO_REMOTE_MAP=%q\n' "${ACTION_GO_REMOTE_MAP:-config/remote_actions.yaml}"
+    printf 'export ACTION_GO_LOG_DIR=%q\n' "${LOG_DIR}"
+    printf 'export ACTION_GO_CONSOLE=%q\n' "${ACTION_GO_CONSOLE:-normal}"
     printf 'export LD_LIBRARY_PATH=%q\n' "${ld_path}"
-    printf 'echo %q\n' "[start.sh] root=${ROOT} session=${SESSION} log=${log_file}"
-    printf '%s\n' 'echo "[start.sh] ACTION_GO_NET=${ACTION_GO_NET:-<default from tools/launch/start_safe.sh>}"'
+    printf '%s\n' 'export ACTION_GO_GIT_SHA="$(git rev-parse HEAD 2>/dev/null || echo unknown)"'
+    printf 'LAUNCHER_LOG=%q\n' "${log_file}"
+    printf '%s\n' 'launcher_notice() { printf "%s\n" "$*"; printf "%s\n" "$*" >> "${LAUNCHER_LOG}"; }'
+    printf 'launcher_notice %q\n' "[start.sh] root=${ROOT} session=${SESSION} log=${log_file}"
+    printf '%s\n' 'launcher_notice "[start.sh] ACTION_GO_NET=${ACTION_GO_NET}"'
     printf 'RESTART_DELAY_SEC=%q\n' "${RESTART_DELAY_SEC}"
-    printf '%s\n' "trap 'echo \"[start.sh] runner received stop signal\"; exit 0' INT TERM"
+    printf '%s\n' "trap 'launcher_notice \"[start.sh] runner received stop signal\"; exit 0' INT TERM"
     printf '%s\n' 'while true; do'
-    printf '%s\n' '  echo "[start.sh] launching tools/launch/start_safe.sh at $(date --iso-8601=seconds)"'
+    printf '%s\n' '  launcher_notice "[start.sh] launching tools/launch/start_safe.sh at $(date --iso-8601=seconds)"'
     printf '%s\n' '  set +e'
-    printf '  %q 2>&1 | tee -a %q\n' "${START_SAFE}" "${log_file}"
-    printf '%s\n' '  status=${PIPESTATUS[0]}'
+    printf '  python3 tools/logs/manage_logs.py --root %q --prune\n' "${LOG_DIR}"
+    printf '  %q\n' "${START_SAFE}"
+    printf '%s\n' '  status=$?'
     printf '%s\n' '  set -e'
-    printf '%s\n' '  echo "[start.sh] tools/launch/start_safe.sh exited status=${status} at $(date --iso-8601=seconds)"'
+    printf '%s\n' '  launcher_notice "[start.sh] tools/launch/start_safe.sh exited status=${status} at $(date --iso-8601=seconds)"'
     printf '%s\n' '  if [[ "${status}" -eq 0 || "${status}" -eq 130 || "${status}" -eq 143 ]]; then'
-    printf '%s\n' '    echo "[start.sh] normal exit; tmux session will close"'
+    printf '%s\n' '    launcher_notice "[start.sh] normal exit; tmux session will close"'
     printf '%s\n' '    exit 0'
     printf '%s\n' '  fi'
-    printf '%s\n' '  echo "[start.sh] non-zero exit; restarting in ${RESTART_DELAY_SEC}s"'
+    printf '%s\n' '  launcher_notice "[start.sh] non-zero exit; restarting in ${RESTART_DELAY_SEC}s"'
     printf '%s\n' '  sleep "${RESTART_DELAY_SEC}"'
     printf '%s\n' 'done'
   } > "${RUNNER}"
@@ -108,6 +114,8 @@ start_session() {
     echo "[start.sh] attach: tools/launch/start.sh attach"
     return 0
   fi
+
+  : "${ACTION_GO_NET:?Set ACTION_GO_NET to the robot DDS network interface}"
 
   if [[ ! -x "${START_SAFE}" ]]; then
     echo "[start.sh] ERROR: ${START_SAFE} not executable" >&2
@@ -132,7 +140,7 @@ start_session() {
 
   echo "[start.sh] started tmux session '${SESSION}'"
   echo "[start.sh] attach: tools/launch/start.sh attach"
-  echo "[start.sh] logs:   tail -f ${log_file}"
+  echo "[start.sh] logs:   tools/launch/start.sh logs"
 }
 
 stop_session() {
@@ -182,6 +190,10 @@ attach_session() {
 }
 
 follow_logs() {
+  local runtime_log="${LOG_DIR}/latest/events.log"
+  if [[ -f "${runtime_log}" ]]; then
+    exec tail -F "${runtime_log}"
+  fi
   local latest_log="${LOG_DIR}/action_go_latest.log"
   if [[ ! -e "${latest_log}" ]]; then
     echo "[start.sh] no log yet: ${latest_log}" >&2

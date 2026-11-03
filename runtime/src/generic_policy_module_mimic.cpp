@@ -203,6 +203,7 @@ void GenericPolicyPlayer::reset_beyond_controller() {
   }
 
 bool GenericPolicyPlayer::build_beyond_target(const GenericPolicyPlayer::RobotState& s, std::vector<float>& q, std::vector<float>& kp, std::vector<float>& kd) {
+    CommandTimingScope timing_scope(s.stamp, s.seq);
     if (beyond_motion_step_ >= static_cast<int64_t>(max_frames_)) return false;
     if (s.q.size() < static_cast<size_t>(num_actions_)) throw std::runtime_error("lowstate motor count too small");
     std::vector<float> qj(num_actions_, 0.f), dqj(num_actions_, 0.f);
@@ -902,6 +903,7 @@ bool GenericPolicyPlayer::check_holosoma_target_safety(const GenericPolicyPlayer
 
 bool GenericPolicyPlayer::build_holosoma_policy_command(const GenericPolicyPlayer::RobotState& s, std::vector<float>& q, std::vector<float>& kp, std::vector<float>& kd,
                                      bool motion_clip_progressing) {
+    CommandTimingScope timing_scope(s.stamp, s.seq);
     if (motion_clip_progressing && holosoma_wall_time_timestep_) {
       holosoma_current_timestep_ = holosoma_timestep_from_wall_clock();
     } else if (!motion_clip_progressing) {

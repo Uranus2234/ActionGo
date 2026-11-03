@@ -3,6 +3,7 @@
 #include <chrono>
 #include <cstdint>
 #include <vector>
+#include "action_go/runtime/command_timing.h"
 
 namespace action_go::runtime {
 
@@ -11,6 +12,7 @@ struct JointCommand {
   std::vector<float> kp;
   std::vector<float> kd;
   uint64_t sequence{0};
+  CommandTiming timing;
 };
 
 struct ActivationBlendResult {

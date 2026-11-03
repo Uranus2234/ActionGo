@@ -185,6 +185,7 @@ std::vector<float> GenericPolicyPlayer::bfm_infer(const std::vector<float>& obs)
 
 bool GenericPolicyPlayer::build_bfm_target(const GenericPolicyPlayer::RobotState& s, std::vector<float>& q, std::vector<float>& kp, std::vector<float>& kd,
                         std::vector<float>& action_out) {
+    CommandTimingScope timing_scope(s.stamp, s.seq);
     const auto observation = bfm_history_.build(
         s.q, s.dq, default_q_, projected_gravity_from_quat(s.quat), s.gyro,
         bfm_last_action_scaled_, variant_ == "pbfm" ? BfmHistoryTiming::kPreviousOnly :
@@ -332,6 +333,7 @@ void GenericPolicyPlayer::control_loop_single_bfm() {
     auto next_policy = preview_committed ? start + policy_dt : start;
     struct CommandMailbox {
       std::mutex mutex;
+      CommandTiming timing;
       std::vector<float> begin_q;
       std::vector<float> goal_q;
       std::vector<float> kp;
@@ -359,6 +361,7 @@ void GenericPolicyPlayer::control_loop_single_bfm() {
           const auto now = std::chrono::steady_clock::now();
           std::vector<float> publish_q, publish_kp, publish_kd;
           bool active = false;
+          CommandTiming timing;
           {
             std::lock_guard<std::mutex> lock(mailbox.mutex);
             const double alpha = target_interp_sec_ > 1e-6
@@ -369,10 +372,11 @@ void GenericPolicyPlayer::control_loop_single_bfm() {
             publish_kp = mailbox.kp;
             publish_kd = mailbox.kd;
             active = mailbox.active;
+            timing = mailbox.timing;
           }
           const auto state = snapshot();
           publish(publish_q, publish_kp, publish_kd, state.mode_machine, false,
-                  active ? CommandPhase::kActive : CommandPhase::kHold);
+                  active ? CommandPhase::kActive : CommandPhase::kHold, timing);
           const auto published_at = std::chrono::steady_clock::now();
           if (previous_publish.time_since_epoch().count() != 0) {
             const double interval_ms =
@@ -436,6 +440,7 @@ void GenericPolicyPlayer::control_loop_single_bfm() {
           mailbox.kd = std::move(new_kd);
           mailbox.update_time = now;
           mailbox.active = true;
+          mailbox.timing = finish_command_timing();
         }
         if (stats_interval_ > 0 && steps % stats_interval_ == 0) {
           float action_abs_max = 0.f;
@@ -537,6 +542,7 @@ std::vector<float> GenericPolicyPlayer::build_unitree_obs(const GenericPolicyPla
 
 bool GenericPolicyPlayer::build_unitree_target(const GenericPolicyPlayer::RobotState& s, std::vector<float>& target, std::vector<float>& kp, std::vector<float>& kd,
                             GenericPolicyPlayer::Command& cmd, std::vector<float>& action) {
+    CommandTimingScope timing_scope(s.stamp, s.seq);
     cmd = unitree_command_from_remote(s.wireless_remote);
     auto obs = build_unitree_obs(s, cmd);
     action = onnx_.run_single(obs, obs_input_name_, action_output_name_, motor_count_);
@@ -590,7 +596,7 @@ void GenericPolicyPlayer::control_loop_single_unitree() {
         [this](const JointCommand& command, bool active) {
           const auto state = snapshot();
           publish(command.q, command.kp, command.kd, state.mode_machine, false,
-                  active ? CommandPhase::kActive : CommandPhase::kHold);
+                  active ? CommandPhase::kActive : CommandPhase::kHold, command.timing);
         });
     std::cout << player_log_prefix() << " start single_actor_state/unitree_rl_mjlab model=" << runtime_model_path_.string()
               << " obs_dim=" << unitree_obs_dim_ << " hz=" << inference_hz_ << " publish_hz=" << publish_hz_

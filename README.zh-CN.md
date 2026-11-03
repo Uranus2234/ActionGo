@@ -30,9 +30,11 @@ OpenCV 和 libzmq 用于构建 sensor player；RealSense、AprilTag、MuJoCo、R
 
 ## 模型与预检
 
-代码版不分发第三方 ONNX、运动数据、标签或预编译二进制。根据 [资产获取说明](docs/model_assets.md) 从上游取得模型或提供匹配的本地导出，再按 [MODEL_ASSETS.json](MODEL_ASSETS.json) 校验。清单已同步本地动作包的 84 个文件，包含四模型 154k 格斗动作包、paoxiao、PHP、P-BFM、mjlab、SONIC 原版与 v1.1 及运动数据；来源不明确的 checkpoint 继续标为待补，未在本地找到的 HandoffGuard risk model 需单独提供。`blocked_pending_review` 表示 BYOW，不代表允许再分发。
+代码版不分发第三方 ONNX、运动数据、标签或预编译二进制。[下载器](tools/assets/fetch_assets.py) 按 [MODEL_ASSETS.json](MODEL_ASSETS.json) 的固定上游版本和 SHA256 获取 11 个策略族的公开资产。TWIST、SteadyTray 下载原始 TorchScript，配套 ONNX 仍需转换验证；本地训练导出、未确认来源和缺失动作数据继续手动提供。下载不改变上游许可；`blocked_pending_review` 表示禁止随公开快照打包。详细覆盖范围见 [资产获取说明](docs/model_assets.md)。
 
 ```bash
+python3 tools/assets/fetch_assets.py --list
+python3 tools/assets/fetch_assets.py --policy bfm0  # --all 获取全部已登记的公开下载
 python3 tools/assets/check_model_assets.py --policy bfm0  # 严格检查已安装的指定动作包
 python3 tools/assets/check_model_assets.py --installed-only
 ./build/policy_spec_schema_check --all --allow-missing-assets
@@ -123,6 +125,7 @@ SONIC 当前动作默认使用 v1.1，原版配置仍保留；v1.1 的官方 rep
 
 - [新策略接入](docs/new_policy_onboarding.md)
 - [运行时架构](docs/runtime_architecture.md)
+- [运行日志](docs/runtime_logging.md)：当前状态、醒目策略名、实时 E2E 延迟与完整会话诊断。
 - [依赖与版本](DEPENDENCIES.md)
 - [贡献规范](CONTRIBUTING.md)
 - [安全报告](SECURITY.md)

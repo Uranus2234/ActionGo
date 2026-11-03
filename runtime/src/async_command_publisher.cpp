@@ -61,6 +61,7 @@ JointCommand AsyncCommandPublisher::interpolate(const JointCommand& from,
 void AsyncCommandPublisher::update(JointCommand command, bool active,
                                    Clock::time_point now) {
   validate_command(command);
+  if (!command.timing.command_sequence) command.timing = finish_command_timing();
   std::lock_guard<std::mutex> lock(command_mutex_);
   const double alpha = target_interp_sec_ > 1e-6
       ? std::chrono::duration<double>(now - update_time_).count() /

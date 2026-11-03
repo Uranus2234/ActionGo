@@ -18,7 +18,8 @@
       "upstream_code_license": "unverified",
       "weight_license": "local training export; dataset terms apply separately",
       "redistribution": "blocked_pending_review",
-      "notes": "Ordinary Git assets. Shared actor with original mjlab preprocessing captured in ONNX; current/+40ms reference. Full 824-frame 017/Ma and 399-frame A42 generated references match the recorded ActionGo inference. Right+A uses 017/Ma; Right+B uses the A42 eight-second segment."
+      "notes": "Ordinary Git assets. Shared actor with original mjlab preprocessing captured in ONNX; current/+40ms reference. Full 824-frame 017/Ma and 399-frame A42 generated references match the recorded ActionGo inference. Right+A uses 017/Ma; Right+B uses the A42 eight-second segment.",
+      "download_note": "No verified public URL for these exact local or derived assets."
     },
     {
       "paths": [
@@ -42,7 +43,8 @@
       "upstream_code_license": "unverified",
       "weight_license": "local training export; dataset terms apply separately",
       "redistribution": "blocked_pending_review",
-      "notes": "154000-iteration Omni15% / NoOmni pair; exact video comparison exports, shared family-specific 051/Ma and Kungfu side-kick references. Ordinary Git binaries; not LFS. R1+A / R1+Down now use the Omni15% model with full-length training-library wbst_motive / yewendun references; NoOmni actions remain registered without remote bindings."
+      "notes": "154000-iteration Omni15% / NoOmni pair; exact video comparison exports, shared family-specific 051/Ma and Kungfu side-kick references. Ordinary Git binaries; not LFS. R1+A / R1+Down now use the Omni15% model with full-length training-library wbst_motive / yewendun references; NoOmni actions remain registered without remote bindings.",
+      "download_note": "No verified public URL for these exact local or derived assets."
     },
     {
       "paths": [
@@ -62,7 +64,8 @@
       "upstream_code_license": "unverified",
       "weight_license": "local training export; dataset terms apply separately",
       "redistribution": "blocked_pending_review",
-      "notes": "154000-iteration Omni15% / NoOmni pair; exact video comparison exports, shared family-specific 051/Ma and Kungfu side-kick references. Ordinary Git binaries; not LFS."
+      "notes": "154000-iteration Omni15% / NoOmni pair; exact video comparison exports, shared family-specific 051/Ma and Kungfu side-kick references. Ordinary Git binaries; not LFS.",
+      "download_note": "No verified public URL for these exact local or derived assets."
     },
     {
       "paths": [
@@ -80,7 +83,8 @@
       "upstream_code_license": "unverified; upstream LICENSE is a placeholder",
       "weight_license": "local training export; dataset terms apply separately",
       "redistribution": "blocked_pending_review",
-      "notes": "Locally trained Omni-mix WoStateEstimation checkpoint iteration 159000, SHA256 b5378b2ca3fb6ffedf4405830d01a1e7eee53dcc81a81967910863d0dd8838e3. Requested 158700 was not archived; exported nearest 159000. Independent 93x10 + 730 observation and upper-body residual targets."
+      "notes": "Locally trained Omni-mix WoStateEstimation checkpoint iteration 159000, SHA256 b5378b2ca3fb6ffedf4405830d01a1e7eee53dcc81a81967910863d0dd8838e3. Requested 158700 was not archived; exported nearest 159000. Independent 93x10 + 730 observation and upper-body residual targets.",
+      "download_note": "No verified public URL for these exact local or derived assets."
     },
     {
       "paths": [
@@ -94,7 +98,8 @@
       "upstream_code_license": "unverified; upstream LICENSE is a placeholder",
       "weight_license": "local training export; dataset terms apply separately",
       "redistribution": "blocked_pending_review",
-      "notes": "Locally trained WoStateEstimation checkpoint 20261026-wostate4096/gpu0/ckpt_0159000.pt, iteration 159000, SHA256 7672e9b93eff081f5f847103feace4b284d9c8088801514ebe7da6104852ab21. Training library gpu0.npz contains no Omni clips. Shares byte-identical robot parameters and paoxiao reference with the Omni-mix export."
+      "notes": "Locally trained WoStateEstimation checkpoint 20261026-wostate4096/gpu0/ckpt_0159000.pt, iteration 159000, SHA256 7672e9b93eff081f5f847103feace4b284d9c8088801514ebe7da6104852ab21. Training library gpu0.npz contains no Omni clips. Shares byte-identical robot parameters and paoxiao reference with the Omni-mix export.",
+      "download_note": "No verified public URL for these exact local or derived assets."
     },
     {
       "paths": [
@@ -108,7 +113,18 @@
       "upstream_code_license": "CC-BY-NC-4.0",
       "weight_license": "CC-BY-NC-4.0 (public_demo/LICENSE)",
       "redistribution": "blocked_pending_review",
-      "notes": "Official public demo checkpoint 364822528, assembled upstream modelParts without changing weights. Imported locally with tools/export/import_pbfm_public.py; noncommercial terms retained in the model directory."
+      "notes": "Official public demo checkpoint 364822528, assembled upstream modelParts without changing weights. Imported locally with tools/export/import_pbfm_public.py; noncommercial terms retained in the model directory.",
+      "downloads": {
+        "actions/pbfm/model/policy.onnx": {
+          "kind": "concat",
+          "parts": [
+            "https://raw.githubusercontent.com/Roboparty/P-BFM/671fbafe71a5f58bab77eeb5d969051fd2d283f4/interactive/pbfm/policy-42872f98404a.part0",
+            "https://raw.githubusercontent.com/Roboparty/P-BFM/671fbafe71a5f58bab77eeb5d969051fd2d283f4/interactive/pbfm/policy-42872f98404a.part1",
+            "https://raw.githubusercontent.com/Roboparty/P-BFM/671fbafe71a5f58bab77eeb5d969051fd2d283f4/interactive/pbfm/policy-42872f98404a.part2",
+            "https://raw.githubusercontent.com/Roboparty/P-BFM/671fbafe71a5f58bab77eeb5d969051fd2d283f4/interactive/pbfm/policy-42872f98404a.part3"
+          ]
+        }
+      }
     },
     {
       "paths": [
@@ -127,7 +143,8 @@
       "upstream_revision": "unknown",
       "upstream_code_license": "unverified",
       "weight_license": "unverified",
-      "redistribution": "blocked_pending_review"
+      "redistribution": "blocked_pending_review",
+      "download_note": "No verified public URL for these exact local exports."
     },
     {
       "paths": [
@@ -137,10 +154,16 @@
         "89f66488fc7d59b02f33d098c65142050219ef3df4aaf778b7d24898a2328365"
       ],
       "source": "https://github.com/LeCAR-Lab/BFM-Zero",
-      "upstream_revision": "unknown",
+      "upstream_revision": "62b4206d68e026de5e5dc7efb1529bccfb95164c",
       "upstream_code_license": "CC-BY-NC-4.0",
       "weight_license": "unverified",
-      "redistribution": "blocked_pending_review"
+      "redistribution": "blocked_pending_review",
+      "downloads": {
+        "actions/bfm0/model/FBcprAuxModel.onnx": {
+          "kind": "file",
+          "url": "https://huggingface.co/LeCar-Lab/BFM-Zero/resolve/62b4206d68e026de5e5dc7efb1529bccfb95164c/new_model_for_training_code_inference/exported/FBcprAuxModel.onnx"
+        }
+      }
     },
     {
       "paths": [
@@ -150,10 +173,16 @@
         "50c0d577bd950e7a1df74be8fb5e2cef597f8090b1b219b300bbd2711eb23e5f"
       ],
       "source": "https://github.com/amazon-far/holosoma",
-      "upstream_revision": "unknown",
+      "upstream_revision": "ac810ce65adfa036cb4894a84573cc9fd9b0d642",
       "upstream_code_license": "Apache-2.0",
       "weight_license": "unverified",
-      "redistribution": "blocked_pending_review"
+      "redistribution": "blocked_pending_review",
+      "downloads": {
+        "actions/holosoma/model/ppo_g1_29dof_dancing.onnx": {
+          "kind": "file",
+          "url": "https://raw.githubusercontent.com/amazon-far/holosoma/ac810ce65adfa036cb4894a84573cc9fd9b0d642/src/holosoma_inference/holosoma_inference/models/wbt/ppo_g1_29dof_dancing.onnx"
+        }
+      }
     },
     {
       "paths": [
@@ -163,10 +192,16 @@
         "1ca1f475dc647afb736f4cdbd55d45103c36b7f5059d830b05d6aef3a5fc3a1e"
       ],
       "source": "https://github.com/GalaxyGeneralRobotics/Humanoid-GPT",
-      "upstream_revision": "unknown",
+      "upstream_revision": "9f9e7b74ecadb532abbb34b6a779d87191a9bbb6",
       "upstream_code_license": "unverified",
       "weight_license": "unverified",
-      "redistribution": "blocked_pending_review"
+      "redistribution": "blocked_pending_review",
+      "downloads": {
+        "actions/humanoid_gpt/model/pns_wo_priv216.onnx": {
+          "kind": "file",
+          "url": "https://raw.githubusercontent.com/GalaxyGeneralRobotics/Humanoid-GPT/9f9e7b74ecadb532abbb34b6a779d87191a9bbb6/storage/ckpts/pns_wo_priv216.onnx"
+        }
+      }
     },
     {
       "paths": [
@@ -185,7 +220,8 @@
       "upstream_revision": "unknown",
       "upstream_code_license": "unverified",
       "weight_license": "unverified",
-      "redistribution": "blocked_pending_review"
+      "redistribution": "blocked_pending_review",
+      "download_note": "Upstream publishes Drive folders; exact file IDs and matching hashes are not verified."
     },
     {
       "paths": [
@@ -199,10 +235,24 @@
         "6174205a430b84ec51d3f15e014907504a9ad0c38575535a509bc771ebbc1d85"
       ],
       "source": "https://github.com/Perkins729/OmniXtreme",
-      "upstream_revision": "unknown",
+      "upstream_revision": "6f2716d1b1d1132d513d86beb2193f5b18f11fcd",
       "upstream_code_license": "Apache-2.0",
       "weight_license": "unverified",
-      "redistribution": "blocked_pending_review"
+      "redistribution": "blocked_pending_review",
+      "downloads": {
+        "actions/omnixtreme/model/base_policy_trt.onnx": {
+          "kind": "file",
+          "url": "https://raw.githubusercontent.com/Perkins729/OmniXtreme/6f2716d1b1d1132d513d86beb2193f5b18f11fcd/policy/base_policy_trt.onnx"
+        },
+        "actions/omnixtreme/model/fk_trt.onnx": {
+          "kind": "file",
+          "url": "https://raw.githubusercontent.com/Perkins729/OmniXtreme/6f2716d1b1d1132d513d86beb2193f5b18f11fcd/policy/fk_trt.onnx"
+        },
+        "actions/omnixtreme/model/residual_policy.onnx": {
+          "kind": "file",
+          "url": "https://raw.githubusercontent.com/Perkins729/OmniXtreme/6f2716d1b1d1132d513d86beb2193f5b18f11fcd/policy/residual_policy.onnx"
+        }
+      }
     },
     {
       "paths": [
@@ -212,10 +262,16 @@
         "a59baa3e04a951e5cf0b4cc68f24ebaafa9272714226618b99a5017dfc805b4c"
       ],
       "source": "https://github.com/NVlabs/ProtoMotions",
-      "upstream_revision": "unknown",
+      "upstream_revision": "b30eae3c7258292f3e5a7b60ecd8c9d3317e3ed3",
       "upstream_code_license": "Apache-2.0",
       "weight_license": "unverified",
-      "redistribution": "blocked_pending_review"
+      "redistribution": "blocked_pending_review",
+      "downloads": {
+        "actions/protomotions/model/unified_pipeline.onnx": {
+          "kind": "file",
+          "url": "https://media.githubusercontent.com/media/NVlabs/ProtoMotions/b30eae3c7258292f3e5a7b60ecd8c9d3317e3ed3/data/pretrained_models/motion_tracker/g1-bones-deploy/compiled_models/unified_pipeline.onnx"
+        }
+      }
     },
     {
       "paths": [
@@ -228,7 +284,8 @@
       "upstream_revision": "unknown",
       "upstream_code_license": "unverified",
       "weight_license": "unverified",
-      "redistribution": "blocked_pending_review"
+      "redistribution": "blocked_pending_review",
+      "download_note": "Use fetch_assets.py to obtain the public .pt checkpoint. A byte-identical ONNX conversion is not verified; supply and validate the recorded export separately."
     },
     {
       "paths": [
@@ -242,11 +299,25 @@
         "39b553e197f62f077975ba38512bc04781a3fc37c2af7c6756e04629f760edea"
       ],
       "source": "https://huggingface.co/nvidia/GEAR-SONIC",
-      "upstream_revision": "unknown",
+      "upstream_revision": "6733128a3d8a523b1418b06bca3cdf61c8b0987f",
       "upstream_code_license": "unverified",
       "weight_license": "unverified",
       "redistribution": "blocked_pending_review",
-      "notes": "Original 1762D encoder/decoder and shared V2 planner; kept separately from SONIC v1.1. Exact asset revision remains unresolved."
+      "notes": "Original 1762D encoder/decoder and shared V2 planner; kept separately from SONIC v1.1. Exact asset revision remains unresolved.",
+      "downloads": {
+        "actions/sonic/model/model_decoder.onnx": {
+          "kind": "file",
+          "url": "https://huggingface.co/nvidia/GEAR-SONIC/resolve/6733128a3d8a523b1418b06bca3cdf61c8b0987f/model_decoder.onnx"
+        },
+        "actions/sonic/model/model_encoder.onnx": {
+          "kind": "file",
+          "url": "https://huggingface.co/nvidia/GEAR-SONIC/resolve/6733128a3d8a523b1418b06bca3cdf61c8b0987f/model_encoder.onnx"
+        },
+        "actions/sonic/model/planner_sonic.onnx": {
+          "kind": "file",
+          "url": "https://huggingface.co/nvidia/GEAR-SONIC/resolve/6733128a3d8a523b1418b06bca3cdf61c8b0987f/planner_sonic.onnx"
+        }
+      }
     },
     {
       "paths": [
@@ -259,7 +330,8 @@
       "upstream_revision": "unknown",
       "upstream_code_license": "MIT",
       "weight_license": "unverified",
-      "redistribution": "blocked_pending_review"
+      "redistribution": "blocked_pending_review",
+      "download_note": "Use fetch_assets.py to obtain the public .pt checkpoint. A byte-identical ONNX conversion is not verified; supply and validate the recorded export separately."
     },
     {
       "paths": [
@@ -272,7 +344,13 @@
       "upstream_revision": "fc5efb7b3bb7a82270abaeabb0cf3c1194f1c7e6",
       "upstream_code_license": "unverified",
       "weight_license": "unverified",
-      "redistribution": "blocked_pending_review"
+      "redistribution": "blocked_pending_review",
+      "downloads": {
+        "actions/ufo/model/FBcprAuxModel.onnx": {
+          "kind": "file",
+          "url": "https://huggingface.co/xuewang/ufo-g1-policy/resolve/fc5efb7b3bb7a82270abaeabb0cf3c1194f1c7e6/g1_policy/exported/FBcprAuxModel.onnx"
+        }
+      }
     },
     {
       "paths": [
@@ -285,7 +363,8 @@
       "upstream_revision": "local export; source checkpoint path must be replaced with a release identifier",
       "upstream_code_license": "unverified",
       "weight_license": "unverified",
-      "redistribution": "blocked_pending_review"
+      "redistribution": "blocked_pending_review",
+      "download_note": "Public dance/velocity ONNX files differ from this local export; supply the recorded export."
     },
     {
       "paths": [
@@ -299,7 +378,8 @@
       "upstream_code_license": "unverified",
       "weight_license": "unverified",
       "redistribution": "blocked_pending_review",
-      "notes": "Current hlqk action uses paoxiao.onnx. A public download or training run identifier has not been recorded."
+      "notes": "Current hlqk action uses paoxiao.onnx. A public download or training run identifier has not been recorded.",
+      "download_note": "No verified public URL for these exact local exports."
     },
     {
       "paths": [
@@ -313,7 +393,8 @@
       "upstream_code_license": "unverified",
       "weight_license": "unverified",
       "redistribution": "blocked_pending_review",
-      "notes": "Local asset inventoried; exact upstream asset revision and redistribution terms remain unverified."
+      "notes": "Local asset inventoried; exact upstream asset revision and redistribution terms remain unverified.",
+      "download_note": "No verified public URL for these exact local or derived assets."
     },
     {
       "paths": [
@@ -327,7 +408,8 @@
       "upstream_code_license": "unverified",
       "weight_license": "unverified",
       "redistribution": "blocked_pending_review",
-      "notes": "Local asset inventoried; exact upstream asset revision and redistribution terms remain unverified."
+      "notes": "Local asset inventoried; exact upstream asset revision and redistribution terms remain unverified.",
+      "download_note": "No verified public URL for these exact local or derived assets."
     },
     {
       "paths": [
@@ -347,7 +429,8 @@
       "upstream_code_license": "unverified",
       "weight_license": "unverified",
       "redistribution": "blocked_pending_review",
-      "notes": "Locally exported checkpoints listed in actions/mjlab/README.md; no public checkpoint download is currently recorded."
+      "notes": "Locally exported checkpoints listed in actions/mjlab/README.md; no public checkpoint download is currently recorded.",
+      "download_note": "No verified public URL for these exact local or derived assets."
     },
     {
       "paths": [
@@ -391,7 +474,8 @@
       "upstream_code_license": "unverified",
       "weight_license": "unverified",
       "redistribution": "blocked_pending_review",
-      "notes": "Local asset inventoried; exact upstream asset revision and redistribution terms remain unverified."
+      "notes": "Local asset inventoried; exact upstream asset revision and redistribution terms remain unverified.",
+      "download_note": "No verified public URL for these exact local or derived assets."
     },
     {
       "paths": [
@@ -407,7 +491,25 @@
       "upstream_code_license": "Apache-2.0",
       "weight_license": "unverified",
       "redistribution": "blocked_pending_review",
-      "notes": "File checksums match the upstream student release manifest; model-specific redistribution terms remain unverified."
+      "notes": "File checksums match the upstream student release manifest; model-specific redistribution terms remain unverified.",
+      "downloads": {
+        "actions/php/model/depth_backbone.onnx": {
+          "kind": "tar",
+          "archive": {
+            "url": "https://github.com/amazon-far/php_parkour/releases/download/student-assets-v1/php-student-v1.tar.gz",
+            "sha256": "e772504b0b54035e401bcbb752f4f19b6c74f560561c8369e28b9f77c5e6ae5c"
+          },
+          "member": "depth_backbone.onnx"
+        },
+        "actions/php/model/student.onnx": {
+          "kind": "tar",
+          "archive": {
+            "url": "https://github.com/amazon-far/php_parkour/releases/download/student-assets-v1/php-student-v1.tar.gz",
+            "sha256": "e772504b0b54035e401bcbb752f4f19b6c74f560561c8369e28b9f77c5e6ae5c"
+          },
+          "member": "student.onnx"
+        }
+      }
     },
     {
       "paths": [
@@ -423,7 +525,8 @@
       "upstream_code_license": "unverified",
       "weight_license": "unverified",
       "redistribution": "blocked_pending_review",
-      "notes": "Local asset inventoried; exact upstream asset revision and redistribution terms remain unverified."
+      "notes": "Local asset inventoried; exact upstream asset revision and redistribution terms remain unverified.",
+      "download_note": "No verified public URL for these exact local or derived assets."
     },
     {
       "paths": [
@@ -435,11 +538,21 @@
         "fb97de22819b2057b41459802128d91723d91a25f0ad73e7bfc41a9cf8365bae"
       ],
       "source": "https://huggingface.co/nvidia/GEAR-SONIC",
-      "upstream_revision": "unknown",
+      "upstream_revision": "6733128a3d8a523b1418b06bca3cdf61c8b0987f",
       "upstream_code_license": "unverified",
       "weight_license": "unverified",
       "redistribution": "blocked_pending_review",
-      "notes": "SONIC v1.1 encoder/decoder; retrieve the matching historical upstream release, not a later default or low-latency variant. Exact model revision is unresolved."
+      "notes": "SONIC v1.1 encoder/decoder pinned to the matching HF revision; do not substitute the low-latency variant.",
+      "downloads": {
+        "actions/sonic/model/sonic_v1_1/model_decoder.onnx": {
+          "kind": "file",
+          "url": "https://huggingface.co/nvidia/GEAR-SONIC/resolve/6733128a3d8a523b1418b06bca3cdf61c8b0987f/sonic_v1_1/model_decoder.onnx"
+        },
+        "actions/sonic/model/sonic_v1_1/model_encoder.onnx": {
+          "kind": "file",
+          "url": "https://huggingface.co/nvidia/GEAR-SONIC/resolve/6733128a3d8a523b1418b06bca3cdf61c8b0987f/sonic_v1_1/model_encoder.onnx"
+        }
+      }
     },
     {
       "paths": [
@@ -463,7 +576,8 @@
       "upstream_code_license": "unverified",
       "weight_license": "unverified",
       "redistribution": "blocked_pending_review",
-      "notes": "Local squat motion CSV; exact upstream sample revision is unresolved."
+      "notes": "Local squat motion CSV; exact upstream sample revision is unresolved.",
+      "download_note": "No verified public URL for these exact local or derived assets."
     },
     {
       "paths": [
@@ -493,7 +607,8 @@
       "upstream_code_license": "unverified",
       "weight_license": "unverified",
       "redistribution": "blocked_pending_review",
-      "notes": "Local asset inventoried; exact upstream asset revision and redistribution terms remain unverified."
+      "notes": "Local asset inventoried; exact upstream asset revision and redistribution terms remain unverified.",
+      "download_note": "Public TorchScript source exists; matching ONNX export recipe is under verification."
     },
     {
       "paths": [
@@ -513,7 +628,8 @@
       "upstream_code_license": "unverified",
       "weight_license": "unverified",
       "redistribution": "blocked_pending_review",
-      "notes": "Local asset inventoried; exact upstream asset revision and redistribution terms remain unverified."
+      "notes": "Local asset inventoried; exact upstream asset revision and redistribution terms remain unverified.",
+      "download_note": "Public TorchScript source exists; matching ONNX export recipe is under verification."
     },
     {
       "paths": [
@@ -527,7 +643,48 @@
       "upstream_code_license": "unverified",
       "weight_license": "unverified",
       "redistribution": "blocked_pending_review",
-      "notes": "Local asset inventoried; exact upstream asset revision and redistribution terms remain unverified."
+      "notes": "Local asset inventoried; exact upstream asset revision and redistribution terms remain unverified.",
+      "download_note": "No verified public URL for these exact local or derived assets."
+    },
+    {
+      "paths": [
+        "actions/twist/model/twist_general_motion_tracker.pt"
+      ],
+      "sha256": [
+        "0ec24c54c1e1502f5c7bd27efb39ecc0630c06b5c01dc640a6d493d672fc515c"
+      ],
+      "source": "https://raw.githubusercontent.com/YanjieZe/TWIST/42d8c134739eee51f28d7cc0ff72a86728afb8dc/assets/twist_general_motion_tracker.pt",
+      "upstream_revision": "42d8c134739eee51f28d7cc0ff72a86728afb8dc",
+      "upstream_code_license": "unverified",
+      "weight_license": "upstream model-specific terms apply; see upstream repository",
+      "redistribution": "blocked_pending_review",
+      "notes": "Public upstream TorchScript checkpoint. This is not a replacement for the recorded ONNX deployment model; export and validate the adapter contract separately.",
+      "downloads": {
+        "actions/twist/model/twist_general_motion_tracker.pt": {
+          "kind": "file",
+          "url": "https://raw.githubusercontent.com/YanjieZe/TWIST/42d8c134739eee51f28d7cc0ff72a86728afb8dc/assets/twist_general_motion_tracker.pt"
+        }
+      }
+    },
+    {
+      "paths": [
+        "actions/steadytray/model/policy_9999.pt"
+      ],
+      "sha256": [
+        "9435d02c2f33b96bad067126adaa3db5fcf4f1bdbb41700283b4dc95b30ab957"
+      ],
+      "source": "https://media.githubusercontent.com/media/AllenHuangGit/SteadyTray/ae781f9f43f9505118c2c434733c57ed1c09dbc3/exported/policy_9999.pt",
+      "upstream_revision": "ae781f9f43f9505118c2c434733c57ed1c09dbc3",
+      "upstream_code_license": "unverified",
+      "weight_license": "upstream model-specific terms apply; see upstream repository",
+      "redistribution": "blocked_pending_review",
+      "notes": "Public upstream TorchScript checkpoint. This is not a replacement for the recorded ONNX deployment model; export and validate the adapter contract separately.",
+      "downloads": {
+        "actions/steadytray/model/policy_9999.pt": {
+          "kind": "file",
+          "url": "https://media.githubusercontent.com/media/AllenHuangGit/SteadyTray/ae781f9f43f9505118c2c434733c57ed1c09dbc3/exported/policy_9999.pt"
+        }
+      }
     }
   ],
   "external_assets": [

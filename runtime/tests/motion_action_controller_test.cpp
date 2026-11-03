@@ -1,11 +1,15 @@
 #include "action_go/motion_action_controller.h"
 #include "action_go/runtime/control_mode_backend.h"
+#include "action_go/runtime/signal_file.h"
+#include <nlohmann/json.hpp>
+#include <sys/stat.h>
 
 #include <atomic>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <iterator>
 #include <memory>
 #include <mutex>
 #include <stdexcept>
@@ -469,9 +473,11 @@ void test_normal_stop_and_damping() {
     MotionActionController controller;
     controller.setEventLogPath(files.log.string());
     expect(controller.init(backend, files.config.string()), "normal-stop init");
+    expect(controller.controlState() == "UNKNOWN", "unconfirmed initial control state");
     expect(controller.startAction("normal_stop"), "normal-stop start");
     expect(wait_backend_calls(backend->user_calls, 1), "normal-stop reached UserCtrl");
     expect(controller.stopAndSwitchToOfficial("walkrun"), "normal stop switches back");
+    expect(controller.controlState() == "WALKRUN", "successful switch confirms WALKRUN");
     expect(backend->internal_calls == 1, "normal stop switch-back once");
     std::ifstream log_stream(files.log);
     const std::string log((std::istreambuf_iterator<char>(log_stream)),
@@ -491,6 +497,7 @@ void test_normal_stop_and_damping() {
     expect(wait_backend_calls(backend->user_calls, 1), "damping reached UserCtrl");
     controller.dampingStop();
     expect(backend->damping_calls == 1, "damping backend called once");
+    expect(controller.controlState() == "DAMPING", "successful damping confirms DAMPING");
     expect(backend->internal_calls == 0, "damping is not raced by walkrun switch-back");
   }
 }
@@ -521,6 +528,7 @@ void test_running_stop_preserves_payload_through_ack_and_overlap() {
     std::this_thread::sleep_for(std::chrono::milliseconds(2));
   }
   expect(platform->long_sleep_entered.load(), "ordered-stop entered overlap");
+  expect(!controller.startAction("ordered_stop"), "normal-stop overlap rejects a new action");
   {
     std::lock_guard<std::mutex> lock(platform->mutex);
     expect(platform->terminate_calls == 0 && platform->running,
@@ -905,6 +913,137 @@ void test_motion_config_rejects_ambiguous_input() {
   }
 }
 
+void test_concurrent_start_is_serialized() {
+  TestFiles files("concurrent_start");
+  write_config(files, "concurrent", "--run-ms 5000");
+  auto backend = std::make_shared<FakeControlModeBackend>();
+  auto platform = fake_platform_for(files);
+  platform->complete_after_start = false;
+  MotionActionController controller;
+  expect(controller.init(backend, platform, files.config.string()), "concurrent init");
+  std::atomic<int> waiting{0};
+  std::atomic<bool> go{false};
+  std::atomic<int> accepted{0};
+  auto start = [&]() {
+    ++waiting;
+    while (!go.load()) std::this_thread::yield();
+    if (controller.startAction("concurrent")) ++accepted;
+  };
+  std::thread first(start);
+  std::thread second(start);
+  while (waiting.load() != 2) std::this_thread::yield();
+  go.store(true);
+  first.join();
+  second.join();
+  expect(accepted == 1, "only one concurrent start accepted");
+  expect(wait_status(controller, MotionActionController::Status::Running),
+         "concurrent payload reaches running");
+  controller.cancel();
+  expect(platform->spawn_calls == 1, "only one payload spawned");
+}
+
+void test_private_default_handshake() {
+  TestFiles files("private_handshake");
+  {
+    std::ofstream output(files.config);
+    output << "actions:\n  private:\n    type: fake\n    prestart_before_userctrl: true\n"
+           << "    command: \"" << ACTION_GO_FAKE_PAYLOAD
+           << " --ready-file {ready_file} --start-file {start_file} --run-ms 5000\"\n";
+  }
+  auto backend = std::make_shared<FakeControlModeBackend>();
+  MotionActionController controller;
+  controller.setEventLogPath(files.log.string());
+  expect(controller.init(backend, files.config.string()), "private handshake init");
+  std::string previous_directory;
+  for (int attempt = 1; attempt <= 2; ++attempt) {
+    expect(controller.startAction("private"), "private handshake start");
+    expect(wait_backend_calls(backend->user_calls, attempt), "private handshake ready");
+    controller.flushLogs();
+    std::ifstream input(files.log);
+    std::string line;
+    std::string ready;
+    while (std::getline(input, line)) {
+      const auto event = nlohmann::json::parse(line);
+      if (event.value("event", "") == "action_triggered") ready = event.value("ready_file", "");
+    }
+    const auto directory = fs::path(ready).parent_path().string();
+    struct stat info {};
+    expect(!ready.empty() && stat(directory.c_str(), &info) == 0 &&
+           (info.st_mode & 0777) == 0700, "private handshake directory is 0700");
+    expect(directory != previous_directory, "fresh directory for each activation");
+    controller.cancel();
+    expect(!fs::exists(directory), "private directory cleaned after child exits");
+    previous_directory = directory;
+  }
+}
+
+void test_signal_files_reject_links() {
+  TestFiles files("signals");
+  const auto target = files.root / "target";
+  { std::ofstream output(target); output << "preserve"; }
+  fs::create_symlink(target, files.ready);
+  auto platform = action_go::runtime::make_posix_supervisor_platform();
+  std::string error;
+  expect(!platform->touch_file(files.ready.string(), "bad", error), "reject signal symlink write");
+  expect(!platform->file_exists(files.ready.string()), "reject signal symlink read");
+  std::ifstream input(target);
+  std::string contents;
+  input >> contents;
+  expect(contents == "preserve", "symlink target unchanged");
+  fs::remove(files.ready);
+  expect(platform->touch_file(files.ready.string(), "ready", error), "create signal");
+  expect(platform->touch_file(files.ready.string(), "ready", error), "repeated signal is idempotent");
+  action_go::runtime::write_signal_file(files.ready.string(), "first reason\n", true);
+  action_go::runtime::write_signal_file(files.ready.string(), "new\n", true);
+  {
+    std::ifstream updated(files.ready);
+    std::string reason((std::istreambuf_iterator<char>(updated)), std::istreambuf_iterator<char>());
+    expect(reason == "new\n", "atomic signal update replaces old reason without trailing content");
+  }
+  fs::create_hard_link(target, files.start);
+  expect(!platform->touch_file(files.start.string(), "bad", error), "reject hard-linked signal");
+  for (const auto& linked : {files.start, files.root / "symlink"}) {
+    if (!fs::exists(linked)) fs::create_symlink(target, linked);
+    bool rejected = false;
+    try {
+      action_go::runtime::write_signal_file(linked.string(), "bad", true);
+    } catch (const std::runtime_error&) {
+      rejected = true;
+    }
+    expect(rejected, "atomic signal update rejects linked destination");
+  }
+  {
+    std::ifstream preserved(target);
+    std::string value;
+    preserved >> value;
+    expect(value == "preserve", "atomic update leaves linked target unchanged");
+  }
+  const auto link = files.root / "directory_link";
+  fs::create_directory_symlink(files.root, link);
+  expect(!platform->touch_file((link / "new_signal").string(), "bad", error), "reject linked parent");
+}
+
+void test_command_hash_and_empty_placeholder() {
+  TestFiles files("command_validation");
+  {
+    std::ofstream output(files.config);
+    output << "actions:\n  hash:\n    type: fake\n    command: \"printf '%s' '#kept' > "
+           << files.environment.string() << " {event_log_arg}\" # comment\n"
+           << "  empty:\n    type: fake\n    command: \"echo --handoff-complete-file {handoff_complete_file} --dry-run\"\n";
+  }
+  auto backend = std::make_shared<FakeControlModeBackend>();
+  MotionActionController controller;
+  expect(controller.init(backend, files.config.string()), "command validation init");
+  expect(!controller.startAction("empty"), "reject empty required placeholder");
+  expect(backend->user_calls == 0, "empty placeholder rejected before UserCtrl");
+  expect(controller.startAction("hash"), "hash command starts");
+  expect(wait_terminal(controller) == MotionActionController::Status::Done, "hash command completes");
+  std::ifstream input(files.environment);
+  std::string contents;
+  input >> contents;
+  expect(contents == "#kept", "quoted hash preserved and optional placeholder accepted");
+}
+
 }  // namespace
 
 int main() {
@@ -930,6 +1069,10 @@ int main() {
   test_injected_dry_postrun_hold_releases_without_rpc();
   test_damping_stop_allows_restart();
   test_motion_config_rejects_ambiguous_input();
+  test_concurrent_start_is_serialized();
+  test_private_default_handshake();
+  test_signal_files_reject_links();
+  test_command_hash_and_empty_placeholder();
   if (failures != 0) {
     std::cerr << "[motion_action_controller_test] failures=" << failures << '\n';
     return 1;

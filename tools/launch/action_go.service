@@ -13,9 +13,8 @@ Environment=TERM=xterm-256color
 Environment=ACTION_GO_TMUX_SESSION=action_go
 Environment=ACTION_GO_TMUX_PID_FILE=/home/unitree/action_go/logs/action_go_tmux.pid
 PIDFile=/home/unitree/action_go/logs/action_go_tmux.pid
-# 默认网卡仍然由 /home/unitree/action_go/tools/launch/start_safe.sh 顶部决定。
-# 如果想在 service 里覆盖，取消下一行注释并改成实际网卡：
-# Environment=ACTION_GO_NET=enP8p1s0
+# Set the robot DDS interface before enabling this service.
+Environment=ACTION_GO_NET=eth0
 ExecStart=/home/unitree/action_go/tools/launch/start.sh start
 ExecStop=/home/unitree/action_go/tools/launch/start.sh stop
 Restart=on-failure

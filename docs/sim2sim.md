@@ -4,6 +4,26 @@
 scene. Unitree mjlab velocity control replaces the robot's official WALKRUN
 service. The first integration target is flat ground and policy switching.
 
+## Shared inference and one-command startup
+
+Simulation launches the same C++ player executables, policy specs, observation
+builders, ONNX inference and command safety filters used on the real robot.
+The Python simulator contains no replacement policy inference implementation.
+It owns physics, DDS bridging and player process management.
+
+After configuring the dependencies and asset paths, run
+`tools/launch/start_sim.sh` with no arguments. It loads the common scene,
+starts the mjlab WALKRUN player on `lo`, waits for readiness and enables its
+commands. The robot starts in WALKRUN without ARM or a second terminal. Closing
+the viewer or pressing Ctrl-C stops the managed player processes too.
+
+The stock Unitree MuJoCo bridge accepts `rt/lowcmd` and provides no robot
+WALKRUN/UserCtrl switching service. Changing the network interface alone is
+therefore insufficient for the real robot's handoff protocol. The native
+simulation bridge supplies the command gate between `rt/lowcmd` and
+`rt/user_lowcmd`, while keeping the policy inference code shared. The current
+Python simulation coordinator is separate from the real C++ supervisor.
+
 ## Requirements
 
 - An x86_64 ActionGo C++ build with `generic_policy_player` and the players used

@@ -2732,7 +2732,6 @@ class GenericPolicyPlayer {
   int bfm_actor_obs_dim_{0};
   int bfm_z_dim_{0};
   int bfm_history_steps_{0};
-  BfmHistoryTiming bfm_history_timing_{BfmHistoryTiming::kIncludeCurrent};
   int bfm_warmup_steps_{5};
   float bfm_action_rescale_{5.f};
   float bfm_action_rescale_override_{std::numeric_limits<float>::quiet_NaN()};

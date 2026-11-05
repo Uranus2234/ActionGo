@@ -1,6 +1,6 @@
 # Policy Catalog
 
-This index groups the 110 actions registered by `config/motion_actions.yaml` by task and required input. Runtime implementation remains defined by each policy spec and `PolicyContract`; action names and commands remain defined by the YAML registry.
+This index groups the 94 actions registered by `config/motion_actions.yaml` by task and required input. Runtime implementation remains defined by each policy spec and `PolicyContract`; action names and commands remain defined by the YAML registry.
 
 ## Categories by Required Information
 
@@ -26,7 +26,6 @@ Tracking policies receive selected motion information, either as an explicit ref
 - **OmniXtreme** — `omni_motion`, `omni_motion_default`, `omni_seg01_0000_0850`, `omni_seg01_fuck_floor`, `omni_seg02_0850_1335`, `omni_seg02_back_hand_flip_roll`, `omni_seg03_1335_1728`, `omni_seg03_back_hand_flip`, `omni_seg04_1728_2193`, `omni_seg04_wbst_stand`, `omni_seg05_2193_2607`, `omni_seg05_side_roll_kick`, `omni_seg06_2607_3110`, `omni_seg06_front_roll`, `omni_seg07_3110_3592`, `omni_seg07_back_roll`, `omni_seg08_3592_3715`, `omni_seg08_none`, `omni_seg09_3715_4302`, `omni_seg09_back_hand_flip`, `omni_seg10_4302_4775`, `omni_seg10_back_hand_flip`, `omni_seg11_4775_5139`, `omni_seg11_side_flip_roll`, `omni_seg12_5139_5712`, `omni_seg12_wbst_motive`, `omni_seg13_5712_6122`, `omni_seg13_ceshoufan_double`, `omni_seg14_6122_7038`, `omni_seg14_yewendun_kick`, `omni_seg15_7038_7467`, `omni_seg15_front_paxing`.
 - **ProtoMotions / Humanoid-GPT / SONIC / TWIST** — `proto_walk`, `proto_dance`, `humanoid_gpt_offline`, `humanoid_gpt_realtime`, `sonic_offline_squat`, `sonic_realtime_g1`, `sonic_pico_teleop`, `twist_offline_pkl`, `twist_nokov_realtime`, `twist_udp_realtime`, `twist_zmq_realtime`, `twist_redis_realtime`.
 - **BFM-Zero / UFO** — `bfm_zero_stand`, `ufo_forward_slow`, `ufo_idle`, `ufo_move_left`, `ufo_spin_arms`, `ufo_stand`, `ufo_tracking_zs7`; fixed, prompted, or tracking latents carry implicit or explicit motion information.
-- **UFO DuoBox trial** — `ufo_duobox_050_ma_trial`, `L1+A`; four-GPU MJLab checkpoint at 55,694,336 transitions, selected validation Ma sparring segment. Actor normalization is embedded; history is previous-only. Finite 499-frame latent sequence returns to walkrun. See `actions/tracking/ufo_duobox_trial/README.md` for provenance, reproduction, validation, and rollback.
 - **P-BFM** — `pbfm_arms_up`, `pbfm_joystick`, `pbfm_loco`, `pbfm_tracking_dance`, `pbfm_pico_teleop`; motion/context latent, with live depth also required.
 
 ### Perception

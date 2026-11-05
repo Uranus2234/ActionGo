@@ -503,14 +503,6 @@ void validate_params(const YAML::Node& y,
     require_matching_int(params, {"policy.actor_obs_dim", "actor_obs_dim"}, obs_dim, "BFM-Zero actor obs dim");
     require_matching_int(y, {"observation.latent_dim"}, protocol.latent_dim, "BFM-Zero latent dim");
     require_matching_int(y, {"observation.history_steps"}, protocol.history_steps, "BFM-Zero history steps");
-    const auto timing_node = yamlc::optional_node(y, "observation.history_timing");
-    if (present(timing_node)) {
-      const auto timing = timing_node.as<std::string>();
-      if ((timing != "include_current" && timing != "previous_only") ||
-          (variant == "pbfm" && timing != "previous_only")) {
-        throw std::runtime_error("Invalid BFM observation.history_timing");
-      }
-    }
   } else if (variant == "unitree_rl_mjlab") {
     validate_standard_robot_vectors(params, motor_count, true, true);
     require_matching_int(params, {"policy.num_actions", "num_actions"}, action_dim, "unitree action dim");

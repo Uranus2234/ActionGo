@@ -4,25 +4,6 @@
   "assets": [
     {
       "paths": [
-        "actions/tracking/ufo_duobox_trial/model/actor.onnx",
-        "actions/tracking/ufo_duobox_trial/motions/duobox_050_ma_latents.npy",
-        "actions/tracking/ufo_duobox_trial/motions/duobox_050_ma_reference.npz"
-      ],
-      "sha256": [
-        "ee4f6e82aba97de9b2e9fc6de83972ed812dda70c339819168b91ece26673d6a",
-        "3e422acff483599197b2dac190293d0e7af13e52441fc0a66de589bc84be7426",
-        "dc0ae51d262462f0f276f5789a2a28ad9ed344282e111ec70400020f1bb4673f"
-      ],
-      "source": "User-owned local four-GPU UFO MJLab training and DuoBox validation 050/Ma sparring reference",
-      "upstream_revision": "UFO 0b89378de02f77712072d983bc43ec2a46455dc0; local checkpoint 55,694,336 transitions; source and asset hashes in actions/tracking/ufo_duobox_trial/manifest.json",
-      "upstream_code_license": "unverified; upstream terms apply",
-      "weight_license": "local training export; motion dataset terms apply separately",
-      "redistribution": "blocked_pending_review",
-      "notes": "Explicit user-authorized temporary upload to ActionGo feature for a protected hardware trial. This does not establish broader redistribution rights. Actor uses Git LFS; 499 matched latent frames and 500 portable reference poses use ordinary Git. L1+A; one finite playback and walkrun switch-back. Whole integration is one revertible commit.",
-      "download_note": "git lfs pull --include=actions/tracking/ufo_duobox_trial/model/actor.onnx; no verified public upstream URL for these exact local assets."
-    },
-    {
-      "paths": [
         "actions/tracking/mjlab_combat/model/policy_92000.onnx",
         "actions/tracking/mjlab_combat/motions/duobox_017_ma.csv",
         "actions/tracking/mjlab_combat/motions/a42_8s_generated.csv"

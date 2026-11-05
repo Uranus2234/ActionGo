@@ -9,16 +9,6 @@ void GenericPolicyPlayer::load_spec_bfm(const YAML::Node& y) {
     bfm_actor_obs_dim_ = configured_obs_dim_;
     bfm_z_dim_ = yamlc::required_scalar<int>(y, "observation.latent_dim");
     bfm_history_steps_ = yamlc::required_scalar<int>(y, "observation.history_steps");
-    const auto history_timing = scalar_or<std::string>(obs, "history_timing",
-        variant_ == "pbfm" ? "previous_only" : "include_current");
-    if (history_timing != "previous_only" && history_timing != "include_current") {
-      throw std::runtime_error("BFM observation.history_timing must be previous_only or include_current");
-    }
-    bfm_history_timing_ = history_timing == "previous_only"
-        ? BfmHistoryTiming::kPreviousOnly : BfmHistoryTiming::kIncludeCurrent;
-    if (variant_ == "pbfm" && bfm_history_timing_ != BfmHistoryTiming::kPreviousOnly) {
-      throw std::runtime_error("P-BFM requires previous_only history");
-    }
     if (bfm_z_dim_ <= 0 || bfm_history_steps_ < 0) {
       throw std::runtime_error("BFM observation latent_dim/history_steps must be non-negative");
     }
@@ -33,7 +23,6 @@ void GenericPolicyPlayer::load_spec_bfm(const YAML::Node& y) {
       bfm_latent_sequence_file_.clear();
     }
     bfm_warmup_steps_ = scalar_or<int>(runtime, "warmup_steps", 5);
-    if (bfm_warmup_steps_ < 0) throw std::runtime_error("BFM warmup_steps must be non-negative");
     bfm_action_rescale_override_ = scalar_or<float>(action, "action_rescale", std::numeric_limits<float>::quiet_NaN());
   }
 
@@ -123,10 +112,6 @@ void GenericPolicyPlayer::load_bfm_params() {
                                  std::to_string(bfm_z_dim_) + "]: " + sequence_path.string());
       }
       bfm_latent_sequence_ = npy_to_float_vector(sequence_bytes, sequence_path.string());
-      if (!std::all_of(bfm_latent_sequence_.begin(), bfm_latent_sequence_.end(),
-                       [](float value) { return std::isfinite(value); })) {
-        throw std::runtime_error("BFM latent sequence contains nonfinite values: " + sequence_path.string());
-      }
       bfm_latent_sequence_frames_ = sequence_meta.shape[0];
       bfm_z_.assign(bfm_latent_sequence_.begin(),
                     bfm_latent_sequence_.begin() + bfm_z_dim_);
@@ -165,9 +150,7 @@ void GenericPolicyPlayer::load_unitree_params() {
 void GenericPolicyPlayer::schema_summary_bfm() {
     schema_summary_common();
     std::cout << "  bfm_contract latent_dim=" << bfm_z_dim_
-              << " history_steps=" << bfm_history_steps_
-              << " history_timing=" << (bfm_history_timing_ == BfmHistoryTiming::kPreviousOnly
-                  ? "previous_only" : "include_current") << "\n";
+              << " history_steps=" << bfm_history_steps_ << "\n";
   }
 
 void GenericPolicyPlayer::schema_summary_unitree() {
@@ -205,7 +188,8 @@ bool GenericPolicyPlayer::build_bfm_target(const GenericPolicyPlayer::RobotState
     CommandTimingScope timing_scope(s.stamp, s.seq);
     const auto observation = bfm_history_.build(
         s.q, s.dq, default_q_, projected_gravity_from_quat(s.quat), s.gyro,
-        bfm_last_action_scaled_, bfm_history_timing_);
+        bfm_last_action_scaled_, variant_ == "pbfm" ? BfmHistoryTiming::kPreviousOnly :
+                                                    BfmHistoryTiming::kIncludeCurrent);
 
     if (policy_counter_ < bfm_warmup_steps_) {
       hold_current_pose(s, q, kp, kd);
@@ -436,8 +420,6 @@ void GenericPolicyPlayer::control_loop_single_bfm() {
         if (variant_ == "pbfm" && !pbfm_spec_.context_sequence.frames.empty() &&
             pbfm_spec_.idle_context_path.empty() &&
             static_cast<size_t>(policy_counter_) >= pbfm_spec_.context_sequence.frames.size()) break;
-        if (bfm_latent_sequence_frames_ > 0 && !bfm_latent_sequence_loop_ &&
-            policy_counter_ >= bfm_warmup_steps_ + static_cast<int64_t>(bfm_latent_sequence_frames_)) break;
         std::vector<float> new_goal, new_kp, new_kd;
         const auto t0 = std::chrono::steady_clock::now();
         build_bfm_target(s, new_goal, new_kp, new_kd, last_action);

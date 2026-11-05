@@ -119,7 +119,6 @@ type_defaults:
 # 每个动作默认继承 defaults.safety_enable=true；如需禁用某个动作的 IMU safety，
 # 在对应 action 下写 safety_enable: false。
 action_files:
-  ufo_duobox_trial: actions/tracking/ufo_duobox_trial/ufo_duobox_trial.yaml
   fighting154k: actions/tracking/fighting154k/fighting154k.yaml
   allmimic: actions/tracking/allmimic/allmimic.yaml
   uni_supermimic: actions/tracking/uni_supermimic/uni_supermimic.yaml

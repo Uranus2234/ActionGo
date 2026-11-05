@@ -6,6 +6,7 @@
 
 #include <cmath>
 #include <fstream>
+#include <filesystem>
 #include <iostream>
 #include <limits>
 #include <stdexcept>
@@ -194,8 +195,16 @@ void test_replay(const std::string& fixture) {
   stream >> cases;
   for (const auto& scenario : cases) {
     OnnxRunner runner;
-    runner.load(scenario.at("model").get<std::string>(), 2);
+    auto model_path = std::filesystem::path(scenario.at("model").get<std::string>());
+    if (model_path.is_relative()) model_path = std::filesystem::path(fixture).parent_path() / model_path;
+    runner.load(model_path.string(), 2);
+    for (const auto& sample : scenario.value("actor_cases", nlohmann::json::array())) {
+      const auto action = runner.run_single(sample.at("actor_obs").get<std::vector<float>>(),
+                                             "actor_obs", "action", 29);
+      compare(action, sample.at("action"), 2e-4f, "exported actor parity");
+    }
     const bool pbfm = scenario.at("variant") == "pbfm";
+    const bool previous_only = scenario.value("history_timing", pbfm ? "previous_only" : "include_current") == "previous_only";
     if (pbfm) PbfmPolicy::validate_model(runner);
     BfmObservationHistory history;
     history.reset(29, 4);
@@ -209,7 +218,7 @@ void test_replay(const std::string& fixture) {
     for (const auto& frame : scenario.at("frames")) {
       const auto observation = history.build(frame.at("q"), frame.at("dq"), defaults,
           frame.at("gravity").get<std::array<float, 3>>(), frame.at("gyro").get<std::array<float, 3>>(),
-          last_action, pbfm ? BfmHistoryTiming::kPreviousOnly : BfmHistoryTiming::kIncludeCurrent);
+          last_action, previous_only ? BfmHistoryTiming::kPreviousOnly : BfmHistoryTiming::kIncludeCurrent);
       compare(observation.state, frame.at("state"), 1e-6f, "state");
       compare(observation.last_action, frame.at("last_action"), 2e-4f, "last action");
       compare(observation.history, frame.at("history_actor"), 2e-4f, "history");

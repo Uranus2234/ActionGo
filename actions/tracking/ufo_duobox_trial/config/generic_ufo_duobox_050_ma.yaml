@@ -1,0 +1,43 @@
+name: generic_ufo_duobox_050_ma
+runtime:
+  template: single_actor_state
+  variant: bfm_zero
+  inference_hz: 50
+  publish_hz: 500
+  onnx_threads: 2
+  warmup_steps: 5
+  target_interp_sec: 0.02
+  stats_interval: 100
+  dry_run_duration_sec: 1.0
+robot:
+  params: Robot.yaml
+  motor_count: 29
+model:
+  path: ../model/actor.onnx
+  input_names: [actor_obs]
+  output_names: [action]
+  obs_input: actor_obs
+  action_output: action
+observation:
+  builder: bfm_zero
+  obs_dim: 721
+  latent_dim: 256
+  latent_sequence_file: ../motions/duobox_050_ma_latents.npy
+  latent_sequence_loop: false
+  history_steps: 4
+  history_timing: previous_only
+action:
+  type: target_q
+  action_dim: 29
+  action_rescale: 5.0
+  scale_from_params: action_scale
+  add_default: true
+  clip: [-1.0, 1.0]
+  target_interp_sec: 0.02
+handoff:
+  cmd_topic: rt/user_lowcmd
+  state_topic: rt/lowstate
+  mode_machine: 5
+  activation_blend_sec: 0.10
+  damping_on_stop: false
+safety: {}

@@ -1,0 +1,44 @@
+{
+  "checkpoint": "runs/ufo_mjlab_4gpu_week/checkpoint/model/model.safetensors",
+  "checkpoint_sha256": "94a0f0147e152a65e7a5725ee5a080d5841fb8a23812b8999e66a9929d97f9c2",
+  "checkpoint_transitions": 55694336,
+  "source_revision": "0b89378de02f77712072d983bc43ec2a46455dc0",
+  "exporter_sha256": "7e88be069b7831c7f70a3cb09439a48dde66913b1f58dc4d9ffd13e32fac9647",
+  "boxing_files_sha256": {
+    "boxing_bfm/expert.py": "b14ecce891e164ef648193f7da839364893251cf06b4143a9e074ddbe201e5ed",
+    "boxing_bfm/evaluation.py": "5244026d592f79f580743433be4d1e17fe1e5193be6c9f8210f3bb700e06113a",
+    "boxing_bfm/runtime.py": "e0b5226408f7a451d7914ba9747c6c9e3ba0583d79497674d11367352917f8ae",
+    "configs/ufo_mjlab_4gpu_week.json": "98de08b5600dd6728d671fd4e65d505f200abf1259a4697e15f0edab9f027b39"
+  },
+  "source_files_sha256": {
+    "humanoidverse/agents/envs/humanoidverse_mjlab.py": "afabbd7bf5f7712a21ab3b14c7f49e8c403452d6b06c2d7cc5ce19f90622195b",
+    "humanoidverse/agents/fb/model.py": "d8292b0550f724c6ad914cddb691f2f59a4a5b1b62c01109d24275ad960e68be",
+    "configs/robots/g1_29dof.yaml": "65711a0dac85fe0e8ec8bf2f18b6c867175e53d6fe1d7085a7ed4f00f6edcae1",
+    "humanoidverse/data/robots/g1_mjlab/g1_29dof.xml": "579c8d3d98afa207cc816f1f6bdbe2594c6153cd00d6cdf644a102a4794b5920"
+  },
+  "motion": "duobox_g1_export__04_sparring_050_ma_free_liu_free__ma",
+  "split": "validation",
+  "motion_sha256": "1a6122f7b1b4dcd094710f7b57d303f1e61d2197423451b685f07c1f52ddbc86",
+  "start_frame": 0,
+  "action_frames": 499,
+  "reference_frames": 500,
+  "dt": 0.02,
+  "future_window": 8,
+  "latent_norm": 16.0,
+  "history_timing": "previous_only",
+  "learned_observation_normalization": "embedded in actor.onnx",
+  "action_scale_source": "0.25 * effective config.robot.dof_effort_limit_list / kp",
+  "versions": {
+    "torch": "2.7.1+cu126",
+    "numpy": "1.26.4"
+  },
+  "assets": {
+    "config/Robot.yaml": "e0848468f80b5d4062f2038c4ec91b0e82067c0d036c9a24d08490adfe8a1ae1",
+    "config/generic_ufo_duobox_050_ma.yaml": "802c391bccb1099a5e19399fe9740fed7893d4703854e32542c29d185a928032",
+    "model/actor.onnx": "ee4f6e82aba97de9b2e9fc6de83972ed812dda70c339819168b91ece26673d6a",
+    "motions/duobox_050_ma_latents.npy": "3e422acff483599197b2dac190293d0e7af13e52441fc0a66de589bc84be7426",
+    "motions/duobox_050_ma_reference.npz": "dc0ae51d262462f0f276f5789a2a28ad9ed344282e111ec70400020f1bb4673f",
+    "motions/replay_fixture.json": "1d9729a4756d6ca93178e1997fed661cb7792c2e82f45748b127b6112b30560d",
+    "ufo_duobox_trial.yaml": "169b0023c1c08636a386ad209c9371adc939b8ca2940f832c9d314082ad93f4d"
+  }
+}

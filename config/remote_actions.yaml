@@ -3,6 +3,7 @@
 # 组合键用 + 连接，例如 F1+A。
 
 bindings:
+  L1+A: ufo_duobox_050_ma_trial
   R1+Y: fighting154k_supermimic_omni_051_ma
   R1+A: fighting154k_supermimic_omni_wbst_motive
   R1+Up: fighting154k_supermimic_omni_side_kick

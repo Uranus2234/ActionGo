@@ -141,6 +141,14 @@ class KeyboardTest(unittest.TestCase):
         self.bridge.key_event(ord("X"), True)
         self.assertTrue(self.bridge.exit_requested)
 
+    def test_shared_viewer_keyboard_entry_updates_pbfm_bridge(self):
+        self.bridge.set_keyboard_key(ord("W"), True)
+        self.assertEqual(self.bridge.speed, 1.0)
+        self.bridge.set_keyboard_key(257, True)
+        self.bridge.set_keyboard_key(ord("X"), True)
+        self.assertTrue(self.bridge.start_requested)
+        self.assertTrue(self.bridge.exit_requested)
+
     def test_analog_axes_and_speed_limit(self):
         for amplitude in (0.0, 0.25, 0.5, 0.75, 1.0):
             self.bridge.set_axes(amplitude, 0, 0)

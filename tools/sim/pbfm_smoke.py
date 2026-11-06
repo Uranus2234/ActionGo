@@ -78,7 +78,10 @@ class KeyboardBridge(PbfmSimulationBridge):
             self.lateral = float(lateral * 0.4)
             self.turn = float(turn)
 
-    def _joystick_mask_and_axes(self):
+    def set_keyboard_key(self, key, pressed):
+        self.key_event(key, pressed)
+
+    def _joystick_mask_and_axes(self, consume_keyboard_events=False):
         with self.keyboard_lock:
             speed_axis = self.speed / (1.0 if self.speed >= 0 else 0.3)
             return 0, [-self.lateral / 0.4, -self.turn, 0.0, speed_axis]

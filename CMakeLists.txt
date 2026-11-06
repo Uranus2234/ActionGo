@@ -104,6 +104,7 @@ add_library(action_go STATIC
   runtime/src/activation_blend.cpp
   runtime/src/async_command_publisher.cpp
   runtime/src/motion_action_controller.cpp
+  runtime/src/policy_command_relay.cpp
   runtime/src/event_logger.cpp
   runtime/src/supervisor_platform.cpp
   runtime/src/candidate_command_arbiter.cpp
@@ -152,6 +153,8 @@ if(BUILD_TESTING)
     ${CMAKE_CURRENT_SOURCE_DIR}/runtime/tests/log_manager_test.py)
   add_test(NAME sim2sim_test COMMAND ${Python3_EXECUTABLE}
     ${CMAKE_CURRENT_SOURCE_DIR}/runtime/tests/sim2sim_test.py)
+  add_test(NAME stand_bridge_test COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_CURRENT_SOURCE_DIR}/runtime/tests/stand_bridge_test.py)
   add_test(
     NAME simulation_recovery_test
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/runtime/tests/simulation_recovery_test.py
@@ -218,6 +221,11 @@ if(BUILD_TESTING)
   add_executable(candidate_command_arbiter_test
     runtime/tests/candidate_command_arbiter_test.cpp
   )
+  add_executable(policy_command_relay_test runtime/tests/policy_command_relay_test.cpp)
+  target_link_libraries(policy_command_relay_test action_go)
+  target_include_directories(policy_command_relay_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/runtime/include
+  )
   target_include_directories(motion_action_controller_test PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/runtime/include
   )
@@ -232,6 +240,8 @@ if(BUILD_TESTING)
   add_dependencies(motion_action_controller_test fake_policy_payload)
   add_test(NAME motion_action_controller_test COMMAND motion_action_controller_test)
   add_test(NAME candidate_command_arbiter_test COMMAND candidate_command_arbiter_test)
+  add_test(NAME policy_command_relay_test COMMAND policy_command_relay_test)
+  set_tests_properties(policy_command_relay_test PROPERTIES TIMEOUT 20)
   if(Python3_Interpreter_FOUND AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tools/experiments/tests")
     add_test(
       NAME experiment_tools_test
@@ -838,7 +848,8 @@ message(STATUS "action_go default ALL targets: ${ACTION_GO_ALL_TARGETS}")
 
 if(BUILD_TESTING AND TARGET generic_policy_player)
     add_executable(bfm_policy_test runtime/tests/bfm_policy_test.cpp
-      ${ACTION_GO_BFM_SOURCES} runtime/src/policy_protocol.cpp runtime/src/onnx_runner.cpp)
+      ${ACTION_GO_BFM_SOURCES} runtime/src/policy_protocol.cpp runtime/src/onnx_runner.cpp
+      runtime/src/reference_endpoint.cpp)
     target_include_directories(bfm_policy_test PRIVATE
       ${CMAKE_CURRENT_SOURCE_DIR}/runtime/include ${ACTION_GO_ONNXRUNTIME_INCLUDE_DIR})
     target_link_libraries(bfm_policy_test yaml-cpp motion_action_onnxruntime ${ACTION_GO_NLOHMANN_JSON_TARGET})

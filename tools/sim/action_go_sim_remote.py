@@ -34,6 +34,7 @@ os.environ.setdefault("MUJOCO_GL", "glfw" if os.environ.get("DISPLAY") else "egl
 import mujoco
 import numpy as np
 import yaml
+from stand_bridge import SimStandBridge
 
 from sim2sim_support import MOTOR_NAMES, KeyboardRemoteInput, SimSession, keyboard_combo_name, motor_layout, resource_overlay, signal_exists, walkrun_pose_accepted, write_signal
 
@@ -689,6 +690,8 @@ class NativeActionGoBridge:
         self.mode = "none"  # none/passive, lowcmd/walkrun, user/action
         self.lowcmd: SimLowCommand | None = None
         self.usercmd: SimLowCommand | None = None
+        self.policy_routes = {}
+        self.selected_policy_route = ""
         self.seq = 0
         self.command_barrier_seq = -1
         self.command_barrier_until = 0.0
@@ -799,9 +802,46 @@ class NativeActionGoBridge:
             if np.any(cmd.kp < 0) or np.any(cmd.kd < 0):
                 return
             if topic == "user":
-                self.usercmd = cmd
-            else:
+                if not self.selected_policy_route:
+                    self.usercmd = cmd
+            elif topic in self.policy_routes:
+                self.policy_routes[topic]["command"] = cmd
+                if self.selected_policy_route == topic:
+                    self.usercmd = cmd
+            elif topic == "lowcmd":
                 self.lowcmd = cmd
+
+    def add_policy_route(self, topic):
+        from unitree_sdk2py.core.channel import ChannelSubscriber
+        from unitree_sdk2py.idl.unitree_hg.msg.dds_ import LowCmd_
+        subscriber = ChannelSubscriber(topic, LowCmd_)
+        with self.lock:
+            self.policy_routes[topic] = {"subscriber": subscriber, "command": None}
+        subscriber.Init(lambda msg: self._cmd_handler(topic, msg), 1)
+
+    def policy_route_ready(self, topic):
+        with self.lock:
+            route = self.policy_routes.get(topic)
+            command = route["command"] if route else None
+            return command is not None and time.monotonic() - command.stamp < 0.1
+
+    def select_policy_route(self, topic):
+        with self.lock:
+            route = self.policy_routes.get(topic)
+            command = route["command"] if route else None
+            if command is None or time.monotonic() - command.stamp >= 0.1:
+                return False
+            self.selected_policy_route = topic
+            self.usercmd = command
+            return True
+
+    def release_policy_route(self, topic):
+        with self.lock:
+            route = self.policy_routes.pop(topic, None)
+            if self.selected_policy_route == topic:
+                self.selected_policy_route = ""
+        if route:
+            route["subscriber"].Close()
 
     def _joystick_mask_and_axes(self, consume_keyboard_events: bool = False) -> tuple[int, list[float]]:
         with self.keyboard_lock:
@@ -1030,6 +1070,75 @@ class SimActionManager:
         self.pending_walkrun = None
         self.retiring_processes = []
         self.action_bindings: dict[str, list[int]] = {}
+        self.active_route = ""
+        self.stand_bridge = SimStandBridge(self) if getattr(args, "stand_bridge", False) else None
+
+    def validate_handoff(self, name):
+        action = self.actions[name]
+        if not self.native_bridge or not action.prestart_before_userctrl:
+            raise ValueError("handoff requires a native bridge and a supported prestart target")
+        reason = sim_deferred_reason(action, object_body=self.args.object_body)
+        if reason or action.type in SIM_DISABLED_ACTION_TYPES or name.startswith("uni_supermimic"):
+            raise ValueError(reason or "target is excluded from unified simulation")
+
+    def prepare_handoff(self, name):
+        self.validate_handoff(name)
+        action = replace(self.actions[name])
+        directory = tempfile.TemporaryDirectory(prefix="actiongo_bridge_")
+        self.activation += 1
+        stem = f"{self.activation}_{name}"
+        topic = f"action_go/sim/{os.getpid()}/{self.activation}"
+        action.ready_file = str(Path(directory.name) / "ready")
+        action.start_file = str(Path(directory.name) / "start")
+        action.handoff_complete_file = str(Path(directory.name) / "complete")
+        action.handoff_release_file = str(Path(directory.name) / "release")
+        if self.session:
+            action.payload_event_log = str(self.session.directory / "actions" / (stem + ".jsonl"))
+        self.bridge.add_policy_route(topic)
+        try:
+            command = adapt_command_for_sim(expand_command(action, self.args.build_dir),
+                action_type=action.type, publish_hz=int(self.sim_publish_hz),
+                normalize_publish_hz=not self.args.no_normalize_action_publish_hz,
+                map_user_lowcmd=False, domain_id=self.args.domain_id,
+                execution_provider=self.args.execution_provider)
+            if getattr(self.bridge, "perception", None) is not None and name != "bfm_zero_stand":
+                command = self.bridge.perception.activate(action, command, warmup=False)
+            tokens = shlex.split(command)
+            if not _set_cli_option(tokens, "--cmd-topic", topic):
+                tokens.extend(["--cmd-topic", topic])
+            command = _shell_join(tokens)
+            command = ("export ACTION_GO_INPUT_LOSS_FILE=" + shlex.quote(action.handoff_complete_file + ".input_loss") +
+                       " ACTION_GO_INPUT_LOSS_RELEASE=" + shlex.quote(action.handoff_release_file) + "; " + command)
+            proc = start_shell_command(command, self.output_path(stem))
+            return dict(proc=proc, action=action, topic=topic, directory=directory)
+        except Exception:
+            self.bridge.release_policy_route(topic)
+            directory.cleanup()
+            raise
+
+    def handoff_ready(self, prepared):
+        action = prepared["action"]
+        return (prepared["proc"].poll() is None and signal_exists(action.ready_file) and
+                not signal_exists(action.handoff_complete_file + ".input_loss") and
+                self.bridge.policy_route_ready(prepared["topic"]))
+
+    def discard_handoff(self, prepared):
+        self._retire_process(prepared["proc"], prepared["action"].name, prepared["directory"])
+        self.bridge.release_policy_route(prepared["topic"])
+
+    def commit_handoff(self, prepared):
+        if not self.handoff_ready(prepared) or not self.bridge.select_policy_route(prepared["topic"]):
+            raise RuntimeError("prepared policy has no fresh command")
+        previous_proc, previous_name, previous_directory = self.active_proc, self.active_action, self.action_signal_dir
+        previous_route = self.active_route
+        if prepared["action"].name == "bfm_zero_stand" and getattr(self.bridge, "perception", None) is not None:
+            self.bridge.perception.deactivate()
+        self.action_signal_dir = prepared["directory"]
+        self._activate_action(prepared["action"].name, "stand_bridge", prepared["action"], prepared["proc"])
+        self.active_route = prepared["topic"]
+        self._retire_process(previous_proc, previous_name, previous_directory)
+        if previous_route:
+            self.bridge.release_policy_route(previous_route)
 
     def notice(self, message: str, level: str = "INFO"):
         if self.session:
@@ -1479,8 +1588,8 @@ class SimActionManager:
             self.passive = False
             if hasattr(self.bridge, "arm_user_command_barrier"):
                 self.bridge.arm_user_command_barrier(
-                    0.0 if self.nonblocking_transitions else self.args.action_start_barrier_sec,
-                    wait_for_command=not self.nonblocking_transitions,
+                    0.0 if self.nonblocking_transitions or source == "stand_bridge" else self.args.action_start_barrier_sec,
+                    wait_for_command=not self.nonblocking_transitions and source != "stand_bridge",
                 )
             self._signal_action_start(action)
         else:
@@ -1499,6 +1608,11 @@ class SimActionManager:
         print(f"[action_go_sim] active action={action_name} source={source} switch_back={self.active_switch_mode}", flush=True)
 
     def stop_active(self, switch_mode: str = "walkrun"):
+        if getattr(self, "stand_bridge", None):
+            self.stand_bridge.cancel()
+        if getattr(self, "active_route", ""):
+            self.bridge.release_policy_route(self.active_route)
+            self.active_route = ""
         if self.nonblocking_transitions:
             self._cancel_pending_action()
             proc = self.active_proc
@@ -1553,6 +1667,11 @@ class SimActionManager:
                 return None
         if code is None:
             return None
+        if self.stand_bridge:
+            self.stand_bridge.cancel()
+        if self.active_route:
+            self.bridge.release_policy_route(self.active_route)
+            self.active_route = ""
         name = self.active_action
         mode = self.active_switch_mode
         print(f"[action_go_sim] action exited: {name} status={code} switch_back={mode}", flush=True)
@@ -1635,6 +1754,8 @@ def parse_args(argv=None) -> argparse.Namespace:
     p.add_argument("--sequence-walkrun-min-height", type=float, default=0.5)
     p.add_argument("--config", default=str(ACTION_GO_ROOT / "config/motion_actions.yaml"))
     p.add_argument("--risk-model", default="", help="MLP risk ONNX; terminal/viewer 1 requests BFM handoff")
+    p.add_argument("--stand-bridge", action=argparse.BooleanOptionalAction, default=False,
+                   help="use BFM stand for explicit policy switches; no risk model")
     p.add_argument("--training-env", default="", help="align auto-action to saved training env.yaml")
     p.add_argument("--safety-disable", action="store_true", help="disable automatic excessive-tilt recovery")
     p.add_argument("--risk-auto-request-sec", type=float, default=-1.0)
@@ -1715,6 +1836,8 @@ def parse_args(argv=None) -> argparse.Namespace:
             p.error("unknown simulation profile fields: " + ", ".join(sorted(unknown)))
         p.set_defaults(**profile)
     args = p.parse_args(argv)
+    if args.stand_bridge and (args.bridge != "native" or args.risk_model):
+        p.error("--stand-bridge requires --bridge native and no risk model")
     if args.interface != "lo":
         p.error("simulation requires --interface lo")
     if not 0 <= args.domain_id <= 232:
@@ -2061,6 +2184,9 @@ def run_simulation(args) -> int:
             print("[action_go_sim] automatic excessive-tilt recovery DISABLED", flush=True)
         remote = RemoteMonitor("rt/lowstate")
         manager = SimActionManager(args, actions, _bridge)
+        if args.stand_bridge:
+            args.session.notice(f"Stand bridge enabled | {combo_name(remote_cfg.shell_walkrun_combo)} | "
+                                f"Keyboard {keyboard_combo_name(remote_cfg.shell_walkrun_combo)} | target=WALKRUN")
 
         def prepare_auto_action_reference() -> None:
             if not args.reset_auto_action_to_reference:
@@ -2173,6 +2299,12 @@ def run_simulation(args) -> int:
             elif action == "press" and keycode == 259:
                 with keyboard_lock:
                     keyboard_events.append("reset")
+            elif action == "press" and keycode == ord("1"):
+                with keyboard_lock:
+                    keyboard_events.append("risk_switch")
+            elif action == "press" and keycode in (ord("V"), ord("v")):
+                with keyboard_lock:
+                    keyboard_events.append("risk_reset")
 
         if not args.headless:
             from mujoco_keyboard_viewer import KeyboardViewer
@@ -2285,11 +2417,16 @@ def run_simulation(args) -> int:
             if safety_state == SafetyState.RECOVERING and action_name != selected_safety_action:
                 print(f"[action_go_sim][safety] ignore action while recovering: {action_name}", flush=True)
                 return
+            if getattr(manager, "stand_bridge", None) and action_name != "bfm_zero_stand":
+                manager.stand_bridge.request(action_name)
+                return
             if manager.start_action(action_name, source=source):
                 lie_action_active = (action_name == remote_cfg.lie_action)
 
         def start_safety_recovery(tilt: float):
             nonlocal shell_armed, safety_state, fall_timer_active, recover_timer_active
+            if manager.stand_bridge:
+                manager.stand_bridge.cancel()
             safety_state = SafetyState.DAMPED
             shell_armed = False
             fall_timer_active = False
@@ -2446,6 +2583,10 @@ def run_simulation(args) -> int:
                 manager.shutdown(passive=False)
                 STOP.set()
             elif combo_rising(now_mask, prev_mask, remote_cfg.shell_walkrun_combo):
+                if args.stand_bridge and shell_armed and manager.action_running():
+                    manager.stand_bridge.request("walkrun")
+                    prev_mask = now_mask
+                    return
                 shell_armed = False
                 lie_action_active = False
                 reset_safety_state()
@@ -2482,14 +2623,21 @@ def run_simulation(args) -> int:
                 reset_safety_state()
                 manager.enter_passive()
 
-            if shell_armed and (risk_switch is None or risk_switch.state != "BFM"):
+            if manager.stand_bridge and manager.stand_bridge.target:
+                with state_lock:
+                    gyro_norm = float(np.linalg.norm(data.qvel[3:6]))
+                completed = manager.stand_bridge.tick(remote.imu(), gyro_norm)
+                if completed == "walkrun":
+                    shell_armed = False
+                    reset_safety_state()
+            if shell_armed and (not manager.stand_bridge or not manager.stand_bridge.target or not manager.stand_bridge.standing) and (risk_switch is None or risk_switch.state != "BFM"):
                 safety_tick()
             for binding in remote_cfg.bindings:
                 if not combo_rising(now_mask, prev_mask, binding.combo):
                     continue
                 if not shell_armed:
                     manager.notice(f"Press Enter to ARM before starting {binding.action}", "WARN")
-                elif manager.action_running():
+                elif manager.action_running() and not args.stand_bridge:
                     manager.notice(f"Already running {manager.active_action}; return to WALKRUN before switching", "WARN")
                 elif risk_switch is None or risk_switch.state != "BFM":
                     start_action(binding.action, "remote")
@@ -2615,8 +2763,13 @@ def run_simulation(args) -> int:
                     if manager.active_proc is not None and manager.active_action == args.sequence[sequence_index]:
                         sequence_phase = "action"
                         sequence_deadline = time.monotonic() + args.sequence_action_sec
-                    elif manager.pending_action is None:
+                    elif manager.pending_action is None and not (manager.stand_bridge and manager.stand_bridge.target):
                         raise RuntimeError("sequence action failed to become ready: " + args.sequence[sequence_index])
+                elif args.sequence and sequence_phase == "stand_bridge":
+                    if not manager.stand_bridge.target:
+                        if manager.passive:
+                            raise RuntimeError("stand bridge failed during sequence")
+                        sequence_phase = "walkrun_starting"
                 if args.sequence and time.monotonic() >= sequence_deadline:
                     if sequence_phase == "walkrun":
                         tilt = tilt_deg_from_quat_wxyz(data.qpos[3:7])
@@ -2636,14 +2789,20 @@ def run_simulation(args) -> int:
                             args.session.notice("Sequence complete")
                             break
                         action_name = args.sequence[sequence_index]
-                        if not manager.start_action(action_name, source="sequence"):
+                        started = (manager.stand_bridge.request(action_name) if manager.stand_bridge else
+                                   manager.start_action(action_name, source="sequence"))
+                        if not started:
                             raise RuntimeError("sequence failed to start " + action_name)
                         sequence_phase = "action_starting"
                         sequence_deadline = float("inf")
                     elif sequence_phase == "action":
-                        manager.stop_active(switch_mode="walkrun")
+                        if manager.stand_bridge:
+                            if not manager.stand_bridge.request("walkrun"):
+                                raise RuntimeError("stand bridge request failed during sequence")
+                        else:
+                            manager.stop_active(switch_mode="walkrun")
                         sequence_index += 1
-                        sequence_phase = "walkrun_starting"
+                        sequence_phase = "stand_bridge" if manager.stand_bridge else "walkrun_starting"
                         sequence_deadline = float("inf")
                     args.session.event("sequence_transition", phase=sequence_phase,
                                        index=sequence_index, policy=manager.active_action,

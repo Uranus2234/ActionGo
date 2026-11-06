@@ -19,6 +19,8 @@ trusted action YAML
 
 `MotionActionController` owns process lifecycle and handoff. Generic players own policy semantics and inference. All normal policy commands pass through `CommandSafetyFilter`, which rejects NaN/Inf, stale or missing `LowState`, invalid dimensions, and unsafe gains, then applies joint limits. Exception paths attempt damping when a publisher is active.
 
+Live depth, object-pose, and motion-teleoperation inputs use a two-policy-frame loss gate. The first invalid frame is tolerated from the last valid input where a cache exists; the second requests the existing supervisor handoff to WALKRUN and waits for its release before the policy exits. This applies to camera depth, torso IMU, tracked object pose, and realtime P-BFM, SONIC, TWIST, and Humanoid-GPT inputs. A neutral wireless joystick value carried in a fresh `LowState` remains a valid command; DDS does not expose a separate controller-link heartbeat.
+
 The supervisor's finite current-pose prearm hold occurs before controller ownership transfer. It is a narrowly scoped protocol exception, not a policy-output path; its damping and gains are fixed and validated.
 
 ## Contracts and Players

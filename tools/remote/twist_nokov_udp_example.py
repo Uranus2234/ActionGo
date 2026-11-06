@@ -64,9 +64,9 @@ def main():
     if args.transport == "redis":
         import redis
         r = redis.Redis(host=args.host, port=args.port, db=0)
-        print(f"SET redis://{args.host}:{args.port}/{args.redis_key} at {args.hz:g} Hz")
+        print(f"PSETEX redis://{args.host}:{args.port}/{args.redis_key} at {args.hz:g} Hz")
         while True:
-            r.set(args.redis_key, packet_text)
+            r.set(args.redis_key, packet_text, px=max(100, int(5000 / args.hz)))
             time.sleep(dt)
 
 

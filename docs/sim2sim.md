@@ -27,6 +27,10 @@ Python simulation coordinator is separate from the real C++ supervisor.
 
 ## Requirements
 
+For explicit switches through BFM stand, launch with `--stand-bridge`.
+See [stand bridge controls and handoff](stand_bridge.md). It is off by default
+and does not use a risk model.
+
 - An x86_64 ActionGo C++ build with `generic_policy_player` and the players used
   by the selected actions. Follow the main README for the CPU build.
 - Python with MuJoCo 3.2 or newer, NumPy, PyYAML, Unitree SDK2 Python, and its compatible

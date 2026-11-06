@@ -11,6 +11,7 @@
 #include "action_go/runtime/command_safety_filter.h"
 #include "action_go/runtime/event_logger.h"
 #include "action_go/runtime/input_freshness.h"
+#include "action_go/runtime/input_loss.h"
 #include "action_go/runtime/npy_reader.h"
 #include "action_go/runtime/onnx_runner.h"
 #include "action_go/runtime/policy_contract.h"
@@ -1826,8 +1827,8 @@ class TwistZmqReceiver {
     if (!sock_) throw std::runtime_error("TWIST ZMQ SUB socket creation failed");
     int linger = 0;
     zmq_setsockopt(sock_, ZMQ_LINGER, &linger, sizeof(linger));
-    int conflate = 1;
-    zmq_setsockopt(sock_, ZMQ_CONFLATE, &conflate, sizeof(conflate));
+    int receive_hwm = 1;
+    zmq_setsockopt(sock_, ZMQ_RCVHWM, &receive_hwm, sizeof(receive_hwm));
     if (zmq_setsockopt(sock_, ZMQ_SUBSCRIBE, topic.data(), topic.size()) != 0) {
       throw std::runtime_error("TWIST ZMQ subscribe failed");
     }
@@ -1853,6 +1854,7 @@ class TwistZmqReceiver {
       std::string joined;
       std::string last_part;
       bool have_msg = false;
+      bool oversized = false;
       while (true) {
         char buf[8192];
         const int n = zmq_recv(sock_, buf, sizeof(buf), ZMQ_DONTWAIT);
@@ -1860,17 +1862,36 @@ class TwistZmqReceiver {
           if (errno == EAGAIN) return got_any;
           throw std::runtime_error("TWIST ZMQ recv failed errno=" + std::to_string(errno));
         }
+        if (static_cast<size_t>(n) > sizeof(buf)) {
+          int more = 0;
+          size_t more_size = sizeof(more);
+          zmq_getsockopt(sock_, ZMQ_RCVMORE, &more, &more_size);
+          while (more) {
+            char discard[1];
+            if (zmq_recv(sock_, discard, sizeof(discard), ZMQ_DONTWAIT) < 0) break;
+            zmq_getsockopt(sock_, ZMQ_RCVMORE, &more, &more_size);
+          }
+          oversized = true;
+          break;
+        }
         have_msg = true;
-        std::string part(buf, buf + n);
-        if (!joined.empty()) joined.push_back(' ');
-        joined += part;
-        last_part = std::move(part);
         int more = 0;
         size_t more_size = sizeof(more);
         zmq_getsockopt(sock_, ZMQ_RCVMORE, &more, &more_size);
+        if (!oversized && joined.size() + static_cast<size_t>(n) + 1 > 65536) oversized = true;
+        if (!oversized) {
+          std::string part(buf, buf + n);
+          if (!joined.empty()) joined.push_back(' ');
+          joined += part;
+          last_part = std::move(part);
+        }
         if (!more) break;
       }
-      if (!have_msg) break;
+      if (oversized) {
+        ++bad_packets_;
+        continue;
+      }
+      if (!have_msg) continue;
       auto maybe = parse_twist_mimic_packet(last_part);
       if (!maybe && joined != last_part) maybe = parse_twist_mimic_packet(joined);
       if (maybe) {
@@ -2136,6 +2157,9 @@ class TwistRedisReceiver {
   ~TwistRedisReceiver() { close_socket(); }
 
   void open_socket(const std::string& host, int port, const std::string& key) {
+    if (!action_go::runtime::is_local_reference_bind(host)) {
+      throw std::runtime_error("TWIST Redis host must resolve to an explicit loopback address");
+    }
     host_ = host;
     port_ = port;
     key_ = key;
@@ -2157,10 +2181,36 @@ class TwistRedisReceiver {
       return false;
     }
     if (value.empty()) return false;
+    const std::string pttl_command = "*2\r\n$4\r\nPTTL\r\n$" +
+        std::to_string(key_.size()) + "\r\n" + key_ + "\r\n";
+    if (!send_all(pttl_command)) {
+      close_socket();
+      return false;
+    }
+    std::string pttl_line;
+    if (!read_line(pttl_line) || pttl_line.size() < 2 || pttl_line[0] != ':') {
+      close_socket();
+      return false;
+    }
+    int64_t pttl = -1;
+    try {
+      size_t parsed = 0;
+      pttl = std::stoll(pttl_line.substr(1), &parsed);
+      if (parsed != pttl_line.size() - 1) return false;
+    } catch (...) {
+      close_socket();
+      return false;
+    }
+    if (pttl <= 0) {
+      ++bad_packets_;
+      return false;
+    }
+    const bool lease_refreshed = last_pttl_ms_ < 0 || pttl > last_pttl_ms_ + 2;
+    last_pttl_ms_ = pttl;
     auto maybe = parse_twist_mimic_packet(value);
     if (maybe) {
       last_ = *maybe;
-      last_time_ = std::chrono::steady_clock::now();
+      if (lease_refreshed) last_time_ = std::chrono::steady_clock::now();
       ++sequence_;
       has_last_ = true;
       return true;
@@ -2202,6 +2252,11 @@ class TwistRedisReceiver {
     const int gai = getaddrinfo(host_.c_str(), std::to_string(port_).c_str(), &hints, &res);
     if (gai != 0) return false;
     for (auto* rp = res; rp; rp = rp->ai_next) {
+      const bool loopback = (rp->ai_family == AF_INET &&
+          (ntohl(reinterpret_cast<sockaddr_in*>(rp->ai_addr)->sin_addr.s_addr) >> 24) == 127) ||
+          (rp->ai_family == AF_INET6 && IN6_IS_ADDR_LOOPBACK(
+              &reinterpret_cast<sockaddr_in6*>(rp->ai_addr)->sin6_addr));
+      if (!loopback) continue;
       int fd = ::socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
       if (fd < 0) continue;
       struct timeval tv{};
@@ -2269,12 +2324,19 @@ class TwistRedisReceiver {
     std::string line;
     if (!read_line(line) || line.empty()) return false;
     if (line[0] == '$') {
-      const int len = std::stoi(line.substr(1));
-      if (len < 0) return true;
+      size_t parsed = 0;
+      int len = 0;
+      try {
+        len = std::stoi(line.substr(1), &parsed);
+      } catch (...) {
+        return false;
+      }
+      if (parsed != line.size() - 1 || len > 1024 * 1024 || len < -1) return false;
+      if (len == -1) return true;
       std::string payload;
       if (!read_exact(payload, static_cast<size_t>(len))) return false;
       char cr = 0, lf = 0;
-      if (!recv_byte(cr) || !recv_byte(lf)) return false;
+      if (!recv_byte(cr) || !recv_byte(lf) || cr != '\r' || lf != '\n') return false;
       value = std::move(payload);
       return true;
     }
@@ -2304,6 +2366,7 @@ class TwistRedisReceiver {
   bool has_last_{false};
   std::array<float, kTwistProtocolMimicDim> last_{};
   std::chrono::steady_clock::time_point last_time_{std::chrono::steady_clock::now()};
+  int64_t last_pttl_ms_{-1};
   uint64_t sequence_{0};
   size_t bad_packets_{0};
 };
@@ -2748,6 +2811,10 @@ class GenericPolicyPlayer {
   PbfmDepthHistory pbfm_depth_history_;
 #ifdef ACTION_GO_HAS_ZMQ
   std::unique_ptr<SharedMemoryDepthStream> pbfm_depth_stream_;
+  unsigned pbfm_depth_failures_{0};
+  std::vector<float> pbfm_last_depth_;
+  unsigned pbfm_context_failures_{0};
+  BfmContext pbfm_last_context_;
 #endif
   std::vector<float> pbfm_file_depth_;
   std::vector<float> pbfm_estimated_velocity_;
@@ -2870,6 +2937,7 @@ class GenericPolicyPlayer {
   fs::path humanoid_gpt_convert_xml_path_;
   StaleBehavior humanoid_gpt_stale_behavior_{StaleBehavior::kHoldThenStop};
   RealtimeInputStaleGate humanoid_gpt_stale_gate_;
+  TwoFrameInputGate external_input_gate_;
   int64_t humanoid_gpt_stale_events_{0}, humanoid_gpt_stale_hold_ticks_{0}, humanoid_gpt_stale_stop_events_{0};
   int humanoid_gpt_ref_frame_{0};
   bool humanoid_gpt_have_realtime_ref_{false};

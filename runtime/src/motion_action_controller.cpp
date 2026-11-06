@@ -1121,28 +1121,14 @@ bool MotionActionController::startAction(const std::string& action_name)
     joinWorkerIfJoinable();
 
     try {
-        if (action.prestart_before_userctrl || action.postrun_handoff_hold) {
-            std::string directory = (fs::temp_directory_path() / "action_go_XXXXXX").string();
-            if (!mkdtemp(directory.data())) {
-                throw std::runtime_error("cannot create private handshake directory");
-            }
-            {
-                std::lock_guard<std::mutex> lock(worker_mutex_);
-                handshake_directory_ = directory;
-            }
-            if (action.prestart_before_userctrl) {
-                if (action.ready_file.empty()) action.ready_file = directory + "/ready";
-                if (action.start_file.empty()) action.start_file = directory + "/start";
-            }
-            if (action.postrun_handoff_hold) {
-                if (action.handoff_complete_file.empty()) action.handoff_complete_file = directory + "/complete";
-                if (action.handoff_release_file.empty()) action.handoff_release_file = directory + "/release";
-            }
-        }
+        discardPreparedActionLocked();
+        prepareHandshake(action, handshake_directory_);
         prepareActionEventLog(action);
+        prepareCommandRoute(action);
         expandCommandTemplate(action);
         expandCommandTemplate(action, action.preflight_command);
     } catch (const std::exception& exception) {
+        if (command_relay_) command_relay_->release(action.command_topic);
         setFailed(exception.what());
         joinWorkerIfJoinable();
         return false;
@@ -1169,10 +1155,220 @@ bool MotionActionController::startAction(const std::string& action_name)
         worker_ = std::thread(&MotionActionController::workerMain, this, action);
     } catch (const std::exception& exception) {
         setFailed("cannot start action worker: " + std::string(exception.what()));
+        if (command_relay_) command_relay_->release(action.command_topic);
         joinWorkerIfJoinable();
         return false;
     }
     return true;
+}
+
+void MotionActionController::prepareHandshake(ActionConfig& action, std::string& directory)
+{
+    if (!action.prestart_before_userctrl && !action.postrun_handoff_hold) return;
+    directory = (fs::temp_directory_path() / "action_go_XXXXXX").string();
+    if (!mkdtemp(directory.data())) throw std::runtime_error("cannot create private handshake directory");
+    if (action.prestart_before_userctrl) {
+        if (action.ready_file.empty()) action.ready_file = directory + "/ready";
+        if (action.start_file.empty()) action.start_file = directory + "/start";
+    }
+    if (action.handoff_complete_file.empty()) action.handoff_complete_file = directory + "/complete";
+    if (action.handoff_release_file.empty()) action.handoff_release_file = directory + "/release";
+}
+
+void MotionActionController::setCommandRelay(std::shared_ptr<action_go::runtime::PolicyCommandRelay> relay)
+{
+    std::lock_guard<std::mutex> admission_lock(start_mutex_);
+    if (isRunning() || prepared_pid_ > 0) throw std::logic_error("cannot change relay while running");
+    command_relay_ = std::move(relay);
+}
+
+void MotionActionController::prepareCommandRoute(ActionConfig& action)
+{
+    if (!command_relay_ || dry_run_ || !supportsPreparedHandoff(action.name)) return;
+    action.command_topic = "action_go/policy/" + std::to_string(getpid()) + "/" + std::to_string(action.action_seq);
+    command_relay_->add(action.command_topic);
+}
+
+bool MotionActionController::supportsPreparedHandoff(const std::string& action_name) const
+{
+    const auto target = actions_.find(action_name);
+    if (target == actions_.end()) return false;
+    const auto& action = target->second;
+    return action.prestart_before_userctrl && action.preflight_command.empty() &&
+        (action.type == "generic_policy" || action.type == "generic_motion_tracking" ||
+         action.type == "omnixtreme" || action.type == "instinct_parkour" || action.type == "php" ||
+         action.type == "steadytray");
+}
+
+bool MotionActionController::prepareActionForHandoff(const std::string& action_name)
+{
+    std::lock_guard<std::mutex> admission_lock(start_mutex_);
+    if (prepared_pid_ > 0 && prepared_action_.name == action_name) return true;
+    discardPreparedActionLocked();
+    const auto target = actions_.find(action_name);
+    const auto status = status_.load();
+    if (dry_run_ || !command_relay_ || official_stop_in_progress_ ||
+        (status != Status::Idle && status != Status::Done && status != Status::Running) ||
+        (status == Status::Running && active_action_.command_topic.empty()) || target == actions_.end() ||
+        !supportsPreparedHandoff(action_name)) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        last_error_ = "handoff requires a routed source and a supported prestart target";
+        return false;
+    }
+    ActionConfig action = target->second;
+    action.ready_file.clear();
+    action.start_file.clear();
+    action.handoff_complete_file.clear();
+    action.handoff_release_file.clear();
+    const auto context = event_log_.context();
+    try {
+        prepareHandshake(action, prepared_directory_);
+        prepareActionEventLog(action);
+        event_log_.set_context(context);
+        prepareCommandRoute(action);
+        prepared_action_ = action;
+        if (action.command_topic.empty()) throw std::runtime_error("target does not support command routing");
+        std::string error;
+        const std::string command = "export ACTION_GO_TRIAL_ID=" + shellQuote(action.trial_id) +
+            " ACTION_GO_POLICY=" + shellQuote(action.name) +
+            " ACTION_GO_INPUT_LOSS_FILE=" + shellQuote(action.handoff_complete_file + ".input_loss") +
+            " ACTION_GO_INPUT_LOSS_RELEASE=" + shellQuote(action.handoff_release_file) +
+            "; " + expandCommandTemplate(action);
+        if (!supervisor_platform_->start_shell(command, prepared_pid_, error)) {
+            throw std::runtime_error(error);
+        }
+        logActionEvent("handoff_target_prestarted", action, "source_remains_active");
+        return true;
+    } catch (const std::exception& exception) {
+        event_log_.set_context(context);
+        prepared_action_ = action;
+        discardPreparedActionLocked();
+        std::lock_guard<std::mutex> lock(mutex_);
+        last_error_ = std::string("handoff prestart failed: ") + exception.what();
+        return false;
+    }
+}
+
+bool MotionActionController::preparedActionReadyLocked()
+{
+    if (prepared_pid_ <= 0) return false;
+    if (supervisor_platform_->poll_process(prepared_pid_).state !=
+        action_go::runtime::SupervisorProcessState::kRunning) {
+        prepared_pid_ = -1;
+        discardPreparedActionLocked();
+        return false;
+    }
+    return !supervisor_platform_->file_exists(prepared_action_.handoff_complete_file + ".input_loss") &&
+        supervisor_platform_->file_exists(prepared_action_.ready_file) &&
+        command_relay_->ready(prepared_action_.command_topic);
+}
+
+bool MotionActionController::preparedActionReady()
+{
+    std::lock_guard<std::mutex> admission_lock(start_mutex_);
+    return preparedActionReadyLocked();
+}
+
+void MotionActionController::discardPreparedActionLocked()
+{
+    if (prepared_pid_ > 0) {
+        std::string error;
+        supervisor_platform_->terminate_process_group(prepared_pid_, false, error);
+        prepared_pid_ = -1;
+    }
+    if (command_relay_) command_relay_->release(prepared_action_.command_topic);
+    prepared_action_ = {};
+    if (!prepared_directory_.empty()) {
+        std::error_code error;
+        fs::remove_all(prepared_directory_, error);
+        prepared_directory_.clear();
+    }
+}
+
+void MotionActionController::discardPreparedAction()
+{
+    std::lock_guard<std::mutex> admission_lock(start_mutex_);
+    discardPreparedActionLocked();
+}
+
+bool MotionActionController::commitPreparedAction()
+{
+    std::lock_guard<std::mutex> admission_lock(start_mutex_);
+    if (!preparedActionReadyLocked() || official_stop_in_progress_) return false;
+    const ActionConfig action = prepared_action_;
+    std::string error;
+    std::unique_lock<std::mutex> mode_lock(control_mode_mutex_);
+    const auto status = status_.load();
+    if (status != Status::Running && status != Status::Idle && status != Status::Done) return false;
+    if (!command_relay_->select(action.command_topic)) return false;
+    if (status != Status::Running &&
+        (!control_backend_->stop_move(error) || !control_backend_->switch_to_user_ctrl(false, error))) {
+        command_relay_->release(action.command_topic);
+        discardPreparedActionLocked();
+        return false;
+    }
+    if (!touchFile(action.start_file, error)) {
+        if (status == Status::Running) command_relay_->select(active_action_.command_topic);
+        else control_backend_->switch_to_internal(action_go::runtime::OfficialControlMode::kWalkRun, error);
+        discardPreparedActionLocked();
+        return false;
+    }
+    suppress_switch_back_on_cancel_.store(true);
+    cancel_requested_.store(true);
+    mode_lock.unlock();
+    terminateRunningProcess(false);
+    joinWorkerIfJoinable();
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        current_action_ = action.name;
+        active_action_ = action;
+        current_action_seq_ = action.action_seq;
+        current_trial_id_ = action.trial_id;
+        current_switch_back_mode_ = action.switch_back_mode;
+        current_event_context_ = base_event_context_;
+        current_event_context_.trial_id = action.trial_id;
+        current_event_context_.policy = action.name;
+        event_log_.set_context(current_event_context_);
+        last_error_.clear();
+        running_pid_.store(prepared_pid_);
+        prepared_pid_ = -1;
+        prepared_action_ = {};
+        handshake_directory_ = std::move(prepared_directory_);
+        prepared_directory_.clear();
+        cancel_requested_.store(false);
+        suppress_switch_back_on_cancel_.store(false);
+        handoff_release_sent_.store(false);
+        control_state_.store(1);
+        status_.store(Status::Running);
+    }
+    logActionEvent("handoff_target_activated", action, "first_command_before_source_stop");
+    try {
+        std::lock_guard<std::mutex> lock(worker_mutex_);
+        worker_ = std::thread([this, action]() {
+            monitorAction(action, true);
+            command_relay_->release(action.command_topic);
+        });
+    } catch (const std::exception& exception) {
+        terminateRunningProcess(true);
+        command_relay_->release(action.command_topic);
+        enterOfficialDamping(error);
+        setFailed(exception.what());
+        return false;
+    }
+    return true;
+}
+
+bool MotionActionController::waitForCommandRoute(const ActionConfig& action, std::string& error)
+{
+    if (action.command_topic.empty()) return true;
+    const auto deadline = supervisor_platform_->now() + std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+        std::chrono::duration<double>(action.prestart_ready_timeout_sec));
+    while (!cancel_requested_.load() && supervisor_platform_->now() < deadline) {
+        if (command_relay_->select(action.command_topic)) return true;
+        supervisor_platform_->sleep_for(std::chrono::milliseconds(2));
+    }
+    error = "no fresh command received from prestarted policy";
+    return false;
 }
 
 MotionActionController::Status MotionActionController::update()
@@ -1188,6 +1384,7 @@ MotionActionController::Status MotionActionController::update()
 void MotionActionController::cancel()
 {
     std::lock_guard<std::mutex> admission_lock(start_mutex_);
+    discardPreparedActionLocked();
     suppress_switch_back_on_cancel_.store(false);
     cancel_requested_.store(true);
     terminateRunningProcess(false);
@@ -1200,6 +1397,7 @@ void MotionActionController::cancel()
 void MotionActionController::interruptForRecovery()
 {
     std::lock_guard<std::mutex> admission_lock(start_mutex_);
+    discardPreparedActionLocked();
     std::cerr << "[MotionActionController] safety recovery interrupt requested" << std::endl;
     if (dry_run_) {
         cancel_requested_.store(true);
@@ -1234,6 +1432,7 @@ void MotionActionController::interruptForRecovery()
 void MotionActionController::dampingStop()
 {
     std::lock_guard<std::mutex> admission_lock(start_mutex_);
+    discardPreparedActionLocked();
     std::cerr << "[MotionActionController] dampingStop requested" << std::endl;
     if (dry_run_) {
         cancel_requested_.store(true);
@@ -1279,6 +1478,7 @@ bool MotionActionController::stopAndSwitchToOfficial(const std::string& mode)
 {
     std::unique_lock<std::mutex> admission_lock(start_mutex_);
     if (official_stop_in_progress_) return false;
+    discardPreparedActionLocked();
     const std::string normalized_mode = normalizeInternalMode(mode);
     std::cerr << "[MotionActionController] normal stop requested, switch to official "
               << normalized_mode << std::endl;
@@ -1419,6 +1619,12 @@ const char* MotionActionController::statusToString(Status status)
 
 void MotionActionController::workerMain(ActionConfig action)
 {
+    workerMainImpl(action);
+    if (command_relay_) command_relay_->release(action.command_topic);
+}
+
+void MotionActionController::workerMainImpl(ActionConfig action)
+{
     std::string error;
     bool payload_prestarted = false;
     bool loco_stopped = false;
@@ -1431,6 +1637,7 @@ void MotionActionController::workerMain(ActionConfig action)
         if (!supervisor_platform_->remove_file(action.ready_file, error)) return false;
         if (!supervisor_platform_->remove_file(action.start_file, error)) return false;
         if (!supervisor_platform_->remove_file(action.handoff_complete_file, error)) return false;
+        if (!supervisor_platform_->remove_file(action.handoff_complete_file + ".input_loss", error)) return false;
         if (!supervisor_platform_->remove_file(action.handoff_release_file, error)) return false;
         return true;
     };
@@ -1496,7 +1703,7 @@ void MotionActionController::workerMain(ActionConfig action)
                             event_int("pid", static_cast<long long>(running_pid_.load())),
                             event_string("phase", "dry_run_prestart"),
                             event_string("payload_event_log", action.payload_event_log)});
-            if (!waitForFile(action.ready_file, action.prestart_ready_timeout_sec, error)) {
+            if (!waitForFile(action.ready_file, action.prestart_ready_timeout_sec, error, &action)) {
                 terminateRunningProcess(false);
                 setFailed("dry-run ready timeout: " + error);
                 return;
@@ -1561,7 +1768,7 @@ void MotionActionController::workerMain(ActionConfig action)
                         event_string("payload_event_log", action.payload_event_log)});
 
         if (!action.ready_file.empty()) {
-            if (!waitForFile(action.ready_file, action.prestart_ready_timeout_sec, error)) {
+            if (!waitForFile(action.ready_file, action.prestart_ready_timeout_sec, error, &action)) {
                 terminateRunningProcess(false);
                 if (cancel_requested_.load()) {
                     logActionEvent("action_exit", action, "canceled_before_handoff");
@@ -1573,6 +1780,12 @@ void MotionActionController::workerMain(ActionConfig action)
                 return;
             }
             logActionEvent("ready_seen", action, "prestart");
+            if (!waitForCommandRoute(action, error)) {
+                terminateRunningProcess(false);
+                request_switch_back_after_pre_userctrl_failure();
+                setFailed(error);
+                return;
+            }
             std::cout << "[MotionActionController] prestarted payload ready, switching to UserCtrl"
                       << std::endl;
         }
@@ -1626,6 +1839,12 @@ void MotionActionController::workerMain(ActionConfig action)
         logActionEvent("start_file_touched", action, "activate_prestarted_payload");
     }
 
+    monitorAction(action, payload_prestarted);
+}
+
+void MotionActionController::monitorAction(const ActionConfig& action, bool payload_prestarted)
+{
+    std::string error;
     setStatus(Status::Running);
     const bool payload_ok = payload_prestarted
         ? waitRunningCommand(expandCommandTemplate(action), error, &action)
@@ -1873,6 +2092,11 @@ bool MotionActionController::startCommandStringAsync(const std::string& command,
     export_context("ACTION_GO_RUN_ID", child_context.run_id);
     export_context("ACTION_GO_PAIR_ID", child_context.pair_id);
     export_context("ACTION_GO_POLICY", child_context.policy.empty() ? child_policy : child_context.policy);
+    const auto input_action = currentActionConfig();
+    if (!input_action.handoff_complete_file.empty() && !input_action.handoff_release_file.empty()) {
+        export_context("ACTION_GO_INPUT_LOSS_FILE", input_action.handoff_complete_file + ".input_loss");
+        export_context("ACTION_GO_INPUT_LOSS_RELEASE", input_action.handoff_release_file);
+    }
     export_context("ACTION_GO_HANDOFF_METHOD", child_context.handoff_method);
     export_context("ACTION_GO_GIT_SHA", child_context.git_sha);
     export_context("ACTION_GO_SPEC_SHA256", child_context.spec_sha256);
@@ -1914,7 +2138,17 @@ bool MotionActionController::waitRunningCommand(const std::string& command, std:
     action_go::runtime::SupervisorProcessResult process_result;
     bool complete_seen = false;
     while (true) {
-        if (action && action->postrun_handoff_hold && !complete_seen &&
+        if (action && !cancel_requested_.load() && !action->handoff_complete_file.empty() &&
+            !action->handoff_release_file.empty() &&
+            supervisor_platform_->file_exists(action->handoff_complete_file + ".input_loss") &&
+            !handoff_release_sent_.load()) {
+            logActionEvent("input_loss_confirmed", *action, "two_invalid_samples");
+            if (!completeSwitchBack(*action, "walkrun", "input_loss", error_message)) {
+                supervisor_platform_->sleep_for(std::chrono::milliseconds(20));
+                continue;
+            }
+        }
+        if (action && !cancel_requested_.load() && action->postrun_handoff_hold && !complete_seen &&
             !action->handoff_complete_file.empty() &&
             supervisor_platform_->file_exists(action->handoff_complete_file)) {
             complete_seen = true;
@@ -1986,7 +2220,8 @@ bool MotionActionController::waitRunningCommand(const std::string& command, std:
     return true;
 }
 
-bool MotionActionController::waitForFile(const std::string& path, double timeout_sec, std::string& error_message)
+bool MotionActionController::waitForFile(const std::string& path, double timeout_sec, std::string& error_message,
+                                         const ActionConfig* action)
 {
     if (path.empty()) {
         return true;
@@ -1995,6 +2230,15 @@ bool MotionActionController::waitForFile(const std::string& path, double timeout
                           std::chrono::duration_cast<std::chrono::steady_clock::duration>(
                               std::chrono::duration<double>(std::max(0.0, timeout_sec)));
     while (!cancel_requested_.load()) {
+        if (action && !action->handoff_complete_file.empty() &&
+            !action->handoff_release_file.empty() &&
+            supervisor_platform_->file_exists(action->handoff_complete_file + ".input_loss")) {
+            if (!touchFile(action->handoff_release_file, error_message)) return false;
+            handoff_release_sent_.store(true);
+            logActionEvent("input_loss_before_userctrl", *action, "walkrun_remains_owner");
+            error_message = "required live input was lost before UserCtrl handoff";
+            return false;
+        }
         const pid_t pid = running_pid_.load();
         if (pid > 0) {
             action_go::runtime::SupervisorProcessResult process_result;
@@ -2212,6 +2456,7 @@ std::string MotionActionController::expandCommandTemplate(const ActionConfig& ac
     replaceAll(command, "{payload_event_log}", action.payload_event_log);
     replaceAll(command, "{supervisor_event_log}", action.supervisor_event_log);
     replaceAll(command, "{event_log_arg}", action.event_log_arg);
+    if (!command.empty() && !action.command_topic.empty()) command += " --cmd-topic " + shellQuote(action.command_topic);
     return command;
 }
 

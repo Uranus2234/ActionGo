@@ -1,6 +1,7 @@
 #include "action_go/runtime/signal_file.h"
 #include "action_go/runtime/log_provenance.h"
 #include "generic_policy_runtime_internal.h"
+#include "action_go/runtime/input_loss.h"
 
 namespace action_go::runtime::generic_policy_runtime {
 
@@ -1061,6 +1062,18 @@ int run_generic_policy_runtime(int argc, char** argv, GenericPolicyRuntimeScope 
     try {
       player.run();
       player.log_process_exit(true, "ok");
+    } catch (const action_go::runtime::InputLoss& e) {
+      try {
+        if (action_go::runtime::request_input_loss_walkrun(e.what())) {
+          player.log_process_exit(true, "input_loss_walkrun");
+          return 0;
+        }
+      } catch (const std::exception& handoff_error) {
+        std::cerr << generic_policy_runtime::player_log_prefix() << " ERROR: " << handoff_error.what() << std::endl;
+      }
+      player.log_process_exit(false, e.what());
+      player.emergency_stop_after_error();
+      throw;
     } catch (...) {
       try {
         throw;

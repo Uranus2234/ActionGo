@@ -1,6 +1,7 @@
 #include "action_go/runtime/signal_file.h"
 #include "action_go/runtime/command_timing.h"
 #include "action_go/runtime/activation_blend.h"
+#include "action_go/runtime/input_loss.h"
 #include "action_go/runtime/async_trace_writer.h"
 #include "action_go/runtime/command_safety_filter.h"
 #include "action_go/runtime/depth_image_preprocessor.h"
@@ -644,10 +645,9 @@ class RealSenseDepthSource final : public DepthSource {
 
   std::vector<float> observation() override {
     std::lock_guard<std::mutex> lk(mtx_);
-    if (args_.variant == "php" && (frames_.empty() ||
-        std::chrono::duration<double>(std::chrono::steady_clock::now() - last_time_).count() > args_.depth_camera_timeout_sec))
-      throw std::runtime_error("PHP RealSense depth stream is missing or stale");
-    if (frames_.empty()) return std::vector<float>(static_cast<size_t>(cfg_.num_frames * cfg_.depth_h * cfg_.depth_w), 0.f);
+    if (frames_.empty() ||
+        std::chrono::duration<double>(std::chrono::steady_clock::now() - last_time_).count() > args_.depth_camera_timeout_sec)
+      throw action_go::runtime::InputLoss("depth stream missing or stale");
     std::vector<float> out;
     out.reserve(static_cast<size_t>(cfg_.num_frames * cfg_.depth_h * cfg_.depth_w));
     for (int idx : indices_) {
@@ -1405,10 +1405,10 @@ class UnitreeDDS {
   void publish(const std::vector<float>& target, const std::vector<float>& kp, const std::vector<float>& kd,
                bool allow_stale_state = false, bool active_command = true,
                bool bypass_activation = false,
-               action_go::runtime::CommandTiming timing = {}) {
+               action_go::runtime::CommandTiming timing = {}, bool damping_command = false) {
     if (!publish_enabled_ || !publisher_) return;
     std::lock_guard<std::mutex> publish_lock(publish_mtx_);
-    if (!active_command && args_.experimental_no_prestart_hold) {
+    if (!active_command && !damping_command && args_.experimental_no_prestart_hold) {
       if (!prestart_hold_suppressed_logged_) {
         prestart_hold_suppressed_logged_ = true;
         event_log_.log("prestart_hold_suppressed",
@@ -1547,7 +1547,7 @@ class UnitreeDDS {
     auto s = snapshot();
     std::vector<float> kp(kNumJoints, 0.f), kd(kNumJoints, 3.f);
     for (int i=0;i<20;++i) {
-      publish(s.q_sim, kp, kd, true, false);
+      publish(s.q_sim, kp, kd, true, false, false, {}, true);
       std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
   }
@@ -1560,7 +1560,7 @@ class UnitreeDDS {
         !std::all_of(imu.gyroscope().begin(), imu.gyroscope().end(), finite)) return;
     float norm_squared = 0.f;
     for (float value : imu.quaternion()) norm_squared += value * value;
-    if (args_.variant == "php" && (norm_squared < 0.5f || norm_squared > 1.5f)) return;
+    if (norm_squared < 0.5f || norm_squared > 1.5f) return;
     {
       std::lock_guard<std::mutex> lk(mtx_);
       torso_quat_ = imu.quaternion();
@@ -1715,7 +1715,23 @@ class Runtime {
       if (args_.duration_sec > 0 && std::chrono::duration<double>(std::chrono::steady_clock::now()-start).count() >= args_.duration_sec) break;
       auto t0=std::chrono::steady_clock::now(); RobotState s = dds ? dds->snapshot() : fake_state();
       action_go::runtime::begin_command_timing(s.recv_stamp, s.seq);
-      Command cmd = joystick_command(s.wireless_remote, args_); auto depth = depth_->observation(); auto action = policy_.infer(s, cmd, depth); auto target = policy_.action_to_target(action, s); target = limit_target_rate(target, s.q_sim);
+      std::vector<float> depth;
+      try {
+        depth = depth_->observation();
+        if (!depth_gate_.check(true, "depth stream stale")) continue;
+        last_depth_ = depth;
+      } catch (const std::exception& e) {
+        depth_gate_.check(false, e.what());
+        if (last_depth_.empty()) continue;
+        depth = last_depth_;
+      }
+      RobotState observed = s;
+      if (args_.use_torso_imu) {
+        const bool torso_fresh = s.torso_imu_connected &&
+            s.torso_imu_age_ms <= args_.torso_imu_timeout_sec * 1000.0;
+        if (!torso_gate_.check(torso_fresh, "torso IMU stale")) continue;
+      }
+      Command cmd = joystick_command(observed.wireless_remote, args_); auto action = policy_.infer(observed, cmd, depth); auto target = policy_.action_to_target(action, observed); target = limit_target_rate(target, observed.q_sim);
       update_stats(s, action, target); set_latest(target, policy_.kp(), policy_.kd(), action_go::runtime::finish_command_timing());
       const double ms=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-t0).count(); ++count; avg += (ms-avg)/count; mx=std::max(mx,ms);
       if (count % std::max(1,args_.stats_interval)==0) {
@@ -2182,11 +2198,13 @@ class Runtime {
     });
     std::cout << "[generic_sensor_policy_player][" << args_.variant << "] start real DDS depth_source=" << args_.depth_source << " hz=" << args_.hz << " command_source=" << args_.command_source << " target_rate_limit=" << args_.target_rate_limit << " prestart=" << (prestart_handoff?"true":"false") << "\n";
     const auto start=std::chrono::steady_clock::now(); while(!g_stop_requested.load()) { if(args_.duration_sec>0 && std::chrono::duration<double>(std::chrono::steady_clock::now()-start).count()>=args_.duration_sec) break; std::this_thread::sleep_for(std::chrono::milliseconds(50)); }
-    g_stop_requested.store(true); publish_stop_.store(true); if(inf.joinable()) inf.join(); if(pub.joinable()) pub.join(); if(!args_.no_damping_on_stop) dds_->publish_damping_for_stop(); if(dds_->safety_failed()) throw std::runtime_error("CommandSafetyFilter stopped Instinct publishing"); if(inference_failed.load()) throw std::runtime_error("inference loop failed: " + inference_error); event_log_.log("runtime_metrics", {event_string("player", "generic_sensor_policy_player"), event_string("template", "depth_conditioned_actor"), event_string("variant", args_.variant), event_int("publish_count", publish_count_.load()), event_int("policy_deadline_miss", policy_deadline_miss_.load()), event_int("publish_deadline_miss", publish_deadline_miss_.load()), event_number("max_publish_interval_ms", max_publish_interval_ms_.load()), event_string("phase", "final")}); std::cout << "[generic_sensor_policy_player][" << args_.variant << "] completed\n";
+    g_stop_requested.store(true); publish_stop_.store(true); if(inf.joinable()) inf.join(); if(pub.joinable()) pub.join(); if(inference_failed.load()) throw action_go::runtime::InputLoss(inference_error); if(!args_.no_damping_on_stop) dds_->publish_damping_for_stop(); if(dds_->safety_failed()) throw std::runtime_error("CommandSafetyFilter stopped Instinct publishing"); event_log_.log("runtime_metrics", {event_string("player", "generic_sensor_policy_player"), event_string("template", "depth_conditioned_actor"), event_string("variant", args_.variant), event_int("publish_count", publish_count_.load()), event_int("policy_deadline_miss", policy_deadline_miss_.load()), event_int("publish_deadline_miss", publish_deadline_miss_.load()), event_number("max_publish_interval_ms", max_publish_interval_ms_.load()), event_string("phase", "final")}); std::cout << "[generic_sensor_policy_player][" << args_.variant << "] completed\n";
   }
   void check_preflight() { if (!args_.fail_on_bad_input) return; std::vector<std::string> fail; if(stats_.count<=0) fail.push_back("no samples"); if(stats_.max_tilt>args_.max_preflight_tilt_deg) fail.push_back("tilt too large"); if(stats_.max_dq>args_.max_preflight_dq) fail.push_back("dq too large"); if(stats_.max_action_abs>args_.max_preflight_action_abs) fail.push_back("action too large"); if(stats_.max_target_err>args_.max_preflight_target_err) fail.push_back("target error too large"); if(args_.depth_source=="realsense" && depth_->frame_count()<args_.min_preflight_rs_frames) fail.push_back("not enough RealSense frames"); if(!fail.empty()) throw std::runtime_error("preflight sanity failed: " + fail.front()); }
 
   Args args_; DepthActorPolicy policy_; std::unique_ptr<DepthActorPolicy> stand_policy_; std::unique_ptr<DepthSource> depth_; std::unique_ptr<UnitreeDDS> dds_; RunStats stats_;
+  action_go::runtime::TwoFrameInputGate depth_gate_, torso_gate_;
+  std::vector<float> last_depth_;
   RuntimeEventLogger event_log_;
   std::atomic<long long> policy_deadline_miss_{0};
   std::atomic<long long> publish_count_{0};
@@ -2207,6 +2225,11 @@ int run_instinct_parkour_runtime(int argc, char** argv) {
     if (args.depth_camera_check_only) return run_depth_camera_check_only(args);
     Runtime rt(std::move(args));
     return rt.run();
+  }
+  catch (const action_go::runtime::InputLoss& e) {
+    if (action_go::runtime::request_input_loss_walkrun(e.what())) return 0;
+    std::cerr << "[generic_sensor_policy_player] ERROR: " << e.what() << "\n";
+    return 1;
   }
   catch (const std::exception& e) { std::cerr << "[generic_sensor_policy_player] ERROR: " << e.what() << "\n"; return 1; }
 }

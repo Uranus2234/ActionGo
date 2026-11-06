@@ -2,6 +2,7 @@
 #include "action_go/runtime/async_command_publisher.h"
 #include "action_go/runtime/command_safety_filter.h"
 #include "action_go/runtime/input_freshness.h"
+#include "action_go/runtime/input_loss.h"
 #include "action_go/runtime/network_command.h"
 #include "action_go/runtime/npy_reader.h"
 #include "action_go/runtime/onnx_runner.h"
@@ -551,6 +552,19 @@ void test_realtime_input_stale_gate() {
   expect_true("default stale behavior uses default", d.action == StaleDecisionAction::kUseDefault);
   d = gate.decide(SampleFreshness::kMissing, StaleBehavior::kStop, 0.5, t0);
   expect_true("stop stale behavior stops", d.action == StaleDecisionAction::kStop);
+}
+
+void test_two_frame_input_gate() {
+  action_go::runtime::TwoFrameInputGate gate;
+  expect_true("valid input resets loss counter", gate.check(true, "camera lost"));
+  expect_true("first invalid input is held", !gate.check(false, "camera lost"));
+  bool stopped = false;
+  try {
+    gate.check(false, "camera lost");
+  } catch (const action_go::runtime::InputLoss&) {
+    stopped = true;
+  }
+  expect_true("second invalid input requests fallback", stopped);
 }
 
 void test_policy_contract() {
@@ -1232,6 +1246,7 @@ int main() {
     test_reference_endpoint_boundary();
     test_onnx_runner();
     test_realtime_input_stale_gate();
+    test_two_frame_input_gate();
     test_sonic_policy_helpers();
     test_supermimic_policy_helpers();
     test_allmimic_policy_helpers();

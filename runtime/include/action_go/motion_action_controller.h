@@ -4,6 +4,7 @@
 #include "action_go/runtime/control_mode_backend.h"
 #include "action_go/runtime/event_logger.h"
 #include "action_go/runtime/supervisor_platform.h"
+#include "action_go/runtime/policy_command_relay.h"
 
 #include <atomic>
 #include <csignal>
@@ -42,6 +43,7 @@ public:
         std::string params;
         std::string trajectory;
         std::string command;
+        std::string command_topic;
         // Directory of the YAML file where this action was declared.  Used so
         // resource paths in split action files can be relative to that file.
         std::string resource_base_dir;
@@ -111,6 +113,12 @@ public:
     std::string controlState() const;
 
     bool startAction(const std::string& action_name);
+    void setCommandRelay(std::shared_ptr<action_go::runtime::PolicyCommandRelay> relay);
+    bool supportsPreparedHandoff(const std::string& action_name) const;
+    bool prepareActionForHandoff(const std::string& action_name);
+    bool preparedActionReady();
+    bool commitPreparedAction();
+    void discardPreparedAction();
     Status update();
     void cancel();
     // Safety recovery path: stop the current UserCtrl payload without first
@@ -133,6 +141,13 @@ public:
 private:
     bool loadConfig(const std::string& config_path);
     void workerMain(ActionConfig action);
+    void workerMainImpl(ActionConfig action);
+    void monitorAction(const ActionConfig& action, bool payload_prestarted);
+    void prepareHandshake(ActionConfig& action, std::string& directory);
+    void prepareCommandRoute(ActionConfig& action);
+    bool waitForCommandRoute(const ActionConfig& action, std::string& error);
+    bool preparedActionReadyLocked();
+    void discardPreparedActionLocked();
     bool switchToUserCtrl(std::string& error_message, bool publish_prearm = true);
     bool switchBackToOfficial(std::string& error_message,
                               const std::string& mode);
@@ -147,7 +162,8 @@ private:
     bool startCommandStringAsync(const std::string& command, std::string& error_message);
     bool waitRunningCommand(const std::string& command, std::string& error_message,
                             const ActionConfig* action = nullptr);
-    bool waitForFile(const std::string& path, double timeout_sec, std::string& error_message);
+    bool waitForFile(const std::string& path, double timeout_sec, std::string& error_message,
+                     const ActionConfig* action = nullptr);
     bool touchFile(const std::string& path, std::string& error_message);
     void prepareActionEventLog(ActionConfig& action);
     void logActionEvent(const std::string& event, const ActionConfig& action,
@@ -177,6 +193,10 @@ private:
 
     std::shared_ptr<action_go::runtime::ControlModeBackend> control_backend_;
     std::shared_ptr<action_go::runtime::SupervisorPlatform> supervisor_platform_;
+    std::shared_ptr<action_go::runtime::PolicyCommandRelay> command_relay_;
+    ActionConfig prepared_action_;
+    pid_t prepared_pid_{-1};
+    std::string prepared_directory_;
     std::filesystem::path config_dir_;
     std::filesystem::path action_go_root_;
     std::string network_interface_override_;

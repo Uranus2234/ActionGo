@@ -2,6 +2,7 @@
 #include "action_go/runtime/network_command.h"
 #include "action_go/runtime/bridge_gate.h"
 #include "action_go/runtime/bridge_risk_monitor.h"
+#include "action_go/runtime/stand_confirmation.h"
 #include "action_go/runtime/runtime_session.h"
 
 #include <unitree/idl/hg/LowState_.hpp>
@@ -456,6 +457,7 @@ struct Args {
   std::string b_action{"walkrun"};
   int auto_switch_step{-1};
   bool bridge_enabled{true};
+  bool stand_bridge{false};
   RemoteConfig remote;
 };
 
@@ -635,6 +637,8 @@ Args parseArgs(int argc, char** argv) {
     else if (k == "--b-action") args.b_action = need("--b-action");
     else if (k == "--auto-switch-step") args.auto_switch_step = std::stoi(need("--auto-switch-step"));
     else if (k == "--bridge-disable") args.bridge_enabled = false;
+    else if (k == "--stand-bridge") args.stand_bridge = true;
+    else if (k == "--no-stand-bridge") args.stand_bridge = false;
     else if (k == "--safety-enable") { cli_safety_enable_set = true; cli_safety_enable = true; }
     else if (k == "--safety-disable") { cli_safety_enable_set = true; cli_safety_enable = false; }
     else if (k == "--safety-auto-recovery") { cli_auto_recovery_set = true; cli_auto_recovery = true; }
@@ -690,6 +694,9 @@ Args parseArgs(int argc, char** argv) {
           << "  --shell-damping-combo Select+Start --shell-walkrun-combo R2+A\n"
           << "  --lie-down-combo L2+Down --lie-action lie_down_beyondmimic\n\n"
           << "Startup options:\n"
+          << "  --stand-bridge            enable BFM stand between explicit policy switches; no risk model\n"
+          << "  --no-stand-bridge         disable BFM stand bridge (default)\n"
+          << "  R2+A                      return to WALKRUN through BFM stand while armed\n"
           << "  --startup-delay-sec 10     wait after remote ready before main loop/safety\n\n"
           << "Experiment logging:\n"
           << "  --event-log /tmp/actiongo_supervisor.jsonl  write supervisor JSONL events\n\n"
@@ -714,6 +721,9 @@ Args parseArgs(int argc, char** argv) {
   appendDefaultRemoteMapPath(args.remote_map);
   if (args.risk_model.empty()) {
     if (const char* model = std::getenv("ACTION_GO_RISK_MODEL")) args.risk_model = model;
+  }
+  if (args.stand_bridge && !args.risk_model.empty()) {
+    throw std::runtime_error("--stand-bridge cannot be combined with a risk model");
   }
   if (args.event_log.empty()) {
     if (const char* env_log = std::getenv("ACTION_GO_EVENT_LOG")) {
@@ -917,6 +927,15 @@ int main(int argc, char** argv) {
     int bridge_step = 0;
     bool bridge_normal_pending = false;
     bool bridge_emergency_pending = false;
+    std::string stand_target;
+    bool stand_preparing = false;
+    auto stand_deadline = std::chrono::steady_clock::now();
+    action_go::runtime::StandConfirmation stand_confirmation;
+    if (args.stand_bridge) {
+      if (!controller.hasAction("bfm_zero_stand")) throw std::runtime_error("stand bridge requires bfm_zero_stand");
+      if (!args.dry_run) controller.setCommandRelay(action_go::runtime::make_policy_command_relay());
+      runtime_session.notice("INFO", "Stand bridge enabled | " + comboName(args.remote.shell_walkrun_combo) + " -> WALKRUN");
+    }
     if (args.bridge_enabled && !args.risk_model.empty()) {
       bridge_risk = std::make_unique<action_go::runtime::BridgeRiskMonitor>(
           action_go::runtime::BridgeRiskMonitor::Config{args.risk_model});
@@ -926,6 +945,37 @@ int main(int argc, char** argv) {
     }
     std::string selected_safety_action = args.remote.safety.action;
     bool logging_failure_reported = false;
+
+    auto requestStandBridge = [&](const std::string& target) -> bool {
+      if (!args.stand_bridge || !stand_target.empty() || !shell_armed || lie_action_active ||
+          safety_state != SafetyState::Normal ||
+          (target != "walkrun" && !controller.hasAction(target)) || target == "bfm_zero_stand") return false;
+      if (!controller.supportsPreparedHandoff("bfm_zero_stand") ||
+          (target != "walkrun" && !controller.supportsPreparedHandoff(target))) {
+        runtime_session.notice("WARN", "Stand bridge requires a supported prestart target: " + target);
+        return false;
+      }
+      if (args.dry_run) {
+        runtime_session.notice("INFO", "DRY_RUN bridge: " + controller.currentAction() + " -> bfm_zero_stand -> " + target);
+        return true;
+      }
+      if (controller.currentAction() != "bfm_zero_stand" || !controller.isRunning()) {
+        if (!controller.prepareActionForHandoff("bfm_zero_stand")) {
+          runtime_session.notice("WARN", "Stand bridge unavailable: " + controller.lastError());
+          return false;
+        }
+        stand_preparing = true;
+      } else {
+        stand_preparing = false;
+        if (target != "walkrun" && !controller.prepareActionForHandoff(target)) return false;
+      }
+      stand_target = target;
+      stand_confirmation.reset();
+      stand_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(15);
+      scheduled_action.clear();
+      runtime_session.notice("INFO", "Bridge: " + controller.currentAction() + " -> bfm_zero_stand -> " + target);
+      return true;
+    };
 
     auto requestAction = [&](const std::string& action,
                              std::chrono::steady_clock::time_point when,
@@ -942,6 +992,10 @@ int main(int argc, char** argv) {
         const auto wait_ms = std::chrono::duration_cast<std::chrono::milliseconds>(when - now).count();
         std::cout << "[action_go_remote_test] scheduled action from " << source
                   << ": " << action << " in " << wait_ms << " ms" << std::endl;
+        return;
+      }
+      if (args.stand_bridge && action != "bfm_zero_stand") {
+        requestStandBridge(action);
         return;
       }
       if (controller.isRunning()) {
@@ -985,6 +1039,10 @@ int main(int argc, char** argv) {
     };
 
     auto startSafetyRecovery = [&](double tilt_deg) {
+      stand_target.clear();
+      stand_preparing = false;
+      stand_confirmation.reset();
+      controller.discardPreparedAction();
       scheduled_action.clear();
       fall_timer_active = false;
       recover_timer_active = false;
@@ -1102,6 +1160,10 @@ int main(int argc, char** argv) {
     };
 
     auto resetSafetyState = [&]() {
+      stand_target.clear();
+      stand_preparing = false;
+      stand_confirmation.reset();
+      controller.discardPreparedAction();
       safety_state = SafetyState::Normal;
       fall_timer_active = false;
       recover_timer_active = false;
@@ -1191,6 +1253,10 @@ int main(int argc, char** argv) {
     };
 
     auto enterShellWalkrun = [&](const std::string& source) {
+      if (args.stand_bridge && shell_armed && controller.isRunning()) {
+        requestStandBridge("walkrun");
+        return;
+      }
       std::cerr << "[action_go_remote_test][shell] " << source
                 << ": switch to WALKRUN and return to SHELL_IDLE (program stays alive)"
                 << std::endl;
@@ -1360,7 +1426,60 @@ int main(int argc, char** argv) {
         enterShellDamping("remote " + comboName(args.remote.emergency_combo));
       }
 
-      if (shell_armed) {
+      if (!stand_target.empty()) {
+        const auto now = std::chrono::steady_clock::now();
+        const auto bridge_status = stand_preparing ? controller.update()
+                                                    : MotionActionController::Status::Running;
+        if (now >= stand_deadline || controller.hasError() ||
+            (stand_preparing && bridge_status != MotionActionController::Status::Running &&
+             bridge_status != MotionActionController::Status::Idle)) {
+          const bool was_preparing = stand_preparing;
+          resetSafetyState();
+          runtime_session.notice("ERROR", "Stand bridge failed or timed out");
+          if (!was_preparing) {
+            shell_armed = false;
+            controller.dampingStop();
+          }
+        } else if (stand_preparing && controller.preparedActionReady()) {
+          if (controller.commitPreparedAction()) {
+            stand_preparing = false;
+            active_action = "bfm_zero_stand";
+            last_status = MotionActionController::Status::Running;
+            runtime_session.notice("INFO", "Running bfm_zero_stand | bridge");
+            if (stand_target != "walkrun" && !controller.prepareActionForHandoff(stand_target)) {
+              runtime_session.notice("ERROR", "Bridge target unavailable: " + controller.lastError());
+              resetSafetyState();
+              shell_armed = false;
+              controller.dampingStop();
+            }
+          }
+        } else if (!stand_preparing) {
+          const auto imu = remote.imu();
+          const auto state = remote.riskState();
+          double gyro_squared = 0.0;
+          for (float value : state.gyro) gyro_squared += static_cast<double>(value) * value;
+          const bool ready = stand_confirmation.update(
+              imu.valid && controller.isRunning() && controller.currentAction() == "bfm_zero_stand",
+              imu.tilt_deg * kPi / 180.0, std::sqrt(gyro_squared), imu.stamp, now);
+          if (ready && (stand_target == "walkrun" || controller.preparedActionReady())) {
+            const auto target = stand_target;
+            const bool ok = target == "walkrun" ? controller.stopAndSwitchToOfficial("walkrun") :
+                controller.commitPreparedAction();
+            resetSafetyState();
+            if (ok) {
+              active_action = target == "walkrun" ? "" : target;
+              shell_armed = target != "walkrun";
+              runtime_session.notice("INFO", "Bridge complete -> " + target);
+              last_status = controller.update();
+            } else {
+              shell_armed = false;
+              controller.dampingStop();
+              runtime_session.notice("ERROR", "Bridge handoff failed; DAMPING");
+            }
+          }
+        }
+      }
+      if (shell_armed && (stand_target.empty() || stand_preparing)) {
         safetyTick();
       }
       bridgeTick();
@@ -1371,7 +1490,7 @@ int main(int argc, char** argv) {
         requestAction(action, std::chrono::steady_clock::now(), "scheduled");
       }
 
-      if (shell_armed && !controller.isRunning()) {
+      if (shell_armed && stand_target.empty() && (!controller.isRunning() || args.stand_bridge)) {
         for (const auto& binding : args.remote.bindings) {
           if (comboRising(now_mask, prev_mask, binding.combo)) {
             requestAction(binding.action, std::chrono::steady_clock::now(), "remote");

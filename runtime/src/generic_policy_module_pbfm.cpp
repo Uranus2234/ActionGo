@@ -1,4 +1,5 @@
 #include "generic_policy_runtime_internal.h"
+#include "action_go/runtime/input_loss.h"
 
 #include <nlohmann/json.hpp>
 
@@ -74,31 +75,43 @@ void GenericPolicyPlayer::check_only_pbfm() {
 
 std::vector<float> GenericPolicyPlayer::pbfm_depth_observation() {
     if (pbfm_spec_.depth_source == "file") return pbfm_file_depth_;
+    std::vector<float> depth;
+    try {
     if (pbfm_spec_.depth_source == "realsense") {
       if (!pbfm_realsense_) {
         pbfm_realsense_ = std::make_unique<RealSenseDepthStream>(pbfm_spec_.realsense);
       }
-      return pbfm_depth_history_.append(pbfm_realsense_->observation());
-    }
+      depth = pbfm_depth_history_.append(pbfm_realsense_->observation());
+    } else {
 #ifdef ACTION_GO_HAS_ZMQ
-    if (!pbfm_depth_stream_) {
-      pbfm_depth_stream_ = std::make_unique<SharedMemoryDepthStream>(pbfm_spec_.shm_name,
-          kPbfmProtocolDepthFrames * kPbfmProtocolDepthHeight * kPbfmProtocolDepthWidth,
-          pbfm_spec_.depth_timeout_sec);
-    }
-    auto depth = pbfm_depth_stream_->observation();
-    if (pbfm_depth_stream_->age_sec() > pbfm_spec_.depth_timeout_sec) {
-      throw std::runtime_error("P-BFM depth stream is stale");
-    }
-    for (float value : depth) {
-      if (value < 0.f || value > 1.f) {
-        throw std::runtime_error("P-BFM depth must be normalized float32 in [0,1]");
+      if (!pbfm_depth_stream_) {
+        pbfm_depth_stream_ = std::make_unique<SharedMemoryDepthStream>(pbfm_spec_.shm_name,
+            kPbfmProtocolDepthFrames * kPbfmProtocolDepthHeight * kPbfmProtocolDepthWidth,
+            pbfm_spec_.depth_timeout_sec);
       }
-    }
-    return depth;
+      depth = pbfm_depth_stream_->observation();
+      if (pbfm_depth_stream_->age_sec() > pbfm_spec_.depth_timeout_sec) {
+        throw std::runtime_error("depth stream is stale");
+      }
+      for (float value : depth) {
+        if (value < 0.f || value > 1.f) throw std::runtime_error("depth is outside [0,1]");
+      }
 #else
-    throw std::runtime_error("P-BFM live depth requires a build with libzmq");
+      throw std::runtime_error("P-BFM live depth requires a build with libzmq");
 #endif
+    }
+    pbfm_depth_failures_ = 0;
+    pbfm_last_depth_ = depth;
+    return depth;
+    } catch (const action_go::runtime::InputLoss&) {
+      throw;
+    } catch (const std::exception& error) {
+      if (++pbfm_depth_failures_ >= 2) {
+        throw action_go::runtime::InputLoss(std::string("P-BFM depth stream lost: ") + error.what());
+      }
+      if (pbfm_last_depth_.empty()) throw action_go::runtime::InputLoss(error.what());
+      return pbfm_last_depth_;
+    }
   }
 
 std::vector<float> GenericPolicyPlayer::infer_pbfm(const RobotState& state, const BfmObservation& observation) {
@@ -111,7 +124,17 @@ std::vector<float> GenericPolicyPlayer::infer_pbfm(const RobotState& state, cons
                                      reference_step, pbfm_initial_yaw_, current_yaw);
     std::string motion_state = "context";
     if (pbfm_context_stream_) {
-      context = pbfm_context_stream_->current().aligned(pbfm_reference_start_yaw_, pbfm_initial_yaw_, current_yaw);
+      try {
+        context = pbfm_context_stream_->current();
+        pbfm_context_failures_ = 0;
+        pbfm_last_context_ = context;
+      } catch (const std::exception& error) {
+        if (++pbfm_context_failures_ >= 2) {
+          throw action_go::runtime::InputLoss(std::string("P-BFM realtime context lost: ") + error.what());
+        }
+        context = pbfm_last_context_;
+      }
+      context = context.aligned(pbfm_reference_start_yaw_, pbfm_initial_yaw_, current_yaw);
       motion_state = "pico_realtime";
     }
     std::array<float, 3> raw_command_axes{0.f, 0.f, 0.f};

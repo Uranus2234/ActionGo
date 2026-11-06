@@ -1,5 +1,6 @@
 #include "action_go/runtime/activation_blend.h"
 #include "action_go/runtime/command_safety_filter.h"
+#include "action_go/runtime/input_loss.h"
 #include "action_go/runtime/event_logger.h"
 #include "action_go/runtime/command_timing.h"
 #include "action_go/runtime/policy_protocol.h"
@@ -492,6 +493,9 @@ class UdpObjectSource final : public ObjectSource {
   static bool parse_packet(const char* data, ssize_t n, std::array<float, 7>& out) {
     if (n == static_cast<ssize_t>(7 * sizeof(float))) {
       std::memcpy(out.data(), data, 7 * sizeof(float));
+      if (!std::all_of(out.begin(), out.end(), [](float value) { return std::isfinite(value); })) return false;
+      const float norm = std::sqrt(out[3] * out[3] + out[4] * out[4] + out[5] * out[5] + out[6] * out[6]);
+      if (!(norm > 1e-6f)) return false;
       auto q = normalize_quat({out[3], out[4], out[5], out[6]});
       out[3] = q[0]; out[4] = q[1]; out[5] = q[2]; out[6] = q[3];
       return true;
@@ -500,8 +504,10 @@ class UdpObjectSource final : public ObjectSource {
     for (char& c : s) if (c == ',' || c == '[' || c == ']' || c == ';') c = ' ';
     std::stringstream ss(s);
     for (float& v : out) {
-      if (!(ss >> v)) return false;
+      if (!(ss >> v) || !std::isfinite(v)) return false;
     }
+    const float norm = std::sqrt(out[3] * out[3] + out[4] * out[4] + out[5] * out[5] + out[6] * out[6]);
+    if (!(norm > 1e-6f)) return false;
     auto q = normalize_quat({out[3], out[4], out[5], out[6]});
     out[3] = q[0]; out[4] = q[1]; out[5] = q[2]; out[6] = q[3];
     return true;
@@ -1008,9 +1014,9 @@ class UnitreeDDS {
   void publish(const std::vector<float>& q, const std::vector<float>& kp, const std::vector<float>& kd,
                bool allow_stale_state = false, bool active_command = true,
                bool bypass_activation = false,
-               action_go::runtime::CommandTiming timing = {}) {
+               action_go::runtime::CommandTiming timing = {}, bool damping_command = false) {
     if (args_.dry_run || !publisher_) return;
-    if (!active_command && args_.experimental_no_prestart_hold) {
+    if (!active_command && !damping_command && args_.experimental_no_prestart_hold) {
       if (!prestart_hold_suppressed_logged_) {
         prestart_hold_suppressed_logged_ = true;
         event_log_.log("prestart_hold_suppressed",
@@ -1131,7 +1137,7 @@ class UnitreeDDS {
     const auto s = snapshot();
     if (s.q.size() < kNumJoints) return;
     std::vector<float> kp(kNumJoints, 0.f), kd(kNumJoints, 3.f);
-    publish(s.q, kp, kd, true, false);
+    publish(s.q, kp, kd, true, false, false, {}, true);
   }
   bool safety_failed() const { return safety_failed_.load(); }
 
@@ -1144,19 +1150,21 @@ class UnitreeDDS {
     const auto gyro = low.imu_state().gyroscope();
     if (!std::all_of(quat.begin(), quat.end(), finite) ||
         !std::all_of(gyro.begin(), gyro.end(), finite)) return;
-    std::lock_guard<std::mutex> lk(mtx_);
-    state_.mode_machine = static_cast<int>(low.mode_machine());
-    state_.recv_stamp = std::chrono::steady_clock::now();
-    state_.seq = sequence_.fetch_add(1, std::memory_order_relaxed) + 1;
-    state_.quat = low.imu_state().quaternion();
-    state_.gyro = low.imu_state().gyroscope();
-    state_.q.assign(kNumJoints, 0.f);
-    state_.dq.assign(kNumJoints, 0.f);
+    RobotState next;
+    next.mode_machine = static_cast<int>(low.mode_machine());
+    next.quat = low.imu_state().quaternion();
+    next.gyro = low.imu_state().gyroscope();
+    next.q.assign(kNumJoints, 0.f);
+    next.dq.assign(kNumJoints, 0.f);
     for (size_t i = 0; i < kNumJoints; ++i) {
-      state_.q[i] = low.motor_state()[i].q();
-      state_.dq[i] = low.motor_state()[i].dq();
-      if (!finite(state_.q[i]) || !finite(state_.dq[i])) return;
+      next.q[i] = low.motor_state()[i].q();
+      next.dq[i] = low.motor_state()[i].dq();
+      if (!finite(next.q[i]) || !finite(next.dq[i])) return;
     }
+    next.recv_stamp = std::chrono::steady_clock::now();
+    std::lock_guard<std::mutex> lk(mtx_);
+    next.seq = sequence_.fetch_add(1, std::memory_order_relaxed) + 1;
+    state_ = std::move(next);
     connected_.store(true);
   }
 
@@ -1328,6 +1336,7 @@ class SteadyTrayRunner {
               std::chrono::duration_cast<std::chrono::steady_clock::duration>(
                   std::chrono::duration<double>(1.0 / std::max(1, args_.hz)))
         : std::chrono::steady_clock::now();
+    unsigned invalid_pose_frames = 0;
     std::vector<float> target = preview_mode ? preview_target : dds.snapshot().q;
     if (target.size() < kNumJoints) target.assign(kNumJoints, 0.f);
     std::vector<float> from = target, to = target;
@@ -1412,11 +1421,16 @@ class SteadyTrayRunner {
         action_go::runtime::begin_command_timing(s.recv_stamp, s.seq);
         if (s.q.size() < kNumJoints || s.dq.size() < kNumJoints) throw std::runtime_error("lowstate motor count too small");
         ObjectPose op = object_source_->latest();
-        if (!op.valid || op.age_sec > args_.pose_timeout_sec) {
-          if (args_.require_tag || args_.exit_on_tag_lost) {
-            throw std::runtime_error("object pose missing/stale: " + object_source_->stats());
+        if (args_.object_source != "zero" && (!op.valid || op.age_sec > args_.pose_timeout_sec)) {
+          if (++invalid_pose_frames >= 2) {
+            throw action_go::runtime::InputLoss("object pose missing/stale: " + object_source_->stats());
           }
+          next_infer += std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+              std::chrono::duration<double>(1.0 / std::max(1, args_.hz)));
+          std::this_thread::sleep_until(next_infer);
+          continue;
         }
+        invalid_pose_frames = 0;
         std::vector<float> next_target;
         bool next_active = true;
         if (!preview_mode && infer_count < args_.warmup_steps) {
@@ -1526,6 +1540,12 @@ int run_steadytray_runtime(int argc, char** argv) {
     runner.run();
     return 0;
   } catch (const std::exception& e) {
+    try {
+      if (const auto* lost = dynamic_cast<const action_go::runtime::InputLoss*>(&e);
+          lost && action_go::runtime::request_input_loss_walkrun(lost->what())) return 0;
+    } catch (const std::exception& handoff_error) {
+      std::cerr << "[generic_sensor_policy_player][steadytray] ERROR: " << handoff_error.what() << std::endl;
+    }
     std::cerr << "[generic_sensor_policy_player][steadytray] ERROR: " << e.what() << std::endl;
     return 1;
   }

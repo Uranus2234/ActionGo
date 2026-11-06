@@ -1,6 +1,7 @@
 #include "action_go/motion_action_controller.h"
 #include "action_go/runtime/control_mode_backend.h"
 #include "action_go/runtime/signal_file.h"
+#include "action_go/runtime/stand_confirmation.h"
 #include <nlohmann/json.hpp>
 #include <sys/stat.h>
 
@@ -10,6 +11,7 @@
 #include <fstream>
 #include <iostream>
 #include <iterator>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <stdexcept>
@@ -118,6 +120,7 @@ class FakeSupervisorPlatform final : public SupervisorPlatform {
     }
     std::lock_guard<std::mutex> lock(mutex);
     current_time += duration;
+    if (duration >= std::chrono::milliseconds(300)) long_sleep_end = current_time;
   }
 
   bool file_exists(const std::string& path) override {
@@ -238,6 +241,7 @@ class FakeSupervisorPlatform final : public SupervisorPlatform {
   int terminate_calls{0};
   int completion_exit_code{0};
   TimePoint terminate_time{};
+  TimePoint long_sleep_end{};
   pid_t next_pid{10000};
 };
 
@@ -577,7 +581,7 @@ void test_configured_overlap_window_is_preserved() {
   expect(stop_result.load(), "configured-overlap stop succeeds");
   {
     std::lock_guard<std::mutex> lock(platform->mutex);
-    expect(platform->terminate_time == platform->current_time,
+    expect(platform->terminate_time >= platform->long_sleep_end,
            "configured-overlap terminates after overlap");
     expect(platform->terminate_calls == 1,
            "configured-overlap terminates payload once");
@@ -1044,6 +1048,114 @@ void test_command_hash_and_empty_placeholder() {
   expect(contents == "#kept", "quoted hash preserved and optional placeholder accepted");
 }
 
+class FakePolicyRelay final : public action_go::runtime::PolicyCommandRelay {
+ public:
+  void add(const std::string& topic) override {
+    std::lock_guard<std::mutex> lock(mutex);
+    topics.insert(topic);
+  }
+  bool ready(const std::string& topic) override {
+    std::lock_guard<std::mutex> lock(mutex);
+    return allow_ready.load() && topics.count(topic) != 0;
+  }
+  bool select(const std::string& topic) override {
+    std::lock_guard<std::mutex> lock(mutex);
+    if (!allow_ready.load() || !topics.count(topic)) return false;
+    selected = topic;
+    ++selections;
+    return true;
+  }
+  void release(const std::string& topic) override {
+    std::lock_guard<std::mutex> lock(mutex);
+    topics.erase(topic);
+    if (selected == topic) selected.clear();
+  }
+  std::mutex mutex;
+  std::unordered_set<std::string> topics;
+  std::string selected;
+  std::atomic<bool> allow_ready{true};
+  int selections{0};
+};
+
+void test_prepared_handoff_keeps_source_until_commit() {
+  TestFiles files("prepared");
+  {
+    std::ofstream output(files.config);
+    output << "actions:\n";
+    for (const auto& name : {"source", "target"}) {
+      output << "  " << name << ":\n"
+             << "    type: generic_policy\n"
+             << "    prestart_before_userctrl: true\n"
+             << "    switch_back: false\n"
+             << "    command: \"" << ACTION_GO_FAKE_PAYLOAD
+             << " --ready-file {ready_file} --start-file {start_file} --run-ms 10000\"\n";
+    }
+    output << "  unsupported:\n    type: external_command\n    prestart_before_userctrl: true\n"
+           << "    command: \"echo unsupported\"\n";
+  }
+  auto backend = std::make_shared<FakeControlModeBackend>();
+  auto relay = std::make_shared<FakePolicyRelay>();
+  MotionActionController controller;
+  expect(controller.init(backend, files.config.string()), "prepared init");
+  expect(controller.supportsPreparedHandoff("target"), "routed target supports handoff");
+  expect(!controller.supportsPreparedHandoff("missing"), "unknown target rejected");
+  expect(!controller.supportsPreparedHandoff("unsupported"), "unrouted player rejected");
+  controller.setCommandRelay(relay);
+  expect(controller.startAction("source"), "routed source starts");
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+  while (controller.update() != MotionActionController::Status::Running && std::chrono::steady_clock::now() < deadline) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(2));
+  }
+  expect(controller.update() == MotionActionController::Status::Running, "source is active");
+  relay->allow_ready.store(false);
+  expect(controller.prepareActionForHandoff("target"), "target prestarts");
+  expect(!controller.preparedActionReady(), "missing fresh command blocks readiness");
+  expect(!controller.commitPreparedAction(), "missing fresh command blocks commit");
+  expect(controller.currentAction() == "source" && controller.isRunning(), "source survives unready target");
+  relay->allow_ready.store(true);
+  const auto ready_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+  while (!controller.preparedActionReady() && std::chrono::steady_clock::now() < ready_deadline) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(2));
+  }
+  expect(controller.commitPreparedAction(), "prepared target commits");
+  expect(controller.currentAction() == "target" && controller.isRunning(), "target owns controller");
+  expect(backend->user_calls == 1 && backend->internal_calls == 0, "policy handoff stays in UserCtrl");
+  {
+    std::lock_guard<std::mutex> lock(relay->mutex);
+    expect(relay->topics.size() == 1 && !relay->selected.empty(), "only target route remains selected");
+  }
+  expect(controller.prepareActionForHandoff("source"), "prepare another target");
+  controller.discardPreparedAction();
+  expect(!controller.preparedActionReady(), "discard clears readiness");
+  expect(controller.currentAction() == "target" && controller.isRunning(), "discard leaves source running");
+  expect(controller.prepareActionForHandoff("source"), "prepare before damping");
+  controller.dampingStop();
+  expect(!controller.preparedActionReady(), "damping discards pending target");
+  expect(backend->damping_calls == 1 && !controller.isRunning(), "damping preempts handoff");
+  {
+    std::lock_guard<std::mutex> lock(relay->mutex);
+    expect(relay->topics.empty(), "damping releases all command routes");
+  }
+}
+
+void test_stand_confirmation_uses_fresh_distinct_samples() {
+  using Clock = std::chrono::steady_clock;
+  action_go::runtime::StandConfirmation gate;
+  auto now = Clock::now();
+  for (int index = 0; index < 4; ++index) {
+    now += std::chrono::milliseconds(20);
+    expect(!gate.update(true, 0.1, 0.1, now, now), "stand requires five samples");
+  }
+  expect(!gate.update(true, 0.1, 0.1, now, now), "duplicate cannot complete stand confirmation");
+  now += std::chrono::milliseconds(20);
+  expect(gate.update(true, 0.1, 0.1, now, now), "five fresh samples confirm stand");
+  expect(!gate.update(true, 0.1, 0.1, now, now + std::chrono::milliseconds(100)), "stale state resets stand");
+  expect(!gate.update(true, std::numeric_limits<double>::quiet_NaN(), 0.0, now, now), "NaN tilt rejected");
+  expect(!gate.update(true, 0.0, std::numeric_limits<double>::quiet_NaN(), now, now), "NaN gyro rejected");
+  expect(!gate.update(true, 0.20, 0.0, now, now), "tilt boundary rejected");
+  expect(!gate.update(true, 0.0, 0.30, now, now), "gyro boundary rejected");
+}
+
 }  // namespace
 
 int main() {
@@ -1073,6 +1185,8 @@ int main() {
   test_private_default_handshake();
   test_signal_files_reject_links();
   test_command_hash_and_empty_placeholder();
+  test_prepared_handoff_keeps_source_until_commit();
+  test_stand_confirmation_uses_fresh_distinct_samples();
   if (failures != 0) {
     std::cerr << "[motion_action_controller_test] failures=" << failures << '\n';
     return 1;

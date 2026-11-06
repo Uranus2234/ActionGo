@@ -23,7 +23,8 @@ source "${ORT_ENV}"
 
 usage() {
   cat <<USAGE
-Usage: $0 [start|stop|restart|status|attach|logs]
+Usage: $0 [start|restart] [--stand-bridge|--no-stand-bridge] [supervisor options]
+       $0 [stop|status|attach|logs]
 
 Environment:
   ACTION_GO_TMUX_SESSION   tmux session name, default: action_go
@@ -87,7 +88,9 @@ write_runner() {
     printf '%s\n' '  launcher_notice "[start.sh] launching tools/launch/start_safe.sh at $(date --iso-8601=seconds)"'
     printf '%s\n' '  set +e'
     printf '  python3 tools/logs/manage_logs.py --root %q --prune\n' "${LOG_DIR}"
-    printf '  %q\n' "${START_SAFE}"
+    printf '  %q' "${START_SAFE}"
+    if [[ ${#LAUNCH_ARGS[@]} -gt 0 ]]; then printf ' %q' "${LAUNCH_ARGS[@]}"; fi
+    printf '\n'
     printf '%s\n' '  status=$?'
     printf '%s\n' '  set -e'
     printf '%s\n' '  launcher_notice "[start.sh] tools/launch/start_safe.sh exited status=${status} at $(date --iso-8601=seconds)"'
@@ -203,6 +206,12 @@ follow_logs() {
 }
 
 cmd="${1:-start}"
+if [[ "${cmd}" == --* && "${cmd}" != --help ]]; then
+  cmd=start
+else
+  if [[ $# -gt 0 ]]; then shift; fi
+fi
+LAUNCH_ARGS=("$@")
 case "${cmd}" in
   start)
     start_session

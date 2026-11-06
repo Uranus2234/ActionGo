@@ -5,7 +5,7 @@ import time
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 
 REPO = Path(__file__).resolve().parents[2]
@@ -52,6 +52,7 @@ class Manager:
         self.events = []
         self.notices = []
         self.actions = {"unsafe_motion": SimpleNamespace(safety_enable=False)}
+        self.stand_bridge = None
 
     def notice(self, message, level="INFO"):
         self.notices.append((level, message))
@@ -149,6 +150,14 @@ class SimulationRecoveryTest(unittest.TestCase):
         self.observe(60.0)
         self.observe(60.0, 0.061)
         self.assertEqual(self.manager.events, [("mode", "passive"), ("start", "bfm_zero_stand")])
+
+    def test_fall_cancels_pending_stand_bridge(self):
+        self.arm("Start", "bfm_zero_stand")
+        self.manager.stand_bridge = Mock()
+        self.observe(60.0)
+        self.observe(60.0, 0.061)
+        self.manager.stand_bridge.cancel.assert_called_once()
+        self.assertEqual(self.manager.events, [("mode", "passive")])
 
     def test_fall_timer_resets_on_upright_but_preserves_telemetry_gap(self):
         self.arm("Start", "bfm_zero_stand")

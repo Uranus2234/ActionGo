@@ -1,4 +1,5 @@
 #include "generic_policy_runtime_internal.h"
+#include "action_go/runtime/input_loss.h"
 
 namespace action_go::runtime::generic_policy_runtime {
 
@@ -901,6 +902,11 @@ bool GenericPolicyPlayer::update_sonic_reference(const GenericPolicyPlayer::Robo
       } else {
         freshness = sonic_zmq_.current_sample(sonic_stale_sec_).freshness;
       }
+      if (!external_input_gate_.check(freshness == SampleFreshness::kFresh,
+                                      "SONIC PICO realtime input stale")) {
+        sonic_hold_last_target_ = true;
+        return true;
+      }
       const auto decision = sonic_stale_gate_.decide(freshness, StaleBehavior::kHoldThenStop,
                                                      sonic_stale_stop_sec_, std::chrono::steady_clock::now());
       if (decision.new_stale_event) ++sonic_stale_events_;
@@ -911,7 +917,7 @@ bool GenericPolicyPlayer::update_sonic_reference(const GenericPolicyPlayer::Robo
       }
       if (decision.action == StaleDecisionAction::kStop) {
         ++sonic_stale_stop_events_;
-        throw std::runtime_error("SONIC PICO input remained stale beyond the hold window");
+        throw action_go::runtime::InputLoss("SONIC PICO input remained stale");
       }
 
       if (sonic_use_planner_) {
@@ -944,6 +950,11 @@ bool GenericPolicyPlayer::update_sonic_reference(const GenericPolicyPlayer::Robo
     }
 
     const auto sample = sonic_zmq_.current_sample(sonic_stale_sec_);
+    if (!external_input_gate_.check(sample.freshness == SampleFreshness::kFresh,
+                                    "SONIC realtime input stale")) {
+      sonic_hold_last_target_ = true;
+      return true;
+    }
     const auto decision = sonic_stale_gate_.decide(sample.freshness, StaleBehavior::kHoldThenStop,
                                                    sonic_stale_stop_sec_, std::chrono::steady_clock::now());
     if (decision.new_stale_event) {
@@ -966,7 +977,7 @@ bool GenericPolicyPlayer::update_sonic_reference(const GenericPolicyPlayer::Robo
                      {event_string("player", player_label()), event_string("template", template_),
                       event_string("variant", variant_), event_string("source", "sonic_zmq_pose"),
                       event_int("step", policy_step)});
-      throw std::runtime_error("SONIC realtime reference remained stale beyond the hold window");
+      throw action_go::runtime::InputLoss("SONIC realtime reference remained stale");
     }
     if (sample.sequence != sonic_last_realtime_sequence_ && !sample.frames.empty()) {
       const int64_t incoming_step = sample.frames.size() > 1
@@ -1576,6 +1587,11 @@ GenericPolicyPlayer::TwistTargetStatus GenericPolicyPlayer::build_twist_target(c
     auto sample = current_twist_mimic(policy_step, offline_finished);
     if (offline_finished && twist_input_source_ != "realtime") return TwistTargetStatus::kStop;
     if (twist_input_source_ == "realtime") {
+      if (!external_input_gate_.check(sample.freshness == SampleFreshness::kFresh,
+                                      "TWIST realtime input stale")) {
+        ++twist_stale_hold_ticks_;
+        return TwistTargetStatus::kHoldLast;
+      }
       const auto decision = twist_stale_gate_.decide(sample.freshness, twist_stale_behavior_,
                                                      twist_input_timeout_sec_, std::chrono::steady_clock::now());
       if (decision.new_stale_event) {
@@ -1879,6 +1895,11 @@ GenericPolicyPlayer::HumanoidGptTargetStatus GenericPolicyPlayer::update_humanoi
     }
 
     auto sample = humanoid_gpt_udp_.current_sample(humanoid_gpt_stale_sec_);
+    if (!external_input_gate_.check(sample.freshness == SampleFreshness::kFresh,
+                                    "Humanoid-GPT realtime input stale")) {
+      ++humanoid_gpt_stale_hold_ticks_;
+      return HumanoidGptTargetStatus::kHoldLast;
+    }
     const auto decision = humanoid_gpt_stale_gate_.decide(sample.freshness, humanoid_gpt_stale_behavior_,
                                                           humanoid_gpt_input_timeout_sec_, std::chrono::steady_clock::now());
     if (decision.new_stale_event) {

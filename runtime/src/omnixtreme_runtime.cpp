@@ -527,6 +527,7 @@ public:
     joint_vel_raw = npy_to_float_vector(entries.at("joint_vel"), "joint_vel");
     body_quat_w = npy_to_float_vector(entries.at("body_quat_w"), "body_quat_w");
     if (entries.count("fps")) fps = npy_to_float_vector(entries.at("fps"), "fps").at(0);
+    if (!std::isfinite(fps) || fps <= 0.f) throw std::runtime_error("OmniXtreme motion fps must be positive and finite");
     if (static_cast<int>(joint_pos_raw.size()) != num_frames * kNumJoints ||
         static_cast<int>(joint_vel_raw.size()) != num_frames * kNumJoints ||
         static_cast<int>(body_quat_w.size()) != num_frames * num_bodies * 4) {
@@ -589,6 +590,9 @@ public:
 
   explicit OmniXtremePolicy(const Args& args)
       : args_(args), motion_(args.motion), env_(ORT_LOGGING_LEVEL_WARNING, "generic_composite_policy_player") {
+    if (std::abs(motion_.fps - static_cast<float>(args_.inference_hz)) > 0.5f) {
+      throw std::runtime_error("OmniXtreme motion fps must match --hz within 0.5 Hz");
+    }
     load_params(args.params);
     load_sessions();
     history_.assign(kHistDim, 0.f);
@@ -738,6 +742,7 @@ public:
   const std::vector<float>& friction_va() const { return friction_va_; }
   const std::vector<float>& friction_fs() const { return friction_fs_; }
   const std::vector<float>& friction_fd() const { return friction_fd_; }
+  const std::vector<float>& torque_limits() const { return torque_limits_; }
   std::vector<float> motion_start_q() const {
     std::vector<float> q, dq;
     motion_.dof_at(frame_, q, dq);
@@ -1009,6 +1014,7 @@ public:
   explicit UnitreeDDS(const Args& args,
                       const std::vector<float>& lower_limits,
                       const std::vector<float>& upper_limits,
+                      const std::vector<float>& torque_limits,
                       std::vector<float> friction_va,
                       std::vector<float> friction_fs,
                       std::vector<float> friction_fd)
@@ -1016,6 +1022,7 @@ public:
         friction_va_(std::move(friction_va)),
         friction_fs_(std::move(friction_fs)),
         friction_fd_(std::move(friction_fd)),
+        torque_limits_(torque_limits),
         activation_blend_(args.activation_blend_sec) {
     event_log_.open_append(args_.event_log.empty() ? "" : args_.event_log + ".dds.jsonl");
     yamlc::require_size("safety.friction.va", kNumJoints, friction_va_.size());
@@ -1053,9 +1060,9 @@ public:
   void publish(const std::vector<float>& q, const std::vector<float>& kp, const std::vector<float>& kd,
                bool allow_stale_state = false, bool active_command = true,
                bool bypass_activation = false,
-               action_go::runtime::CommandTiming timing = {}) {
+               action_go::runtime::CommandTiming timing = {}, bool damping_command = false) {
     if (args_.dry_run) return;
-    if (!active_command && args_.experimental_no_prestart_hold) {
+    if (!active_command && !damping_command && args_.experimental_no_prestart_hold) {
       if (!prestart_hold_suppressed_logged_) {
         prestart_hold_suppressed_logged_ = true;
         event_log_.log("prestart_hold_suppressed",
@@ -1127,6 +1134,10 @@ public:
                    std::tanh(s.dq[i] / friction_va_[static_cast<size_t>(i)]) +
                    friction_fd_[static_cast<size_t>(i)] * s.dq[i]);
       }
+      const float pd_torque = filtered.kp[i] * (filtered.q[i] - s.q[static_cast<size_t>(i)]) -
+                              filtered.kd[i] * s.dq[static_cast<size_t>(i)];
+      const float total_limit = torque_limits_[static_cast<size_t>(i)];
+      tau_ff = std::clamp(pd_torque + tau_ff, -total_limit, total_limit) - pd_torque;
       cmd.motor_cmd()[i].tau() = tau_ff;
       cmd.motor_cmd()[i].kp() = filtered.kp[i];
       cmd.motor_cmd()[i].kd() = filtered.kd[i];
@@ -1185,7 +1196,7 @@ public:
     if (s.q.size() < kNumJoints) return;
     std::vector<float> kp(kNumJoints, 0.f), kd(kNumJoints, 3.f);
     for (int i = 0; i < 20; ++i) {
-      publish(s.q, kp, kd, true, false);
+      publish(s.q, kp, kd, true, false, false, {}, true);
       std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
   }
@@ -1200,20 +1211,22 @@ private:
     const auto gyro = low.imu_state().gyroscope();
     if (!std::all_of(quat.begin(), quat.end(), finite) ||
         !std::all_of(gyro.begin(), gyro.end(), finite)) return;
-    std::lock_guard<std::mutex> lock(mtx_);
-    state_.recv_stamp = std::chrono::steady_clock::now();
-    state_.mode_machine = static_cast<int>(low.mode_machine());
-    state_.quat = low.imu_state().quaternion();
-    state_.gyro = low.imu_state().gyroscope();
-    state_.q.assign(kNumJoints, 0.f);
-    state_.dq.assign(kNumJoints, 0.f);
+    OmniXtremePolicy::RobotState next;
+    next.mode_machine = static_cast<int>(low.mode_machine());
+    next.quat = low.imu_state().quaternion();
+    next.gyro = low.imu_state().gyroscope();
+    next.q.assign(kNumJoints, 0.f);
+    next.dq.assign(kNumJoints, 0.f);
     for (size_t i = 0; i < kNumJoints; ++i) {
-      state_.q[i] = low.motor_state()[i].q();
-      state_.dq[i] = low.motor_state()[i].dq();
-      if (!finite(state_.q[i]) || !finite(state_.dq[i])) return;
+      next.q[i] = low.motor_state()[i].q();
+      next.dq[i] = low.motor_state()[i].dq();
+      if (!finite(next.q[i]) || !finite(next.dq[i])) return;
     }
+    next.recv_stamp = std::chrono::steady_clock::now();
+    std::lock_guard<std::mutex> lock(mtx_);
+    next.seq = sequence_.fetch_add(1, std::memory_order_relaxed) + 1;
+    state_ = std::move(next);
     connected_.store(true);
-    state_.seq = sequence_.fetch_add(1, std::memory_order_relaxed) + 1;
   }
 
   const Args& args_;
@@ -1222,6 +1235,7 @@ private:
   mutable std::mutex mtx_;
   OmniXtremePolicy::RobotState state_;
   std::vector<float> friction_va_, friction_fs_, friction_fd_;
+  std::vector<float> torque_limits_;
   CommandSafetyFilter safety_filter_;
   CommandSafetyLimits safety_limits_;
   RuntimeEventLogger event_log_;
@@ -1264,6 +1278,7 @@ int run_omnixtreme_runtime(int argc, char** argv) {
     UnitreeDDS dds(args,
                    policy.lower_limits(),
                    policy.upper_limits(),
+                   policy.torque_limits(),
                    policy.friction_va(),
                    policy.friction_fs(),
                    policy.friction_fd());

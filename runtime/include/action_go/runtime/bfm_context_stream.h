@@ -28,6 +28,7 @@ class BfmContextStream {
   double capture_time_{0.0};
   std::chrono::steady_clock::time_point received_at_;
   BfmContext context_;
+  uint64_t bad_packets_{0};
 };
 
 }

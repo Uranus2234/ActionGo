@@ -112,6 +112,15 @@ void GenericPolicyPlayer::load_bfm_params() {
                                  std::to_string(bfm_z_dim_) + "]: " + sequence_path.string());
       }
       bfm_latent_sequence_ = npy_to_float_vector(sequence_bytes, sequence_path.string());
+      for (size_t offset = 0; offset < bfm_latent_sequence_.size(); offset += static_cast<size_t>(bfm_z_dim_)) {
+        double norm_squared = 0.0;
+        for (int index = 0; index < bfm_z_dim_; ++index) {
+          const float value = bfm_latent_sequence_[offset + static_cast<size_t>(index)];
+          if (!std::isfinite(value)) throw std::runtime_error("BFM latent sequence contains NaN/Inf");
+          norm_squared += static_cast<double>(value) * value;
+        }
+        if (!(norm_squared > 1e-12)) throw std::runtime_error("BFM latent sequence contains zero-norm frame");
+      }
       bfm_latent_sequence_frames_ = sequence_meta.shape[0];
       bfm_z_.assign(bfm_latent_sequence_.begin(),
                     bfm_latent_sequence_.begin() + bfm_z_dim_);
@@ -121,6 +130,12 @@ void GenericPolicyPlayer::load_bfm_params() {
       if (z_path.empty()) throw std::runtime_error("BFM-Zero requires observation.latent_file, latent_sequence_file, or params z_file");
       bfm_z_ = read_float_file(resolve_relative(params_path_, z_path), static_cast<size_t>(bfm_z_dim_));
     }
+    double latent_norm_squared = 0.0;
+    for (float value : bfm_z_) {
+      if (!std::isfinite(value)) throw std::runtime_error("BFM latent contains NaN/Inf");
+      latent_norm_squared += static_cast<double>(value) * value;
+    }
+    if (!(latent_norm_squared > 1e-12)) throw std::runtime_error("BFM latent has zero norm");
     last_action_ = std::vector<float>(motor_count_, 0.f);
     bfm_last_action_scaled_.assign(motor_count_, 0.f);
     bfm_history_.reset(motor_count_, bfm_history_steps_);

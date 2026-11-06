@@ -94,7 +94,10 @@ tools/remote/twist_nokov_udp_example.py --transport zmq --zmq-endpoint tcp://127
 
 ### Redis
 
-Player side polls Redis with `GET`:
+Player side polls Redis with `GET` and `PTTL`. The sender must refresh the key with an
+expiry on every update; persistent Redis keys are rejected because they cannot show
+whether the motion publisher is still alive. The included sender uses `PSETEX` with a
+short lease.
 
 ```bash
 ./build/generic_motion_tracking_player --spec actions/tracking/twist/config/generic_twist.yaml \

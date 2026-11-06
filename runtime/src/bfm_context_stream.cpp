@@ -1,4 +1,5 @@
 #include "action_go/runtime/bfm_context_stream.h"
+#include "action_go/runtime/reference_endpoint.h"
 
 #include <nlohmann/json.hpp>
 
@@ -23,6 +24,9 @@ double unix_time() {
 BfmContextStream::BfmContextStream(const std::string& bind_address, int port,
                                  double timeout_sec, size_t latent_dim)
     : timeout_sec_(timeout_sec), latent_dim_(latent_dim) {
+  if (!is_local_reference_bind(bind_address)) {
+    throw std::runtime_error("BFM context UDP bind address must be loopback");
+  }
   sockaddr_in address{};
   address.sin_family = AF_INET;
   address.sin_port = htons(static_cast<uint16_t>(port));
@@ -52,7 +56,8 @@ void BfmContextStream::poll() {
       if (errno == EINTR) continue;
       throw std::runtime_error("BFM realtime UDP receive failed");
     }
-    if (static_cast<size_t>(count) >= buffer.size()) throw std::runtime_error("BFM realtime packet too large");
+    if (static_cast<size_t>(count) >= buffer.size()) continue;
+    try {
     const auto message = nlohmann::json::parse(buffer.data(), buffer.data() + count);
     if (message.at("contract") != "bfm_realtime_context_v1") {
       throw std::runtime_error("unsupported BFM realtime context contract");
@@ -76,6 +81,9 @@ void BfmContextStream::poll() {
     sequence_ = sequence;
     has_sample_ = true;
     received_at_ = std::chrono::steady_clock::now();
+    } catch (const std::exception&) {
+      continue;
+    }
   }
 }
 

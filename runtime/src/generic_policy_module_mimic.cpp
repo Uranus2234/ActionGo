@@ -889,6 +889,7 @@ bool GenericPolicyPlayer::check_holosoma_target_safety(const GenericPolicyPlayer
                 << "; torso_rpy_deg=[" << (rpy[0] * 180.0f / kPi) << "," << (rpy[1] * 180.0f / kPi)
                 << "," << (rpy[2] * 180.0f / kPi) << "]; continuing.\n";
     }
+    if (tracking.all > holosoma_max_target_jump_) return false;
     if (holosoma_have_prev_policy_target_) {
       const JumpStats step = target_jump_stats(holosoma_prev_policy_target_q_, q_target);
       if (step.all > holosoma_max_target_jump_ && holosoma_large_target_step_warnings_ < 5) {
@@ -897,6 +898,7 @@ bool GenericPolicyPlayer::check_holosoma_target_safety(const GenericPolicyPlayer
                   << " rad at timestep " << holosoma_current_timestep_ << " phase=" << phase
                   << " joint=" << joint_desc(step.all_model, step.all_motor) << "; continuing.\n";
       }
+      if (step.all > holosoma_max_target_jump_) return false;
     }
     return true;
   }
